@@ -2,23 +2,23 @@
 "Sub Main" that contains one function to start the training loop.
 """
 
-from functools import partial
 import argparse
 import json
 import re
+from functools import partial
 
-import numpy as np
 import mesh_tensorflow as mtf
+import numpy as np
 import tensorflow.compat.v1 as tf
 from tensorflow.compat.v1 import tpu
-from tensorflow.python.tpu.topology import Topology
 from tensorflow.python.ops import summary_ops_v2 as summary
 from tensorflow.python.tpu.device_assignment import device_assignment
+from tensorflow.python.tpu.topology import Topology
 
 from .dataclass import ModelParameter
+from .eval import gen_sample_fn
 from .inputs import dataset, gpt_neo_input
 from .train import computation_func
-from .eval import gen_sample
 
 
 def main(args: argparse.Namespace) -> None:
@@ -119,26 +119,21 @@ def main(args: argparse.Namespace) -> None:
             summary_writer = summary.create_file_writer(params.model_path)
             with summary_writer.as_default(), (summary.always_record_summaries()):
 
-                computation = computation_func(params,
-                                               input_fn,
-                                               session_config,
-                                               tpu_cluster_resolver,
-                                               run_mode=args.run_mode)
-
-                for current_step in computation:
-                    print('current_step:', current_step)
-
-                tf.logging.info('finished.')
+                computation_func(params,
+                                 input_fn,
+                                 session_config,
+                                 tpu_cluster_resolver,
+                                 [lambda x: print(f"Current step: {x}")] * params.debug_train_step,
+                                 run_mode=args.run_mode)
 
         else:  # run_mode == 'sample'
-
-            computation = computation_func(params,
-                                           input_fn,
-                                           session_config,
-                                           tpu_cluster_resolver,
-                                           run_mode=args.run_mode)
-
-            gen_sample(computation, params)
+            computation_func(params,
+                             input_fn,
+                             session_config,
+                             tpu_cluster_resolver,
+                             [gen_sample_fn(params)],
+                             run_mode=args.run_mode)
+    tf.logging.info('finished.')
 
     with tf.Session(target=tpu_cluster_resolver.get_master(), config=session_config) as sess:
         sess.run(tpu.shutdown_system())

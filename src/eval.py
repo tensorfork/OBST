@@ -1,14 +1,11 @@
-from functools import partial
 import typing
 
-from src.dataclass import ModelParameter
-from .inputs import dataset
-from src.utils_core import chunks
-
-from tensorflow_estimator.python.estimator import estimator as estimator_lib
-import scipy.ndimage
-import numpy as np
 import cv2
+import numpy as np
+import scipy.ndimage
+
+from src.dataclass import ModelParameter
+from src.utils_core import chunks
 
 
 def render_video(model_output: typing.List[typing.Tuple[np.ndarray, typing.List[str]]],
@@ -22,7 +19,6 @@ def render_video(model_output: typing.List[typing.Tuple[np.ndarray, typing.List[
                  text_size: float = 1.27,
                  text_thickness: int = 3,
                  text_line_offset: int = 50):
-
     writer = cv2.VideoWriter(f"{save_prefix}_{count}.avi", cv2.VideoWriter_fourcc(*"MJPG"), 1,
                              (params.frame_width * upscale * len(model_output), params.frame_height * upscale))
 
@@ -39,7 +35,6 @@ def render_video(model_output: typing.List[typing.Tuple[np.ndarray, typing.List[
             text = model_output[sub_idx][1]
             if text is not None:
                 for i, _text in enumerate(chunks(text[idx], params.language_token_per_frame // line_split)):
-
                     cv2.putText(sub_frame, _text, (text_pos[0], text_pos[1] + text_line_offset * i),
                                 cv2.FONT_HERSHEY_SIMPLEX, text_size, text_color, text_thickness)
 
@@ -52,7 +47,6 @@ def render_video(model_output: typing.List[typing.Tuple[np.ndarray, typing.List[
 
 
 def process_token_output(token_out: np.ndarray, padding_token: int, do_argmax: bool = True) -> typing.List[str]:
-
     _shape = token_out.shape
     if do_argmax:
         token_out = np.reshape(token_out, newshape=(_shape[0], _shape[1] * _shape[2], _shape[3]))
@@ -72,7 +66,6 @@ def process_token_output(token_out: np.ndarray, padding_token: int, do_argmax: b
 
 
 def process_video_output(out_frame: np.ndarray, params: ModelParameter) -> np.ndarray:
-
     out_frame = np.reshape(out_frame, (params.time_patch_size, params.frame_height_patch, params.frame_width_patch,
                                        params.time_patch, params.patch_size, params.patch_size, params.color_channels))
 
@@ -82,11 +75,15 @@ def process_video_output(out_frame: np.ndarray, params: ModelParameter) -> np.nd
     return out_frame
 
 
-def gen_sample(computation, params: ModelParameter):
+def gen_sample_fn(params: ModelParameter):
+    state = {'sample_index': 0}
 
-    for sample_idx in range(params.num_of_sample):
-        out = next(computation)
-        print('sample_idx:', sample_idx)
+    def _fn(out):
+        print('sample_idx:', state['sample_index'])
+
+        token_inp = None
+        token_out = None
+        render_input = []
 
         frame_out = out[0][0]
 
@@ -94,10 +91,6 @@ def gen_sample(computation, params: ModelParameter):
 
         if params.use_language:
             token_out = process_token_output(out[2][0], params.padding_token)
-        else:
-            token_out = None
-
-        render_input = []
 
         if not params.use_autoregressive_sampling:
             frame_inp = out[1][0]
@@ -106,11 +99,15 @@ def gen_sample(computation, params: ModelParameter):
 
             if params.use_language:
                 token_inp = process_token_output(out[3][0], params.padding_token, False)
-            else:
-                token_inp = None
 
             render_input.append((frame_inp, token_inp))
 
         render_input.append((frame_out, token_out))
 
-        render_video(render_input, sample_idx, params)
+        render_video(render_input, state['sample_index'], params)
+
+        state['sample_index'] += 1
+        if state['sample_index'] >= params.num_of_sample:
+            exit()
+
+    return _fn

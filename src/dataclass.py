@@ -64,6 +64,8 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.intermediate_feed_forward_multiplier = 1
         self.group_linear_factor = 4
         self.embedding_stddev = 0.004
+        self.summary_flush_interval = 1024
+        self.debug_train_step = True
         self.model_mode = 'jannet'
         self.optimizer = 'adam'
         self.use_revnet = True

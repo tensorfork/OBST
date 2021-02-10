@@ -439,7 +439,8 @@ class CheckpointLoaderHook(tf.estimator.SessionRunHook):
                 saver.restore(session, check_point)
 
 
-def computation_func(params: ModelParameter, input_fn, session_config, tpu_cluster_resolver, run_mode: str):
+def computation_func(params: ModelParameter, input_fn, session_config, tpu_cluster_resolver, callback_fns,
+                     run_mode: str):
     captured_hooks = CapturedObject()
     captured_output_dtypes_shapes = CapturedObject()
 
@@ -524,7 +525,6 @@ def computation_func(params: ModelParameter, input_fn, session_config, tpu_clust
                                                        params.token_dim_shape, "tkn_src")
             token_y_input = mtf.import_laid_out_tensor(mesh, params.mesh_impl.LaidOutTensor([args[1]]),
                                                        params.token_dim_shape, "tkn_tgt")
-
 
         if run_mode == 'sample' and params.use_autoregressive_sampling:
             sequence_dim = mtf.Dimension("sequence", params.time_patch_size)
@@ -776,16 +776,12 @@ def computation_func(params: ModelParameter, input_fn, session_config, tpu_clust
             summary.initialize(session=sess)
 
             current_step = int(estimator_lib._load_global_step_from_checkpoint_dir(params.model_path))
-            while current_step < params.train_steps:
+            for i in range(current_step, params.train_steps):
                 sess.run(computation)
-                sess.run(flush_summary)
-
-                tf.logging.info('train steps: {}'.format(current_step))
-
-                _current_step = current_step
-                current_step += 1
-
-                yield _current_step
+                if (i + 1) % params.summary_flush_interval == 0:
+                    sess.run(flush_summary)
+                for fn in callback_fns:
+                    fn(i)
 
     else:  # run_mode == 'sample'
 
@@ -802,4 +798,6 @@ def computation_func(params: ModelParameter, input_fn, session_config, tpu_clust
 
             while True:
                 sess.run(computation)
-                yield sess.run(outfeed_dequeue_ops)[0]
+                out = sess.run(outfeed_dequeue_ops)[0]
+                for fn in callback_fns:
+                    fn(out)
