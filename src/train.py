@@ -105,7 +105,7 @@ def simd_mesh_impl_input_reader(simd_mesh_impl, ds_creator, mtf_input_shapes, ds
     num_cores = simd_mesh_impl.device_assignment.num_replicas
 
     ordered_ordinals = np.zeros((num_cores,), dtype=np.int32)
-    ordered_hosts = np.zeros((num_cores,), dtype=np.int32)
+    ordered_hosts = np.zeros((num_cores,), dtype=str)
     ordered_host_ids = np.zeros((num_cores,), dtype=np.int32)
 
     for pnum in range(num_cores):
