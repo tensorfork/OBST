@@ -43,9 +43,9 @@ def main(args: argparse.Namespace) -> None:
 
     # Fetch appropriate input functions
     if params.model_mode == 'jannet':
-        input_fn = partial(dataset, params=params, step=0, train=args.run_mode == 'train')
+        input_fn = partial(dataset, params=params, step=current_step, train=args.run_mode == 'train')
     elif params.model_mode == 'gpt':
-        input_fn = partial(gpt_neo_input, params=params, step=0, eval=False)
+        input_fn = partial(gpt_neo_input, params=params, step=current_step, eval=False)
 
         # Set params for text only GPT mode.
         params.use_language = True
