@@ -169,7 +169,7 @@ def simd_mesh_impl_input_reader(simd_mesh_impl, ds_creator, mtf_input_shapes, ds
             if len(all_input_tensors) != len(mtf_input_shapes):
                 raise ValueError
 
-            for input_tensor, idx in enumerate(all_input_tensors):
+            for idx, input_tensor in enumerate(all_input_tensors):
                 sub_batch_pnums = all_sub_batch_pnums[idx]
                 mtf_input_shape = mtf_input_shapes[idx]
 
