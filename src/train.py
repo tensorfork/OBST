@@ -92,7 +92,6 @@ def simd_mesh_impl_input_reader(simd_mesh_impl, ds_creator, mtf_input_shapes, ds
           mtf_input_shapes[0]. We recommand you to put the largest tensor as the
           0-th input.
         """
-    super().__init__()
     if not mtf_input_shapes:
         raise ValueError
     if not isinstance(mtf_input_shapes, list):
