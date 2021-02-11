@@ -69,10 +69,9 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.model_mode = 'jannet'
         self.optimizer = 'adam'
         self.use_revnet = True
-        self.block_config = [{'layer': ["group_instance_norm", "feed_forward", "rezero"]},
+        self.block_config = [{'layer': ["group_instance_norm", "group_feed_forward", "rezero"]},
                              {'layer': ["group_instance_norm", "group_feed_forward", "rezero"]},
-                             {'layer': ["group_instance_norm", "context_attention", "rezero"]},
-                             {'layer': ["group_instance_norm", "positional_attention", "rezero"]}]
+                             {'layer': ["group_instance_norm", "_embedded_attention", "rezero"]}]
 
         self.mesh = None
         self.mesh_impl = None
