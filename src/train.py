@@ -116,7 +116,7 @@ def simd_mesh_impl_input_reader(simd_mesh_impl, ds_creator, mtf_input_shapes, ds
         ordered_ordinals[pnum] = simd_mesh_impl.device_assignment.tpu_ordinal(replica=physical_pnum, logical_core=0)
         ordered_hosts[pnum] = host_device
         ordered_host_ids[pnum] = int(host_device.lower().split("/task:")[1].split("/device:")[0])
-    num_hosts = np.unique(ordered_hosts)
+    num_hosts = len(np.unique(ordered_hosts))
     pnum_maps = []
     batch_size = mtf_input_shapes[0].to_integer_list[0]
     for shape in mtf_input_shapes:
@@ -174,7 +174,7 @@ def simd_mesh_impl_input_reader(simd_mesh_impl, ds_creator, mtf_input_shapes, ds
                 sub_batch_pnums = all_sub_batch_pnums[idx]
                 mtf_input_shape = mtf_input_shapes[idx]
 
-                # Initialize the cache for each input_i
+                # Initialize the cache for each
                 slice_dict = collections.defaultdict(list)
 
                 for pnum in sub_batch_pnums:
@@ -186,8 +186,7 @@ def simd_mesh_impl_input_reader(simd_mesh_impl, ds_creator, mtf_input_shapes, ds
                     if tuple(s_begin) in slice_dict:
                         all_laidout_tensors[pnum][idx] = tf_tensor
                         continue
-                    s_shape = simd_mesh_impl.slice_shape(mtf_input_shape)
-                    tf_tensor = tf.slice(input_tensor, s_begin, s_shape)
+                    tf_tensor = tf.slice(input_tensor, s_begin, simd_mesh_impl.slice_shape(mtf_input_shape))
 
                     slice_dict[tuple(s_begin)] = tf_tensor
                     all_laidout_tensors[pnum][idx] = tf_tensor
