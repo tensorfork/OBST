@@ -212,9 +212,8 @@ def simd_mesh_impl_input_reader(simd_mesh_impl, ds_creator, mtf_input_shapes, ds
                         # input_tensor a sub-batch tensor.
                         s_begin[0] = 0
                     if tuple(s_begin) in slice_dict:
-                        for tf_tensor, pnum, input_i in slice_dict[tuple(s_begin)]:
-                            all_laidout_tensors[pnum][input_i] = tf_tensor
-                        break
+                        all_laidout_tensors[pnum][input_i] = tf_tensor
+                        continue
                     s_shape = simd_mesh_impl.slice_shape(mtf_input_shape)
                     tf_tensor = tf.slice(input_tensor, s_begin, s_shape)
 
