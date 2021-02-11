@@ -68,7 +68,7 @@ class CapturedObject(object):
 _NONE_PNUM = None
 _NO_DATA = None
 
-HOST_ID_TO_TF_DEVICE = "'/job:worker/task:{:d}/device:CPU:0"
+HOST_ID_TO_TF_DEVICE = "/job:worker/task:{:d}/device:CPU:0"
 
 
 def simd_mesh_impl_input_reader(simd_mesh_impl, ds_creator, mtf_input_shapes, ds_prefetch_size, is_eval_mode):
