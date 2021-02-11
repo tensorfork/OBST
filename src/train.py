@@ -182,25 +182,22 @@ def simd_mesh_impl_input_reader(simd_mesh_impl, ds_creator, mtf_input_shapes, ds
     all_laidout_tensors = [[_NO_DATA] * len(mtf_input_shapes) for _ in range(num_cores)]
     for sub_batch_i, host_id in enumerate(hosts_to_hold_ds):
         with ops.device(HOST_ID_TO_TF_DEVICE.format(host_id)):
-            ds_iterator = ds_creator().batch(sub_batch_size, drop_remainder=True).prefetch(
-                    ds_prefetch_size).make_initializable_iterator()
-        input_initializers.append(ds_iterator.initializer)
-
-        with ops.device(HOST_ID_TO_TF_DEVICE.format(host_id)):
+            dset = ds_creator()
+            dset = dset.batch(sub_batch_size, drop_remainder=True)
+            dset = dset.prefetch(ds_prefetch_size)
+            ds_iterator = dset.make_initializable_iterator()
+            input_initializers.append(ds_iterator.initializer)
 
             all_input_tensors = ds_iterator.get_next()
-            if isinstance(all_input_tensors, tf.Tensor):
-                all_input_tensors = [all_input_tensors]
             all_sub_batch_pnums = [pnum_map.flatten().tolist() if is_eval_mode else
                                    pnum_map[sub_batch_i, ...].flatten().tolist()
                                    for pnum_map in pnum_maps]
-            if len(all_input_tensors) != len(all_sub_batch_pnums):
+            if len(all_input_tensors) != len(mtf_input_shapes):
                 raise ValueError
 
-            for input_i in range(len(all_input_tensors)):
-                input_tensor = all_input_tensors[input_i]
-                sub_batch_pnums = all_sub_batch_pnums[input_i]
-                mtf_input_shape = mtf_input_shapes[input_i]
+            for input_tensor, idx in enumerate(all_input_tensors):
+                sub_batch_pnums = all_sub_batch_pnums[idx]
+                mtf_input_shape = mtf_input_shapes[idx]
 
                 # Initialize the cache for each input_i
                 slice_dict = collections.defaultdict(list)
@@ -212,13 +209,13 @@ def simd_mesh_impl_input_reader(simd_mesh_impl, ds_creator, mtf_input_shapes, ds
                         # input_tensor a sub-batch tensor.
                         s_begin[0] = 0
                     if tuple(s_begin) in slice_dict:
-                        all_laidout_tensors[pnum][input_i] = tf_tensor
+                        all_laidout_tensors[pnum][idx] = tf_tensor
                         continue
                     s_shape = simd_mesh_impl.slice_shape(mtf_input_shape)
                     tf_tensor = tf.slice(input_tensor, s_begin, s_shape)
 
                     slice_dict[tuple(s_begin)] = tf_tensor
-                    all_laidout_tensors[pnum][input_i] = tf_tensor
+                    all_laidout_tensors[pnum][idx] = tf_tensor
 
     # Make sure that there are no Nones in all_laidout_tensors.
     if any(_NO_DATA in laidout_tensors for laidout_tensors in all_laidout_tensors):
