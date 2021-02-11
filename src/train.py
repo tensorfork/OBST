@@ -13,7 +13,6 @@ from tensorflow.python.framework import ops
 from tensorflow.python.ops import summary_ops_v2 as summary
 from tensorflow.python.tpu import tpu_feed
 from tensorflow.python.tpu.ops import tpu_ops
-from tensorflow_estimator.python.estimator import estimator as estimator_lib
 
 from .dataclass import ModelParameter
 from .model import build
@@ -439,7 +438,10 @@ class CheckpointLoaderHook(tf.estimator.SessionRunHook):
                 saver.restore(session, check_point)
 
 
-def computation_func(params: ModelParameter, input_fn, session_config, tpu_cluster_resolver, run_mode: str):
+def computation_func(params: ModelParameter, input_fn,
+                     session_config, tpu_cluster_resolver,
+                     run_mode: str, current_step: int = 0):
+
     captured_hooks = CapturedObject()
     captured_output_dtypes_shapes = CapturedObject()
 
@@ -775,7 +777,6 @@ def computation_func(params: ModelParameter, input_fn, session_config, tpu_clust
             simd_input_reader.start_infeed_thread(sess)
             summary.initialize(session=sess)
 
-            current_step = int(estimator_lib._load_global_step_from_checkpoint_dir(params.model_path))
             while current_step < params.train_steps:
                 sess.run(computation)
                 sess.run(flush_summary)
