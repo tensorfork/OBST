@@ -312,8 +312,8 @@ def dataset(params: ModelParameter, step: int = 0, train: bool = True):
         path = set['path']
         weight = set['weight']
 
-        assert dtype == 'video' or dtype == 'text', \
-            "{} is not a supported option for type for a dataset.".format(dtype)
+        if dtype != 'video' or dtype != 'text':
+            raise ValueError(f"{dtype} is not a supported option for type for a dataset.")
 
         if dtype == 'video':
             datasets.append(dataset_video(path, params))
