@@ -105,20 +105,18 @@ def simd_mesh_impl_input_reader(simd_mesh_impl, ds_creator, mtf_input_shapes, ds
 
     num_cores = simd_mesh_impl.device_assignment.num_replicas
 
-    ordered_ordinals = []
-    ordered_hosts = []
-    ordered_host_ids = []
+    ordered_ordinals = np.zeros((num_cores,), dtype=np.int32)
+    ordered_hosts = np.zeros((num_cores,), dtype=np.int32)
+    ordered_host_ids = np.zeros((num_cores,), dtype=np.int32)
 
     for pnum in range(num_cores):
         physical_pnum = simd_mesh_impl.l2p(pnum)
-        # For MTF, there's always 1 core per replica. So logical_core=0.
-        ordered_ordinals.append(simd_mesh_impl.device_assignment.tpu_ordinal(replica=physical_pnum, logical_core=0))
         host_device = simd_mesh_impl.device_assignment.host_device(replica=physical_pnum)
-        host_id = int(host_device.lower().split("/task:")[1].split("/device:")[0])
-        ordered_hosts.append(host_device)
-        ordered_host_ids.append(host_id)
-    ordered_host_ids = np.array(ordered_host_ids)
-    num_hosts = len(set(ordered_hosts))
+        # For MTF, there's always 1 core per replica. So logical_core=0.
+        ordered_ordinals[pnum] = simd_mesh_impl.device_assignment.tpu_ordinal(replica=physical_pnum, logical_core=0)
+        ordered_hosts[pnum] = host_device
+        ordered_host_ids[pnum] = int(host_device.lower().split("/task:")[1].split("/device:")[0])
+    num_hosts = np.unique(ordered_hosts)
     pnum_maps = []
     batch_size = mtf_input_shapes[0].to_integer_list[0]
     for shape in mtf_input_shapes:
@@ -130,8 +128,8 @@ def simd_mesh_impl_input_reader(simd_mesh_impl, ds_creator, mtf_input_shapes, ds
         pnum_map = -np.ones(shape_list + [num_cores // np.prod(shape_list)], dtype=np.int32)
 
         for pnum in range(num_cores):
-            pnum_array_ref = pnum_map[tuple([d // s
-                                             for d, s in zip(simd_mesh_impl.slice_begin(shape, pnum), s_shape)])]
+            coord = tuple([d // s for d, s in zip(simd_mesh_impl.slice_begin(shape, pnum), s_shape)])
+            pnum_array_ref = pnum_map[coord]
             pnum_array_ref[:] = np.where(pnum_array_ref == -1, pnum, pnum_array_ref)
 
         if np.any(pnum_map == -1):
@@ -139,19 +137,15 @@ def simd_mesh_impl_input_reader(simd_mesh_impl, ds_creator, mtf_input_shapes, ds
         pnum_maps.append(pnum_map)
 
     # For each sub-batch, we need to know which host should read it.
-
     hosts_to_hold_ds = [num_hosts - 1]
     if not is_eval_mode:
-        # This records how many datasets (ds) are already stored on each host.
+        ordered_host_ids = np.array(ordered_host_ids)
+        hosts_to_hold_ds.clear()
         num_dss_per_host = np.zeros((num_hosts,))
-
-        # A list of host_ids that holds datasets (ds).
-        hosts_to_hold_ds = []
-
         for sub_batch_pnum_map in pnum_maps[0]:
             host_id = np.argmax(np.sum(np.equal(ordered_host_ids.take(sub_batch_pnum_map.flatten(), 0).reshape(1, -1),
                                                 np.arange(num_hosts).reshape(-1, 1)), 1) - num_dss_per_host)
-            num_dss_per_host[host_id] -= 1 / num_hosts
+            num_dss_per_host[host_id] -= 0.1 / num_hosts
             hosts_to_hold_ds.append(host_id)
     sub_batch_size = batch_size // len(hosts_to_hold_ds)
 
