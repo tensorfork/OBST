@@ -192,10 +192,6 @@ def simd_mesh_impl_input_reader(simd_mesh_impl, ds_creator, mtf_input_shapes, ds
                     slice_dict[tuple(s_begin)] = tf_tensor
                     all_laidout_tensors[pnum][idx] = tf_tensor
 
-    # Make sure that there are no Nones in all_laidout_tensors.
-    if any(_NO_DATA in laidout_tensors for laidout_tensors in all_laidout_tensors):
-        raise ValueError
-
     with ops.device(HOST_ID_TO_TF_DEVICE.format(hosts_to_hold_ds[0])):
         laidout_tensors0 = all_laidout_tensors[0]
         infeed = tpu_feed.InfeedQueue(number_of_tuple_elements=len(laidout_tensors0),
