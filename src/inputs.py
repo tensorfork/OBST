@@ -444,7 +444,6 @@ def gpt_neo_input(params, step=None, eval=False):
 
     dataset = dataset.map(_memory_func)
     dataset = dataset.map(align_tensor_op)
-    dataset = dataset.prefetch(params.buffer_size * 2)
 
     options = tf.data.Options()
     options.experimental_optimization.autotune = True
