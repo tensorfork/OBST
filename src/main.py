@@ -14,6 +14,7 @@ from tensorflow.compat.v1 import tpu
 from tensorflow.python.ops import summary_ops_v2 as summary
 from tensorflow.python.tpu.device_assignment import device_assignment
 from tensorflow.python.tpu.topology import Topology
+from tensorflow_estimator.python.estimator import estimator as estimator_lib
 
 from .dataclass import ModelParameter
 from .eval import gen_sample_fn
@@ -38,8 +39,9 @@ def main(args: argparse.Namespace) -> None:
     params = ModelParameter(params)
     # Read params of model
 
-    # Fetch appropriate input functions
+    current_step = int(estimator_lib._load_global_step_from_checkpoint_dir(params.model_path))
 
+    # Fetch appropriate input functions
     if params.model_mode == 'jannet':
         input_fn = partial(dataset, params=params, step=0, train=args.run_mode == 'train')
     elif params.model_mode == 'gpt':
@@ -118,14 +120,13 @@ def main(args: argparse.Namespace) -> None:
         if args.run_mode == 'train':
             summary_writer = summary.create_file_writer(params.model_path)
             with summary_writer.as_default(), (summary.always_record_summaries()):
-
                 computation_func(params,
                                  input_fn,
                                  session_config,
                                  tpu_cluster_resolver,
                                  [lambda x: print(f"Current step: {x}")] * params.debug_train_step,
-                                 run_mode=args.run_mode)
-
+                                 run_mode=args.run_mode,
+                                 current_step=current_step)
         else:  # run_mode == 'sample'
             computation_func(params,
                              input_fn,
