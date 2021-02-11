@@ -1,20 +1,19 @@
-import subprocess
 import argparse
 import hashlib
-import time
 import json
 import os
+import subprocess
+import time
 
 
 def str2bool(v: str) -> bool:
     if isinstance(v, bool):
-       return v
+        return v
     if v.lower() in ('yes', 'true', 't', 'y', '1'):
         return True
-    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+    if v.lower() in ('no', 'false', 'f', 'n', '0'):
         return False
-    else:
-        raise argparse.ArgumentTypeError('Boolean value expected.')
+    raise argparse.ArgumentTypeError('Boolean value expected.')
 
 
 if __name__ == '__main__':
@@ -25,15 +24,15 @@ if __name__ == '__main__':
                         help="The path to the .json config with will be use as the bases for this run.")
     parser.add_argument('tpu_start_id', type=int, help="The tpu ID at with the TPU IDs will start.")
     parser.add_argument('--run_config', default='', type=str, help="The path to the .json config that continents "
-                                                             "the Hyperparameters to be run. The config must contain a"
-                                                             " dict in with each entry is a list, the list continents "
-                                                             "the different Hyperparameters for variable")
+                                                                   "the Hyperparameters to be run. The config must contain a"
+                                                                   " dict in with each entry is a list, the list continents "
+                                                                   "the different Hyperparameters for variable")
     parser.add_argument('--run_name_prefix', type=str, default='gs://text-datasets/video-transformer/')
     parser.add_argument('--number_of_repetitions', type=int, default=1, help="The number of times the same "
-                                                                            "parameters will get tested.")
+                                                                             "parameters will get tested.")
     parser.add_argument('--repetition_start_idx', type=int, default=0)
     parser.add_argument('--tpu_name_subfix', type=str, default='', help="A string that will be added "
-                                                                       "at the and of all TPU names.")
+                                                                        "at the and of all TPU names.")
     parser.add_argument('--use_preemptible', type=str, default='true')
     parser.add_argument('--tpu_type', type=str, default='v3-8')
     parser.add_argument('--start_up_sleep', type=int, default=0)
@@ -62,7 +61,7 @@ if __name__ == '__main__':
 
     run = True
 
-    while run:
+    while True:
 
         copy_base_config = base_config.copy()
 
@@ -95,7 +94,7 @@ if __name__ == '__main__':
                 tpu_creat_command = tpu_creat_command + " --preemptible"
 
             if len(run_name) > 66:
-                run_name = hashlib.sha256(run_name.encode('utf-8')).hexdigest()
+                run_name = hashlib.blake2b(run_name.encode('utf-8')).hexdigest()
 
             prosses_name = f"tpu_id:{tpu_id}--{run_name}"
 
@@ -108,4 +107,4 @@ if __name__ == '__main__':
             time.sleep(args.start_up_sleep)
 
         if param_pos >= len(run_config_key):
-            run = False
+            break

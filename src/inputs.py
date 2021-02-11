@@ -312,8 +312,8 @@ def dataset(params: ModelParameter, step: int = 0, train: bool = True):
         path = set['path']
         weight = set['weight']
 
-        assert dtype == 'video' or dtype == 'text', \
-            "{} is not a supported option for type for a dataset.".format(dtype)
+        if dtype != 'video' or dtype != 'text':
+            raise ValueError(f"{dtype} is not a supported option for type for a dataset.")
 
         if dtype == 'video':
             datasets.append(dataset_video(path, params))
@@ -444,7 +444,6 @@ def gpt_neo_input(params, step=None, eval=False):
 
     dataset = dataset.map(_memory_func)
     dataset = dataset.map(align_tensor_op)
-    dataset = dataset.prefetch(params.buffer_size * 2)
 
     options = tf.data.Options()
     options.experimental_optimization.autotune = True

@@ -4,6 +4,7 @@ Contains functions to create a training loop and log its outputs to tensorboard
 import collections
 import threading
 import time
+import typing
 
 import mesh_tensorflow as mtf
 import numpy as np
@@ -66,104 +67,12 @@ class CapturedObject(object):
 _NONE_PNUM = None
 _NO_DATA = None
 
-
-def _host_id_to_tf_device(host_id, external_worker):
-    if not isinstance(host_id, int):
-        raise ValueError
-    return f"{'/job:worker' * external_worker}/task:{host_id}/device:CPU:0"
+HOST_ID_TO_TF_DEVICE = "'/job:worker/task:{:d}/device:CPU:0"
 
 
-class SubBatchSlicer(object):
-    """Reads and distributes a sub-batch on a host."""
-
-    def __init__(self, sub_batch_ds_creator, host_id, all_sub_batch_pnums,
-                 simd_mesh_impl, mtf_input_shapes, external_worker, global_batch):
-        self._host_id = host_id
-        self._all_sub_batch_pnums = all_sub_batch_pnums
-        self._simd_mesh_impl = simd_mesh_impl
-        self._mtf_input_shapes = mtf_input_shapes
-        self._external_worker = external_worker
-        self._global_batch = global_batch
-
-        self._validate_args()
-
-        with ops.device(_host_id_to_tf_device(self._host_id, self._external_worker)):
-            self._ds_iterator = sub_batch_ds_creator().make_initializable_iterator()
-
-    @property
-    def initializer(self):
-        return self._ds_iterator.initializer
-
-    def get_slices(self):
-        """Yields sliced tensors and which remote pnums they should go to.
-        Yields:
-          tf_tensor: The sliced tensor.
-          pnum: Which process number the tf_tensor should to go.
-          input_i: The input ordinal of the tf_tensor.
-        """
-        with ops.device(_host_id_to_tf_device(self._host_id, self._external_worker)):
-
-            all_input_tensors = self._ds_iterator.get_next()
-            if isinstance(all_input_tensors, tf.Tensor):
-                all_input_tensors = [all_input_tensors]
-            assert len(all_input_tensors) == len(self._all_sub_batch_pnums)
-
-            for input_i in range(len(all_input_tensors)):
-                input_tensor = all_input_tensors[input_i]
-                sub_batch_pnums = self._all_sub_batch_pnums[input_i]
-                mtf_input_shape = self._mtf_input_shapes[input_i]
-
-                # Initialize the cache for each input_i
-                self._init_slice_cache()
-
-                for pnum in sub_batch_pnums:
-                    input_slice = self._slice_tensor(input_tensor, mtf_input_shape, pnum)
-                    yield input_slice, pnum, input_i
-
-    def _validate_args(self):
-        if not isinstance(self._all_sub_batch_pnums, list):
-            raise ValueError
-        if not isinstance(self._mtf_input_shapes, list):
-            raise ValueError
-        if not self._all_sub_batch_pnums:
-            raise ValueError
-        if not self._mtf_input_shapes:
-            raise ValueError
-        if len(self._all_sub_batch_pnums) != len(self._mtf_input_shapes):
-            raise ValueError
-
-    def _init_slice_cache(self):
-        # Cache for tensor slices
-        self._slice_dict = collections.defaultdict(list)
-
-    def _slice_tensor(self, input_tensor, mtf_input_shape, pnum):
-        """Slice input_tensor according to mtf_input_shape and pnum."""
-        s_begin = self._simd_mesh_impl.slice_begin(mtf_input_shape, pnum)
-        if not self._global_batch:
-            # Always slice from 0 in the first dimension (batch dimension), since
-            # input_tensor a sub-batch tensor.
-            s_begin[0] = 0
-        if tuple(s_begin) in self._slice_dict:
-            return self._slice_dict[tuple(s_begin)]
-
-        s_shape = self._simd_mesh_impl.slice_shape(mtf_input_shape)
-        input_slice = tf.slice(input_tensor, s_begin, s_shape)
-
-        self._slice_dict[tuple(s_begin)] = input_slice
-        return input_slice
-
-
-class SimdMeshImplInputReader(object):
-    """Handles input pipeline for SimdMeshImpl."""
-
-    def __init__(self,
-                 simd_mesh_impl,
-                 ds_creator,
-                 mtf_input_shapes,
-                 ds_prefetch_size=tf.data.experimental.AUTOTUNE,
-                 external_worker=True,
-                 is_eval_mode=False):
-        """Input pipeline for the SIMD implementation of MeshTensorflow.
+def simd_mesh_impl_input_reader(simd_mesh_impl, ds_creator, mtf_input_shapes, ds_prefetch_size, is_eval_mode):
+    """ Handles input pipeline for SimdMeshImpl.
+        Input pipeline for the SIMD implementation of MeshTensorflow.
         Args:
           simd_mesh_impl: A mtf.simd_mesh_impl.SimdMeshImpl object.
           ds_creator: A function that creates a dataset.
@@ -173,253 +82,169 @@ class SimdMeshImplInputReader(object):
               2. The batch dimension is consistent across all input shapes in
                  mtf_input_shapes.
           ds_prefetch_size: The buffer size for prefetching
-            (default tf.data.experimental.AUTOTUNE).
-          external_worker: Whether you have an external tpu_worker or not. Set it to
-            False if you run the program locally, for example, during local unit
-            test.
           is_eval_mode: In evaluation mode, only one dataset object will be created,
             as opposed to one dataset for each sub-batch. Default is False. Set it
             to True during evaluation, to ensure that one evaluation instance will
             be used once and only once.
         Note:
-          1. The efficiency is optimized according to the shape of the 0-th tensor:
-             mtf_input_shapes[0]. We recommand you to put the largest tensor as the
-             0-th input.
-          2. You need to call start_infeed_thread() before your train ops.
-        Example:
-            simd_mesh_impl = mtf.simd_mesh_impl.SimdMeshImpl(...)
-            # ds_creator is function that creates a tf.data.Dataset.
-            # This Dataset must return single examples (no batch dimension).
-            def ds_creator():
-              return tf.data.Dataset.from_tensors(x)
-            # mtf_input_shapes is a list of Shapes of all input tensors given by the
-            # dataset. All shapes must begin with the same batch dimension.
-            simd_input_reader = SimdMeshImplInputReader(simd_mesh_impl,
-                                                        ds_creator,
-                                                        mtf_input_shapes)
-            batch_dim = mtf.Dimension('batch', FLAGS.batch_size)
-            io_dim = mtf.Dimension('io', FLAGS.io_size)
-            mtf_input_shapes = [mtf.Shape([batch_dim, io_dim])]
-            infeed_queue = simd_input_reader.infeed_queue
-            tpu_train_computation = tpu.replicate(
-                computation=model_fn,
-                inputs=[[]] * num_cores,
-                infeed_queue=infeed_queue, ...)
-            with tf.Session() as sess:
-              simd_input_reader.start_infeed_thread(sess,
-                                                    number_steps=num_training_steps)
-              for _ in range(num_training_steps):
-                sess.run(tpu_train_computation)
+          The efficiency is optimized according to the shape of the 0-th tensor:
+          mtf_input_shapes[0]. We recommand you to put the largest tensor as the
+          0-th input.
         """
-        super().__init__()
-        assert mtf_input_shapes
-        assert isinstance(mtf_input_shapes, list)
+    super().__init__()
+    if not mtf_input_shapes:
+        raise ValueError
+    if not isinstance(mtf_input_shapes, list):
+        raise ValueError
 
-        # TODO(lehou): Support nested structures for ds_creator, mtf_input_shapes.
-        self._simd_mesh_impl = simd_mesh_impl
-        self.num_cores = simd_mesh_impl.device_assignment.num_replicas
+    # TODO(lehou): Support nested structures for ds_creator, mtf_input_shapes.
+    input_initializers = []
+    infeed_thread: typing.List[typing.Optional[threading.Thread]] = [None]
+    enqueue = None
 
-        self.ordered_ordinals = []
-        self.ordered_hosts = []
-        self.ordered_host_ids = []
-        d_assignment = simd_mesh_impl.device_assignment
+    num_cores = simd_mesh_impl.device_assignment.num_replicas
 
-        for pnum in range(self.num_cores):
-            physical_pnum = simd_mesh_impl.l2p(pnum)
-            # For MTF, there's always 1 core per replica. So logical_core=0.
-            self.ordered_ordinals.append(d_assignment.tpu_ordinal(replica=physical_pnum, logical_core=0))
-            host_device = d_assignment.host_device(replica=physical_pnum)
-            host_id = int(host_device.lower().split("/task:")[1].split("/device:")[0])
-            self.ordered_hosts.append(host_device)
-            self.ordered_host_ids.append(host_id)
+    ordered_ordinals = []
+    ordered_hosts = []
+    ordered_host_ids = []
+    d_assignment = simd_mesh_impl.device_assignment
 
-        self.num_hosts = len(set(self.ordered_hosts))
-        self.num_cores_per_host = self.num_cores // self.num_hosts
-        if self.num_cores != self.num_hosts * self.num_cores_per_host:
+    for pnum in range(num_cores):
+        physical_pnum = simd_mesh_impl.l2p(pnum)
+        # For MTF, there's always 1 core per replica. So logical_core=0.
+        ordered_ordinals.append(d_assignment.tpu_ordinal(replica=physical_pnum, logical_core=0))
+        host_device = d_assignment.host_device(replica=physical_pnum)
+        host_id = int(host_device.lower().split("/task:")[1].split("/device:")[0])
+        ordered_hosts.append(host_device)
+        ordered_host_ids.append(host_id)
+
+    num_hosts = len(set(ordered_hosts))
+    num_cores_per_host = num_cores // num_hosts
+    if num_cores != num_hosts * num_cores_per_host:
+        raise ValueError
+    pnum_maps = []
+    batch_size = mtf_input_shapes[0].to_integer_list[0]
+    for shape in mtf_input_shapes:
+        # Make sure that the batch size is the same across all input tensors.
+        if batch_size != shape.to_integer_list[0]:
             raise ValueError
-        self._ds_creator = ds_creator
-        self._mtf_input_shapes = mtf_input_shapes
-        self._ds_prefetch_size = ds_prefetch_size
-        self._external_worker = external_worker
-        self._is_eval_mode = is_eval_mode
+        s_shape = simd_mesh_impl.slice_shape(shape)
+        shape_list = [dim_size // s_dim_size for dim_size, s_dim_size in zip(shape.to_integer_list, s_shape)]
 
-        self._gen_infeed_queue()
-
-    @property
-    def infeed_queue(self):
-        return self._infeed_queue
-
-    def start_infeed_thread(self, sess, number_steps=-1, initial_wait_sec=0.5):
-        """Start running enqueue ops in a thread.
-        Args:
-          sess: A tf.Session.
-          number_steps: Number of times to call sess.run(enqueue_ops).
-            default is -1 (forever).
-          initial_wait_sec: Number of seconds to wait before starting the enqueue
-            loop. Default is 0.5.
-        """
-
-        def _thread_fn():
-            time.sleep(initial_wait_sec)
-            if number_steps > 0:
-                for _ in range(number_steps):
-                    sess.run(self._enqueue_ops)
-            else:
-                while True:
-                    sess.run(self._enqueue_ops)
-
-        sess.run(self._input_initializers)
-        self._infeed_thread = threading.Thread(target=_thread_fn)
-        self._infeed_thread.start()
-
-    def _gen_infeed_queue(self):
-        """Generates _infeed_queue, _enqueue_ops, _input_initializers."""
-        pnum_maps = []
-        batch_size = self._mtf_input_shapes[0].to_integer_list[0]
-        for mtf_shape in self._mtf_input_shapes:
-            # Make sure that the batch size is the same across all input tensors.
-            assert batch_size == mtf_shape.to_integer_list[0]
-            pnum_maps.append(self._get_pnum_map(mtf_shape))
-
-        # For each sub-batch, we need to know which host should read it.
-        if self._is_eval_mode:
-            # There should be just one dataset-holding host. Make the last host do it.
-            hosts_to_hold_ds = [self.num_hosts - 1]
-        else:
-            hosts_to_hold_ds = self._get_hosts_to_hold_ds(pnum_maps[0])
-        sub_batch_size = batch_size // len(hosts_to_hold_ds)
-        tf.logging.info("MTF sub_batch_size: {}".format(sub_batch_size))
-        assert sub_batch_size * len(hosts_to_hold_ds) == batch_size
-
-        def sub_batch_ds_creator():
-            return self._ds_creator().batch(
-                    sub_batch_size, drop_remainder=True).prefetch(
-                    self._ds_prefetch_size)
-
-        # For each sub-batch, create a SubBatchSlicer object.
-        # Get the list of pnums for each input.
-        sub_batch_slicer_list = [SubBatchSlicer(sub_batch_ds_creator,
-                                                host_id,
-                                                [pnum_map.flatten().tolist() if self._is_eval_mode else
-                                                 pnum_map[sub_batch_i, ...].flatten().tolist()
-                                                 for pnum_map in pnum_maps],
-                                                self._simd_mesh_impl,
-                                                self._mtf_input_shapes,
-                                                self._external_worker,
-                                                global_batch=not self._is_eval_mode)
-                                 for sub_batch_i, host_id in enumerate(hosts_to_hold_ds)]
-
-        # Slots for all laidout tensors.
-        all_laidout_tensors = [[_NO_DATA] * len(self._mtf_input_shapes) for _ in range(self.num_cores)]
-
-        # Read tf_tensors, put them in slots.
-        for sub_batch_slicer in sub_batch_slicer_list:
-            for tf_tensor, pnum, input_i in sub_batch_slicer.get_slices():
-                all_laidout_tensors[pnum][input_i] = tf_tensor
-
-        # Make sure that there are no Nones in all_laidout_tensors.
-        for laidout_tensors in all_laidout_tensors:
-            assert _NO_DATA not in laidout_tensors
-
-        with ops.device(_host_id_to_tf_device(hosts_to_hold_ds[0],
-                                              self._external_worker)):
-            self._infeed_queue, self._enqueue_ops = self._enqueue_laidout_tensors(
-                    all_laidout_tensors)
-
-        self._input_initializers = [s.initializer for s in sub_batch_slicer_list]
-
-    def _get_pnum_map(self, mtf_shape):
-        """Returns the pnum_map according to mtf_shape.
-        Args:
-          mtf_shape: A mtf.Shape object.
-        Returns:
-          A numpy array pnum_map. For the i-th sub-batch, pnum_map[i] is a numpy
-          array containing all pnums that tensor slices of the i-th sub-batch
-          will be send to.
-        """
-        s_shape = self._simd_mesh_impl.slice_shape(mtf_shape)
-        shape_list = [dim_size // s_dim_size for dim_size, s_dim_size in zip(
-                mtf_shape.to_integer_list, s_shape)]
-
-        pnum_map_shape = shape_list + [
-                self.num_cores // np.prod(shape_list)]
-        assert np.prod(pnum_map_shape) == self.num_cores
+        pnum_map_shape = shape_list + [num_cores // np.prod(shape_list)]
+        if np.prod(pnum_map_shape) != num_cores:
+            raise ValueError
 
         # Initialize the pnum_map to _NONE_PNUM.
-        pnum_map = np.empty(pnum_map_shape, dtype=object)
-        pnum_map[:] = _NONE_PNUM
+        pnum_map = -np.ones(pnum_map_shape, dtype=np.int32)
 
-        for pnum in range(self.num_cores):
-            s_begin = self._simd_mesh_impl.slice_begin(mtf_shape, pnum)
-            coord = [dim_size // s_dim_size for dim_size, s_dim_size in zip(
-                    s_begin, s_shape)]
+        for pnum in range(num_cores):
             # put pnum in pnum_map[coord]
-            pnum_array_ref = pnum_map[tuple(coord)]
-            for idx, value in enumerate(pnum_array_ref):
-                if value is _NONE_PNUM:
-                    pnum_array_ref[idx] = pnum
-                    break
+            pnum_array_ref = pnum_map[
+                tuple([d // s for d, s in zip(simd_mesh_impl.slice_begin(shape, pnum), s_shape)])]
+            pnum_array_ref[:] = np.where(pnum_array_ref == -1, pnum, pnum_array_ref)
 
-        tf.logging.info("MTF pnum_map: {}".format(pnum_map))
-        assert _NONE_PNUM not in pnum_map
-        return pnum_map
+        if np.any(pnum_map == -1):
+            raise ValueError
+        pnum_maps.append(pnum_map)
 
-    def _get_hosts_to_hold_ds(self, pnum_map):
-        """Finds which host should read which sub-batch."""
-        assert _NONE_PNUM not in pnum_map
+    # For each sub-batch, we need to know which host should read it.
+
+    hosts_to_hold_ds = [num_hosts - 1]
+    if not is_eval_mode:
+        if _NONE_PNUM in pnum_maps[0]:
+            raise ValueError
 
         # This records how many datasets (ds) are already stored on each host.
-        num_dss_per_host = [0] * self.num_hosts
+        num_dss_per_host = [0] * num_hosts
 
         # A list of host_ids that holds datasets (ds).
         hosts_to_hold_ds = []
 
-        def _get_num_pnums_per_host(sub_batch_pnum_map):
-            num_pnums_per_host = [0] * self.num_hosts
+        for sub_batch_pnum_map in pnum_maps[0]:
+            num_pnums_per_host = [0] * num_hosts
             for pnum in sub_batch_pnum_map.flatten():
-                num_pnums_per_host[self.ordered_host_ids[pnum]] += 1
-            return num_pnums_per_host
-
-        def _find_host_id_with_most_pnums_and_least_ds(num_pnums_per_host,
-                                                       num_dss_per_host):
-            host_metics = [(
-                    host_id, num_pnums_per_host[host_id],
-                    num_dss_per_host[host_id]) \
-                    for host_id in range(self.num_hosts)]
+                num_pnums_per_host[ordered_host_ids[pnum]] += 1
             # Major max key: num_pnums
             # Minor max key: -num_dss. We need to find a relatively spare host.
-            host_id, _, _ = max(host_metics, key=lambda keys: (keys[1], -keys[2]))
-            return host_id
-
-        for sub_batch_pnum_map in pnum_map:
-            num_pnums_per_host = _get_num_pnums_per_host(sub_batch_pnum_map)
-            host_id = _find_host_id_with_most_pnums_and_least_ds(num_pnums_per_host,
-                                                                 num_dss_per_host)
+            _, _, host_id = max((num_pnums_per_host[host_id], -num_dss_per_host[host_id], host_id)
+                                for host_id in range(num_hosts))
             num_dss_per_host[host_id] += 1
             hosts_to_hold_ds.append(host_id)
+    sub_batch_size = batch_size // len(hosts_to_hold_ds)
 
-        return hosts_to_hold_ds
+    if sub_batch_size * len(hosts_to_hold_ds) != batch_size:
+        raise ValueError
 
-    def _enqueue_laidout_tensors(self, all_laidout_tensors):
-        """Generate enqueue ops to enqueue all_laidout_tensors."""
+    # For each sub-batch, create a SubBatchSlicer object.
+    # Get the list of pnums for each input.
+    all_laidout_tensors = [[_NO_DATA] * len(mtf_input_shapes) for _ in range(num_cores)]
+    for sub_batch_i, host_id in enumerate(hosts_to_hold_ds):
+        with ops.device(HOST_ID_TO_TF_DEVICE.format(host_id)):
+            dset = ds_creator()
+            dset = dset.batch(sub_batch_size, drop_remainder=True)
+            dset = dset.prefetch(ds_prefetch_size)
+            ds_iterator = dset.make_initializable_iterator()
+            input_initializers.append(ds_iterator.initializer)
 
-        def _tpu_ordinal_function_impl(pnum):
-            return self.ordered_ordinals[pnum]
+            all_input_tensors = ds_iterator.get_next()
+            all_sub_batch_pnums = [pnum_map.flatten().tolist() if is_eval_mode else
+                                   pnum_map[sub_batch_i, ...].flatten().tolist()
+                                   for pnum_map in pnum_maps]
+            if len(all_input_tensors) != len(mtf_input_shapes):
+                raise ValueError
 
-        def _placement_function_impl(pnum):
-            return self.ordered_hosts[pnum]
+            for input_tensor, idx in enumerate(all_input_tensors):
+                sub_batch_pnums = all_sub_batch_pnums[idx]
+                mtf_input_shape = mtf_input_shapes[idx]
 
+                # Initialize the cache for each input_i
+                slice_dict = collections.defaultdict(list)
+
+                for pnum in sub_batch_pnums:
+                    s_begin = simd_mesh_impl.slice_begin(mtf_input_shape, pnum)
+                    if is_eval_mode:
+                        # Always slice from 0 in the first dimension (batch dimension), since
+                        # input_tensor a sub-batch tensor.
+                        s_begin[0] = 0
+                    if tuple(s_begin) in slice_dict:
+                        all_laidout_tensors[pnum][idx] = tf_tensor
+                        continue
+                    s_shape = simd_mesh_impl.slice_shape(mtf_input_shape)
+                    tf_tensor = tf.slice(input_tensor, s_begin, s_shape)
+
+                    slice_dict[tuple(s_begin)] = tf_tensor
+                    all_laidout_tensors[pnum][idx] = tf_tensor
+
+    # Make sure that there are no Nones in all_laidout_tensors.
+    if any(_NO_DATA in laidout_tensors for laidout_tensors in all_laidout_tensors):
+        raise ValueError
+
+    with ops.device(HOST_ID_TO_TF_DEVICE.format(hosts_to_hold_ds[0])):
         laidout_tensors0 = all_laidout_tensors[0]
-        infeed_queue = tpu_feed.InfeedQueue(
-                number_of_tuple_elements=len(laidout_tensors0),
-                tuple_types=[x.dtype for x in laidout_tensors0],
-                tuple_shapes=[x.shape for x in laidout_tensors0])
-        enqueue_ops = infeed_queue.generate_enqueue_ops(
-                all_laidout_tensors,
-                tpu_ordinal_function=_tpu_ordinal_function_impl,
-                placement_function=_placement_function_impl)
+        infeed = tpu_feed.InfeedQueue(number_of_tuple_elements=len(laidout_tensors0),
+                                      tuple_types=[x.dtype for x in laidout_tensors0],
+                                      tuple_shapes=[x.shape for x in laidout_tensors0])
+        enqueue = infeed.generate_enqueue_ops(all_laidout_tensors,
+                                              tpu_ordinal_function=lambda x: ordered_ordinals[x],
+                                              placement_function=lambda x: ordered_hosts[x])
 
-        return infeed_queue, enqueue_ops
+    def _thread_fn(sess):
+        time.sleep(1)
+        while True:
+            sess.run(enqueue)
+
+    def _start(sess: tf.Session):
+        """Start running enqueue ops in a thread.
+        Args:
+          sess: A tf.Session.
+        """
+
+        sess.run(input_initializers)
+        infeed_thread[0] = threading.Thread(target=_thread_fn, args=(sess,))
+        infeed_thread[0].start()
+
+    return infeed, _start
 
 
 class CheckpointLoaderHook(tf.estimator.SessionRunHook):
@@ -438,10 +263,8 @@ class CheckpointLoaderHook(tf.estimator.SessionRunHook):
                 saver.restore(session, check_point)
 
 
-def computation_func(params: ModelParameter, input_fn,
-                     session_config, tpu_cluster_resolver,
+def computation_func(params: ModelParameter, input_fn, session_config, tpu_cluster_resolver, callback_fns,
                      run_mode: str, current_step: int = 0):
-
     captured_hooks = CapturedObject()
     captured_output_dtypes_shapes = CapturedObject()
 
@@ -526,7 +349,6 @@ def computation_func(params: ModelParameter, input_fn,
                                                        params.token_dim_shape, "tkn_src")
             token_y_input = mtf.import_laid_out_tensor(mesh, params.mesh_impl.LaidOutTensor([args[1]]),
                                                        params.token_dim_shape, "tkn_tgt")
-
 
         if run_mode == 'sample' and params.use_autoregressive_sampling:
             sequence_dim = mtf.Dimension("sequence", params.time_patch_size)
@@ -732,14 +554,14 @@ def computation_func(params: ModelParameter, input_fn,
 
             return tpu_ops.outfeed_enqueue_tuple(predictions)
 
-    simd_input_reader = SimdMeshImplInputReader(params.mesh_impl, input_fn,
-                                                params.input_pipeline_shape,
-                                                external_worker=True,
-                                                is_eval_mode=run_mode == 'sample')
+    infeed, simd_input_reader = simd_mesh_impl_input_reader(params.mesh_impl, input_fn,
+                                                            params.input_pipeline_shape,
+                                                            params.buffer_size,
+                                                            run_mode == 'sample')
 
     computation = tpu.replicate(computation=model_fn,
                                 inputs=[[]] * params.num_cores,
-                                infeed_queue=simd_input_reader.infeed_queue,
+                                infeed_queue=infeed,
                                 device_assignment=params.d_assignment)
 
     if run_mode == 'sample':
@@ -749,7 +571,7 @@ def computation_func(params: ModelParameter, input_fn,
         # Create outfeed_dequeue_ops.
         for host_id in range(params.num_hosts):
             # pylint: disable=protected-access
-            with ops.device(_host_id_to_tf_device(host_id, external_worker=True)):
+            with ops.device(HOST_ID_TO_TF_DEVICE.format(host_id)):
                 for device_ordinal in range(params.num_cores_per_host):
                     outfeed_dequeue_op = tpu_ops.outfeed_dequeue_tuple(
                             dtypes=output_dtypes,
@@ -762,10 +584,10 @@ def computation_func(params: ModelParameter, input_fn,
                     else:
                         outfeed_dequeue_ops.append(outfeed_dequeue_op)
 
+    slice_hook = [hook for hook in captured_hooks.get()]
+    ckpt_loader_hook = CheckpointLoaderHook(params.model_path)
     if run_mode == 'train':
 
-        slice_hook = [hook for hook in captured_hooks.get()]
-        ckpt_loader_hook = CheckpointLoaderHook(params.model_path)
         step_counter_hook = tf.train.StepCounterHook(every_n_steps=10)
         all_hooks = [ckpt_loader_hook, step_counter_hook] + slice_hook
 
@@ -774,24 +596,18 @@ def computation_func(params: ModelParameter, input_fn,
 
         with tf.train.MonitoredTrainingSession(master=tpu_cluster_resolver.master(),
                                                hooks=all_hooks, config=session_config) as sess:
-            simd_input_reader.start_infeed_thread(sess)
+            simd_input_reader(sess)
             summary.initialize(session=sess)
 
-            while current_step < params.train_steps:
+            for i in range(current_step, params.train_steps):
                 sess.run(computation)
-                sess.run(flush_summary)
-
-                tf.logging.info('train steps: {}'.format(current_step))
-
-                _current_step = current_step
-                current_step += 1
-
-                yield _current_step
+                if (i + 1) % params.summary_flush_interval == 0:
+                    sess.run(flush_summary)
+                for fn in callback_fns:
+                    fn(i)
 
     else:  # run_mode == 'sample'
 
-        slice_hook = [hook for hook in captured_hooks.get()]
-        ckpt_loader_hook = CheckpointLoaderHook(params.model_path)
         all_hooks = [ckpt_loader_hook, slice_hook[0]]
 
         with tf.train.MonitoredSession(
@@ -799,8 +615,10 @@ def computation_func(params: ModelParameter, input_fn,
                                                              config=session_config),
                 hooks=all_hooks) as sess:
 
-            simd_input_reader.start_infeed_thread(sess)
+            simd_input_reader(sess)
 
             while True:
                 sess.run(computation)
-                yield sess.run(outfeed_dequeue_ops)[0]
+                out = sess.run(outfeed_dequeue_ops)[0]
+                for fn in callback_fns:
+                    fn(out)
