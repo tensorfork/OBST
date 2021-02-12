@@ -71,12 +71,13 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.use_revnet = True
         self.block_config = [{'layer': ["group_instance_norm", "group_feed_forward", "rezero"]},
                              {'layer': ["group_instance_norm", "group_feed_forward", "rezero"]},
-                             {'layer': ["group_instance_norm", "_embedded_attention", "rezero"]}]
+                             {'layer': ["group_instance_norm", "embedded_attention", "rezero"]}]
 
-        self.mesh = None
-        self.mesh_impl = None
-        self.num_cores = None
-        self.num_cores_per_host = None
+        self.mesh: typing.Optional[mtf.Mesh] = None
+        self.mesh_impl: typing.Optional[mtf.simd_mesh_impl.SimdMeshImpl] = None
+        self.num_cores = 0
+        self.num_hosts = 0
+        self.num_cores_per_host = 0
         self.masked_attention_dimensions = [0]
 
         if hasattr(config, 'dict'):
