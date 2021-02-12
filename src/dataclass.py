@@ -131,12 +131,13 @@ class ModelParameter(typing.Dict[str, typing.Any]):
                                           mtf.Dimension("language_token_patch", self.token_patch_size)])
         self.frame_mask_shape = mtf.Shape([self.batch_dim, self.sequence_dim])
 
-        if self.use_video:
-            self.input_pipeline_shape['frame'] = self.frame_input_shape
-        if self.use_language:
-            self.input_pipeline_shape['token_x'] = self.token_dim_shape
-            self.input_pipeline_shape['token_y'] = self.token_dim_shape
-        if self.use_language and self.use_video:
+        if self.model_mode == 'jannet':
+            if self.use_video:
+                self.input_pipeline_shape['frame'] = self.frame_input_shape
+            if self.use_language:
+                self.input_pipeline_shape['token_x'] = self.token_dim_shape
+                self.input_pipeline_shape['token_y'] = self.token_dim_shape
+        else:
             self.token_dim_shape._dims.insert(2, mtf.Dimension("height", self.language_token_patch))
             self.input_pipeline_shape['vid_msk'] = self.frame_mask_shape
             self.input_pipeline_shape['tkn_msk'] = self.token_dim_shape

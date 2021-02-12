@@ -78,7 +78,7 @@ def process_video_output(out_frame: np.ndarray, params: ModelParameter) -> np.nd
 def gen_sample_fn(params: ModelParameter):
     state = {'sample_index': 0}
 
-    def _fn(out):
+    def _video_fn(out):
         print('sample_idx:', state['sample_index'])
 
         token_inp = None
@@ -110,4 +110,17 @@ def gen_sample_fn(params: ModelParameter):
         if state['sample_index'] >= params.num_of_sample:
             exit()
 
-    return _fn
+    def _text_fn(out):
+        print('sample_idx:', state['sample_index'])
+
+        #if params.use_autoregressive_sampling:
+            #print('Promt:', )
+
+        print(out[0].shape, out[1].shape)
+
+        state['sample_index'] += 1
+        if state['sample_index'] >= params.num_of_sample:
+            exit()
+
+
+    return _video_fn if params.model_mode == 'jannet' else _text_fn

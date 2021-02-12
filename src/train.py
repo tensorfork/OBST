@@ -479,11 +479,14 @@ def computation_func(params: ModelParameter, input_fn, session_config, tpu_clust
             predictions = {}
             if params.use_video:
                 predictions.update({'frame_out': lowering.export_to_tf_tensor(frame_out)})
-                predictions.update({'frame_inp': args[0]})
+                predictions.update({'frame_tgt': args[0]})
 
             if params.use_language:
                 predictions.update({'token_out': lowering.export_to_tf_tensor(token_out)})
-                predictions.update({'token_inp': args[2]})
+                if params.model_mode == 'jannet':
+                    predictions.update({'token_tgt': args[2]})
+                else:
+                    predictions.update({'token_tgt': args[1]})
 
         if run_mode == 'train':
 
