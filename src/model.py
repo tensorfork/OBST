@@ -66,8 +66,7 @@ def _linear_from_features(params: ModelParameter, block_input: mtf.Tensor,
 
 
 def _communicating_linear(params: ModelParameter, block_input: mtf.Tensor):
-    return mtf.add_n([_linear_to_features(params, mtf.shift(block_input, i, params.head_dim, True))
-                      for i in range(params.n_head)])
+    return _linear_to_features(params, block_input)
 
 
 def _attention(params: ModelParameter, base: mtf.Tensor, key: mtf.Tensor):

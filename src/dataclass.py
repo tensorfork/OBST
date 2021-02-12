@@ -5,9 +5,7 @@ import typing
 
 import mesh_tensorflow as mtf
 import tensorflow.compat.v1 as tf
-
-from .utils_mtf import anonymize_dim
-
+from tensorflow.python.tpu.device_assignment import DeviceAssignment
 
 class BlockConfig:
     def __init__(self, config):
@@ -35,6 +33,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.three_axes = True
         self.dataset_configs = []
         self.data_seed = 456772
+        self.run_mode = "train"
         self.padding_token = 0
         self.n_ctx = 32
         self.n_head = 8
@@ -47,6 +46,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.storage_dtype = "float32"
         self.calculation_dtype = "float32"
         self.train_batch_size = 1
+        self.current_step = 0
         self.mesh_shape = "x:1,y:1,h:32"
         self.layout = "batch:x,heads:y,height:h"
         self.prefix = "datasets/full_hd_video"
@@ -74,6 +74,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
                              {'layer': ["group_instance_norm", "embedded_attention", "rezero"]}]
 
         self.mesh: typing.Optional[mtf.Mesh] = None
+        self.d_assignment: typing.Optional[DeviceAssignment] = None
         self.mesh_impl: typing.Optional[mtf.simd_mesh_impl.SimdMeshImpl] = None
         self.num_cores = 0
         self.num_hosts = 0
@@ -105,9 +106,10 @@ class ModelParameter(typing.Dict[str, typing.Any]):
 
         self.feature_dims = self.head_dimensions + [self.key_dim]
 
-        self.intermediate = [self.head_dim,
-                             anonymize_dim(self.key_dim,
-                                           int(self.key_dim.size * self.intermediate_feed_forward_multiplier))]
+        self.intermediate = [mtf.Dimension("intermediate",
+                                           int(self.key_dim.size
+                                               * self.intermediate_feed_forward_multiplier
+                                               * self.head_dim.size))]
 
         self.vocab_dim = mtf.Dimension("vocab", self.vocab_size)
         self.batch_dim = mtf.Dimension("batch", self.train_batch_size)
