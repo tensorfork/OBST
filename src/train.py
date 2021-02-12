@@ -115,7 +115,7 @@ def simd_mesh_impl_input_reader(simd_mesh_impl, ds_creator, mtf_input_shapes, ds
         ordered_ordinals[pnum] = simd_mesh_impl.device_assignment.tpu_ordinal(replica=physical_pnum, logical_core=0)
         ordered_hosts[pnum] = host_device
         ordered_host_ids[pnum] = int(host_device.lower().split("/task:")[1].split("/device:")[0])
-    num_hosts = len(np.unique(ordered_hosts))
+    num_hosts = len(np.unique(ordered_host_ids))
     pnum_maps = []
     batch_size = mtf_input_shapes[0].to_integer_list[0]
     for shape in mtf_input_shapes:
@@ -129,7 +129,10 @@ def simd_mesh_impl_input_reader(simd_mesh_impl, ds_creator, mtf_input_shapes, ds
         for pnum in range(num_cores):
             coord = tuple([d // s for d, s in zip(simd_mesh_impl.slice_begin(shape, pnum), s_shape)])
             pnum_array_ref = pnum_map[coord]
-            pnum_array_ref[:] = np.where(pnum_array_ref == -1, pnum, pnum_array_ref)
+            for idx, value in enumerate(pnum_array_ref):
+                if value == -1:
+                    pnum_array_ref[idx] = pnum
+                    break
 
         if np.any(pnum_map == -1):
             raise ValueError
@@ -138,7 +141,6 @@ def simd_mesh_impl_input_reader(simd_mesh_impl, ds_creator, mtf_input_shapes, ds
     # For each sub-batch, we need to know which host should read it.
     hosts_to_hold_ds = [num_hosts - 1]
     if not is_eval_mode:
-        ordered_host_ids = np.array(ordered_host_ids)
         hosts_to_hold_ds.clear()
         num_dss_per_host = np.zeros((num_hosts,))
         for sub_batch_pnum_map in pnum_maps[0]:
@@ -174,20 +176,20 @@ def simd_mesh_impl_input_reader(simd_mesh_impl, ds_creator, mtf_input_shapes, ds
                 mtf_input_shape = mtf_input_shapes[idx]
 
                 # Initialize the cache for each
-                slice_dict = collections.defaultdict(list)
+                slice_dict = {}
 
                 for pnum in sub_batch_pnums:
-                    s_begin = simd_mesh_impl.slice_begin(mtf_input_shape, pnum)
+                    s_begin = tuple(simd_mesh_impl.slice_begin(mtf_input_shape, pnum))
                     if is_eval_mode:
                         # Always slice from 0 in the first dimension (batch dimension), since
                         # input_tensor a sub-batch tensor.
                         s_begin[0] = 0
-                    if tuple(s_begin) in slice_dict:
+                    if s_begin in slice_dict:
                         all_laidout_tensors[pnum][idx] = tf_tensor
                         continue
                     tf_tensor = tf.slice(input_tensor, s_begin, simd_mesh_impl.slice_shape(mtf_input_shape))
 
-                    slice_dict[tuple(s_begin)] = tf_tensor
+                    slice_dict[s_begin] = tf_tensor
                     all_laidout_tensors[pnum][idx] = tf_tensor
 
     with ops.device(HOST_ID_TO_TF_DEVICE.format(hosts_to_hold_ds[0])):
