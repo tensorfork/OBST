@@ -46,7 +46,7 @@ def render_video(model_output: typing.List[typing.Tuple[np.ndarray, typing.List[
     writer.release()
 
 
-def process_token_output(token_out: np.ndarray, padding_token: int, do_argmax: bool = True) -> typing.List[str]:
+def process_token_output(token_out: np.ndarray, padding_token: int = -1, do_argmax: bool = True) -> typing.List[str]:
     _shape = token_out.shape
     if do_argmax:
         token_out = np.reshape(token_out, newshape=(_shape[0], _shape[1] * _shape[2], _shape[3]))
@@ -57,8 +57,9 @@ def process_token_output(token_out: np.ndarray, padding_token: int, do_argmax: b
     token_out_str = []
 
     for token in token_out:
-        if padding_token in token:
-            token = token[:token.tolist().index(padding_token)]
+        if padding_token > -1:
+            if padding_token in token:
+                token = token[:token.tolist().index(padding_token)]
 
         token_out_str.append("".join([chr(tok) if tok > 31 and tok != 127 else " " for tok in token]))
 
@@ -113,14 +114,20 @@ def gen_sample_fn(params: ModelParameter):
     def _text_fn(out):
         print('sample_idx:', state['sample_index'])
 
-        #if params.use_autoregressive_sampling:
-            #print('Promt:', )
+        if params.use_autoregressive_sampling:
+            print('Promt:')
+            print(process_token_output(out[1], do_argmax=False)[0][:params.initial_autoregressive_position])
+        else:
+            print('target:')
+            print(process_token_output(out[1], do_argmax=False)[0])
 
-        print(out[0].shape, out[1].shape)
+        print('\nsample:')
+        print(process_token_output(out[0], do_argmax=True)[0])
 
         state['sample_index'] += 1
         if state['sample_index'] >= params.num_of_sample:
             exit()
 
+        print('\n')
 
     return _video_fn if params.model_mode == 'jannet' else _text_fn
