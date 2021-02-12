@@ -117,12 +117,13 @@ def gen_sample_fn(params: ModelParameter):
         if params.use_autoregressive_sampling:
             print('Promt:')
             print(process_token_output(out[1], do_argmax=False)[0][:params.initial_autoregressive_position])
+            print('\noutput:')
+            print(process_token_output(out[0], do_argmax=False)[0][params.initial_autoregressive_position:])
         else:
             print('target:')
             print(process_token_output(out[1], do_argmax=False)[0])
-
-        print('\nsample:')
-        print(process_token_output(out[0], do_argmax=True)[0])
+            print('\nsample:')
+            print(process_token_output(out[0], do_argmax=True)[0])
 
         state['sample_index'] += 1
         if state['sample_index'] >= params.num_of_sample:
