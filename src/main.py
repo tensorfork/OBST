@@ -51,6 +51,8 @@ def main(args: argparse.Namespace) -> None:
         params.use_language = True
         params.use_video = False
 
+        params = ModelParameter(params)
+
     else:
         raise ValueError(f"model_mode need to be 'jannet' or 'gpt' {params.model_mode}, "
                          "is a not supported option.")
