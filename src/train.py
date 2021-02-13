@@ -376,7 +376,6 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
             while_loop_inputs = [params.initial_autoregressive_position, frame_input,
                                  token_x_input, token_y_input, frame_mask, token_mask]
-            '''
 
             def cond_fn(position, *states):
                 is_done = mtf.greater_equal(position, params.sequence_dim.size)
