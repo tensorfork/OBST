@@ -46,7 +46,7 @@ def get_optimizer(mesh: mtf.Mesh, loss: mtf.Tensor, params: ModelParameter
     if params.optimizer not in OPTIMIZERS:
         raise ValueError(f'Unknown optimizer "{params.optimizer}". Supported optimizers: {list(OPTIMIZERS.keys())}')
     optimizer = OPTIMIZERS[params.optimizer](params, learning_rate, params.weight_decay, beta1, beta2)
-    clip_value = mtf.constant(mesh, params.gradient_clipping, dtype=dtype)
+    clip_value = mtf.constant(mesh, params.gradient_clip, dtype=dtype)
     update_ops = []
     operations = loss.graph.operations
     xs = [x.outputs[0] for x in mesh.graph.trainable_variables]
@@ -82,7 +82,10 @@ def get_optimizer(mesh: mtf.Mesh, loss: mtf.Tensor, params: ModelParameter
                         grad_list = [0, 1, grad]
                         tensor_to_gradient[inp] = grad_list
                     if valid_grad and len(inp.operation.outputs) == grad_list[1] and inp in tensor_to_var:
-                        clipped = mtf.minimum(mtf.maximum(mtf.cast(grad_list[2], dtype), -clip_value), clip_value)
+                        casted_grad = mtf.cast(grad_list[2], dtype)
+                        norm = mtf.reduce_sum(mtf.square(casted_grad)) / mtf.reduce_sum(mtf.square(var.value))
+                        clipped = weighted_add(mtf.rsqrt(norm) * params.gradient_clip * casted_grad, casted_grad,
+                                               mtf.cast(mtf.greater(mtf.sqrt(norm), params.gradient_clip), dtype))
                         var: mtf.Variable = tensor_to_var[inp]
                         optim = adam if var.shape.ndims == 0 else optimizer
                         update_ops.extend(optim.apply_grad(clipped, var))

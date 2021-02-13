@@ -60,7 +60,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.use_autoregressive_sampling = False
         self.num_of_sample = 10
         self.z_loss = 0.1
-        self.gradient_clipping = 1.0
+        self.gradient_clip = 0.01
         self.intermediate_feed_forward_multiplier = 1
         self.group_linear_factor = 4
         self.embedding_stddev = 0.004
