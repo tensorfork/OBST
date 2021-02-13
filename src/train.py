@@ -376,10 +376,44 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
             while_loop_inputs = [params.initial_autoregressive_position, frame_input,
                                  token_x_input, token_y_input, frame_mask, token_mask]
+            '''
 
-            _, frame_out, token_out, _, _, _, loss = mtf.while_loop(cond_fn=cond_fn,
-                                                                    body_fn=body_fn,
-                                                                    inputs=while_loop_inputs)
+            def cond_fn(position, *states):
+                is_done = mtf.greater_equal(position, params.sequence_dim.size)
+                is_done = mtf.logical_or(is_done, mtf.greater_equal(position - params.initial_autoregressive_position,
+                                                                    params.sequence_dim.size))
+                is_done = mtf.reduce_sum(is_done)
+
+                return mtf.logical_not(is_done)
+
+            def body_fn(position, token_x, token_y, *states):
+                with tf.variable_scope('jannet'):
+
+                    _, _, frame_out, token_out = build(params,
+                                                       mtf.ones(params.mesh, [], tf.float32),
+                                                       token_x,
+                                                       token_y_input, mtf.ones(params.mesh, [], tf.float32),
+                                                       mtf.ones(params.mesh, [], tf.float32))
+
+                # (batch, sequence_dim, 1, vocab_size) ->
+                # (batch, sequence_dim, language_token_per_frame)
+                _token_out: mtf.Tensor = mtf.argmax(token_out, reduced_dim=params.vocab_dim)
+
+                # (sequence_dim)
+                one_hot_sequence = mtf.one_hot(position, output_dim=params.sequence_dim, dtype=tf.int32)
+                neg_one_hot_sequence = (1 - one_hot_sequence)
+
+                token_x = _token_out * one_hot_sequence + token_x * neg_one_hot_sequence
+
+                position_out = position + 1
+
+                return [position_out, token_x, token_y]
+
+            while_loop_inputs = [(mtf.zeros(params.mesh, [], tf.int32) + params.initial_autoregressive_position),
+                                 token_x_input, token_y_input]
+
+            _, token_out, _ = mtf.while_loop(cond_fn=cond_fn, body_fn=body_fn, inputs=while_loop_inputs)
+
         else:
             with mtf.utils.outside_all_rewrites(), tf.variable_scope('jannet'):
                 if token_mask is None:
@@ -438,9 +472,6 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
         lowering = mtf.Lowering(graph, {mesh: params.mesh_impl}, autostack=True)
 
-        tf_loss = lowering.export_to_tf_tensor(loss)
-        tf_loss = tf.cast(tf_loss, tf.float32)
-
         log_dict = {}
 
         if params.run_mode == 'train':
@@ -454,6 +485,8 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 token_loss = tf.cast(token_loss, tf.float32)
                 log_dict.update({'token_loss': token_loss})
 
+            tf_loss = lowering.export_to_tf_tensor(loss)
+            tf_loss = tf.cast(tf_loss, tf.float32)
             tf_loss = _add_summary(tf_loss=tf_loss, value=log_dict, global_step=global_step)
 
         else:  # run_mode == 'sample'
