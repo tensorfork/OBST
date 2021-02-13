@@ -44,7 +44,7 @@ def main(args: argparse.Namespace) -> None:
 
     # Fetch appropriate input functions
     if params.model_mode == 'jannet':
-        input_fn = dataset()
+        input_fn = dataset
     elif params.model_mode == 'gpt':
         input_fn = gpt_neo_input
 
