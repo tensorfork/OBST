@@ -438,10 +438,10 @@ def gpt_neo_input(params, sub_batch_size):
 
         return {'token_x': vals1, 'token_y': vals2}
 
-    dset = dset.batch(sub_batch_size)
     dset = dset.interleave(lambda x: _text_decoder(x, params.n_ctx, params.token_patch_size, -1))
 
     dset = dset.shuffle(512, seed=seed)
+    dset = dset.batch(sub_batch_size)
 
     dset = dset.map(_memory_func)
     dset = dset.map(align_tensor_op)
