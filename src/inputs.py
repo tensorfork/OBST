@@ -158,7 +158,7 @@ def dataset_text(path: str, params: ModelParameter, sub_batch_size: int, slice_i
 
         x = tf.reshape(x, (sub_batch_size, time_patch_size + 1, language_token_patch, token_patch_size))
 
-        token_x = x[:, time_patch_size]
+        token_x = x[:, :time_patch_size]
         token_y = x[:, 1:time_patch_size + 1]
 
         if three_axes:
@@ -262,7 +262,7 @@ def dataset_video(path: str, params: ModelParameter, sub_batch_size: int, slice_
             token = tf.reshape(token, (sub_batch_size, time_patch_size + 1, language_token_patch, token_patch_size))
             token = tf.cast(token, tf.int32)
 
-            token_x = token[:, time_patch_size]
+            token_x = token[:, :time_patch_size]
             token_y = token[:, 1:time_patch_size + 1]
 
             frame_mask = frame_mask[:, 1:time_patch_size + 1]
@@ -319,7 +319,7 @@ def dataset(params: ModelParameter, sub_batch_size, slice_index, slice_count):
         path = set['path']
         weight = set['weight']
 
-        if dtype != 'video' or dtype != 'text':
+        if dtype != 'video' and dtype != 'text':
             raise ValueError(f"{dtype} is not a supported option for type for a dataset.")
 
         if dtype == 'video':
@@ -434,7 +434,7 @@ def gpt_neo_input(params, sub_batch_size, slice_index, slice_count):
 
     dset = dset.interleave(lambda x: _text_decoder(x, params.n_ctx, params.token_patch_size, -1))
 
-    dset = dset.shuffle(512, seed=seed)
+    dset = dset.shuffle(512, seed=params.data_seed)
     dset = dset.batch(sub_batch_size)
 
     dset = dset.map(_memory_func)
