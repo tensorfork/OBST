@@ -82,17 +82,17 @@ def get_optimizer(mesh: mtf.Mesh, loss: mtf.Tensor, params: ModelParameter
                         grad_list = [0, 1, grad]
                         tensor_to_gradient[inp] = grad_list
                     if valid_grad and len(inp.operation.outputs) == grad_list[1] and inp in tensor_to_var:
-                        casted_grad = mtf.cast(grad_list[2], dtype)
+                        casted_grad = grad_list[2]
                         norm = mtf.reduce_sum(mtf.square(casted_grad)) / mtf.reduce_sum(mtf.square(var.value))
                         clipped = weighted_add(mtf.rsqrt(norm) * params.gradient_clip * casted_grad, casted_grad,
                                                mtf.cast(mtf.greater(mtf.sqrt(norm), params.gradient_clip), dtype))
                         var: mtf.Variable = tensor_to_var[inp]
                         optim = adam if var.shape.ndims == 0 else optimizer
                         weight_update, buffer = optim.apply_grad(clipped, var)
-                        val = mtf.cast(var.value, params.calculation_dtype)
-                        weight_update += params.weight_decay * val
+                        if params.weight_decay > 0:
+                            weight_update += params.weight_decay * var.value
                         if var.shape.size > 1:
-                            weight_update += mtf.reduce_mean(val)
+                            weight_update += mtf.reduce_mean(var.value)
                         update_ops.extend(buffer)
                         update_ops.append(mtf.assign_sub(var, weight_update))
     return mesh.graph.trainable_variables[0].graph.combine_assignments(update_ops)
