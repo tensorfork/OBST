@@ -430,10 +430,10 @@ def gpt_neo_input(params, sub_batch_size):
     dset: Dataset = tf.data.Dataset.from_tensor_slices(filenames).repeat()
 
     def _memory_func(x):
-        x = tf.reshape(x, (sub_batch_size, (params.n_ctx // params.token_patch_size) + 1, params.token_patch_size))
+        x = tf.reshape(x, (sub_batch_size, params.n_ctx // params.token_patch_size + 1, params.token_patch_size))
         x = tf.cast(x, tf.int32)
 
-        vals1 = x[:, params.n_ctx]
+        vals1 = x[:, :params.n_ctx]
         vals2 = x[:, 1:params.n_ctx + 1]
 
         return {'token_x': vals1, 'token_y': vals2}

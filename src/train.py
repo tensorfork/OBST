@@ -167,7 +167,6 @@ def simd_mesh_impl_input_reader(params: ModelParameter, ds_creator):
                     if s_begin in slice_dict:
                         all_laidout_tensors[pnum][idx] = tf_tensor
                         continue
-
                     tf_tensor = tf.slice(input_tensor, s_begin, params.mesh_impl.slice_shape(mtf_input_shape))
 
                     slice_dict[s_begin] = tf_tensor
