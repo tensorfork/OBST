@@ -156,13 +156,8 @@ def simd_mesh_impl_input_reader(params: ModelParameter, ds_creator):
                 slice_dict = {}
 
                 for pnum in sub_batch_pnums:
-                    s_begin = tuple(params.mesh_impl.slice_begin(mtf_input_shape, pnum))
-                    if params.run_mode == 'sample':
-                        # Always slice from 0 in the first dimension (batch dimension), since
-                        # input_tensor a sub-batch tensor.
-                        s_begin = list(s_begin)
-                        s_begin[0] = 0
-                        s_begin = tuple(s_begin)
+                    s_begin = params.mesh_impl.slice_begin(mtf_input_shape, pnum)
+                    s_begin[0] = 0
 
                     if s_begin in slice_dict:
                         all_laidout_tensors[pnum][idx] = tf_tensor
