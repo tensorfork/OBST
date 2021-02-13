@@ -157,8 +157,7 @@ def simd_mesh_impl_input_reader(params: ModelParameter, ds_creator):
 
                 for pnum in sub_batch_pnums:
                     s_begin = params.mesh_impl.slice_begin(mtf_input_shape, pnum)
-                    s_begin[0] = 0
-
+                    s_begin[0] = s_begin % sub_batch_size * (params.run_mode == 'sample')
                     if s_begin in slice_dict:
                         all_laidout_tensors[pnum][idx] = tf_tensor
                         continue
