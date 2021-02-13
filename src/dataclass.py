@@ -14,7 +14,7 @@ class BlockConfig:
     def __init__(self, config):
         if isinstance(config, BlockConfig):
             config = config.__dict__
-        self.layer = [{}]
+        self.layer = []
         self.skip = False
         self.__dict__.update(config)
 
