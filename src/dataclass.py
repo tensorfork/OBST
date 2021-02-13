@@ -61,6 +61,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.iterations = 2500
         self.initial_autoregressive_position = 128
         self.use_autoregressive_sampling = False
+        self.shuffle_input_filenames = True
         self.num_of_sample = 10
         self.z_loss = 0.1
         self.gradient_clip = 0.01

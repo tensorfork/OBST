@@ -12,6 +12,17 @@ from tensorflow.data import Dataset
 from .dataclass import ModelParameter, align_tensor_op
 
 
+def split_files(path, slice_index, slice_count, seed):
+    filenames = tf.io.gfile.glob(path)
+    if not filenames:
+        raise ValueError
+    files = sorted(filenames)
+    if seed != 0:
+        random.seed(seed)
+        random.shuffle(files)
+    return files[slice_index::slice_count]
+
+
 def get_video_decoder(language_token_num_per_frame=0, frame_height=None, frame_width=None, color_channels=None):
     '''
     :param language_token_num_per_frame: The number of language tokens per single frame.
@@ -98,7 +109,7 @@ def text_decode(proto):
     return x
 
 
-def dataset_text(path: str, params: ModelParameter, sub_batch_size: int) -> tf.data.Dataset:
+def dataset_text(path: str, params: ModelParameter, sub_batch_size: int, slice_index, slice_count) -> tf.data.Dataset:
     """
     Creates a text dataset containing shuffled and prefetched windows.
     :param path: Path to dataset (in google cloud bucket)
@@ -169,11 +180,8 @@ def dataset_text(path: str, params: ModelParameter, sub_batch_size: int) -> tf.d
                 'vid_msk': _padding_frame_mask, 'tkn_msk': _padding_token_mask
                 }
 
-    path = tf.io.gfile.glob(path)
-    random.seed(params.data_seed)
-    random.shuffle(path)
-
-    data: Dataset = tf.data.Dataset.from_tensor_slices(path)
+    data: Dataset = tf.data.Dataset.from_tensor_slices(split_files(path, slice_index, slice_count,
+                                                                   params.data_seed * params.shuffle_input_filenames))
     data = data.repeat()
 
     data = data.map(tf.data.TFRecordDataset, num_parallel_calls=tf.data.experimental.AUTOTUNE)
@@ -191,7 +199,7 @@ def dataset_text(path: str, params: ModelParameter, sub_batch_size: int) -> tf.d
     return data
 
 
-def dataset_video(path: str, params: ModelParameter, sub_batch_size: int):
+def dataset_video(path: str, params: ModelParameter, sub_batch_size: int, slice_index, slice_count):
     """
     Creates a video dataset containing shuffled and prefetched windows.
     :param path: Path to dataset (in google cloud bucket)
@@ -279,11 +287,9 @@ def dataset_video(path: str, params: ModelParameter, sub_batch_size: int):
     frame_decoder = get_video_decoder(language_token_num_per_frame=language_token_per_frame,
                                       frame_height=frame_height, frame_width=frame_width, color_channels=color_channels)
 
-    path = tf.io.gfile.glob(path)
-    random.seed(params.data_seed)
-    random.shuffle(path)
+    data: Dataset = tf.data.Dataset.from_tensor_slices(split_files(path, slice_index, slice_count,
+                                                                   params.data_seed * params.shuffle_input_filenames))
 
-    data: Dataset = tf.data.Dataset.from_tensor_slices(path)
     data = data.repeat()
     data = data.apply(tf.data.experimental.parallel_interleave(lambda x: _decode_func(x),
                                                                cycle_length=params.interleaved_datasets, block_length=1,
@@ -294,7 +300,7 @@ def dataset_video(path: str, params: ModelParameter, sub_batch_size: int):
     return data
 
 
-def dataset(params: ModelParameter, sub_batch_size):
+def dataset(params: ModelParameter, sub_batch_size, slice_index, slice_count):
     """
     Creates any dataset containing shuffled and prefetched windows.
     :param params: ModelParameter
@@ -317,9 +323,9 @@ def dataset(params: ModelParameter, sub_batch_size):
             raise ValueError(f"{dtype} is not a supported option for type for a dataset.")
 
         if dtype == 'video':
-            datasets.append(dataset_video(path, params, sub_batch_size))
+            datasets.append(dataset_video(path, params, sub_batch_size, slice_index, slice_count))
         elif dtype == 'text':
-            datasets.append(dataset_text(path, params, sub_batch_size))
+            datasets.append(dataset_text(path, params, sub_batch_size, slice_index, slice_count))
 
         weights.append(weight)
 
@@ -378,7 +384,7 @@ def _get_skip_index(all_files, n_batches):
     return skip_idx, remainder
 
 
-def gpt_neo_input(params, sub_batch_size):
+def gpt_neo_input(params, sub_batch_size, slice_index, slice_count):
     """
     Input fn that reads tfrecords encoded with a fixed chunk size (== n_ctx + 1), and that either:
 
@@ -410,21 +416,9 @@ def gpt_neo_input(params, sub_batch_size):
         raise ValueError
 
     filenames = []
-
-    # iterate through each dataset and read params
-    for set in params.dataset_configs:
-        path = set['path']
-
-        # then glob all files that fit the pattern specified in dataset_configs
-        filenames.extend(tf.io.gfile.glob(path))
-
-    filenames = sorted(filenames)
-    shuffle_filenames = params.get("shuffle_input_filenames", True)
-    if shuffle_filenames:
-        # shuffle deterministically
-        seed = params.data_seed
-        random.seed(seed)
-        random.shuffle(filenames)
+    for config in params.dataset_configs:
+        filenames.extend(split_files(config['path'], slice_index, slice_count,
+                                     params.shuffle_input_filenames * params.data_seed))
 
     # repeat filenames to infinity
     dset: Dataset = tf.data.Dataset.from_tensor_slices(filenames).repeat()

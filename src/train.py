@@ -137,7 +137,7 @@ def simd_mesh_impl_input_reader(params: ModelParameter, ds_creator):
     all_laidout_tensors = [[_NO_DATA] * len(params.input_pipeline_shape) for _ in range(num_cores)]
     for sub_batch_i, host_id in enumerate(hosts_to_hold_ds):
         with ops.device(HOST_ID_TO_TF_DEVICE.format(host_id)):
-            dset = ds_creator(params, sub_batch_size)
+            dset = ds_creator(params, sub_batch_size, sub_batch_i, len(hosts_to_hold_ds))
             ds_iterator = dset.make_initializable_iterator()
             input_initializers.append(ds_iterator.initializer)
 
