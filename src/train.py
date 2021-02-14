@@ -45,12 +45,6 @@ class CapturedObject(object):
         return self._object
 
 
-_NONE_PNUM = None
-_NO_DATA = None
-
-HOST_ID_TO_TF_DEVICE = "/job:worker/task:{:d}/device:CPU:0"
-
-
 class CheckpointLoaderHook(tf.estimator.SessionRunHook):
     """Load checkpoint right after the session started."""
 
@@ -71,6 +65,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
     # TODO(Lucas): move tf dataset to iterator/queue
     # TODO(Lucas): clean up code + optimize
 
+    host_id_to_tf_device = "/job:worker/task:{:d}/device:CPU:0"
     captured_hooks = CapturedObject()
     captured_output_dtypes_shapes = CapturedObject()
     tf.config.optimizer.set_experimental_options(params.tensorflow_optimization_settings)
@@ -416,7 +411,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
     # For each sub-batch, we need to know which host should read it.
     hosts_to_hold_ds = [num_hosts - 1]
-    if params.train != 'sample':
+    if params.train:
         hosts_to_hold_ds.clear()
         num_dss_per_host = np.zeros((num_hosts,))
         for sub_batch_pnum_map in pnum_maps[0]:
@@ -431,9 +426,9 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
     # For each sub-batch, create a SubBatchSlicer object.
     # Get the list of pnums for each input.
-    all_laidout_tensors = [[_NO_DATA] * len(params.input_pipeline_shape) for _ in range(num_cores)]
+    all_laidout_tensors = [[None] * len(params.input_pipeline_shape) for _ in range(num_cores)]
     for sub_batch_i, host_id in enumerate(hosts_to_hold_ds):
-        with ops.device(HOST_ID_TO_TF_DEVICE.format(host_id)):
+        with ops.device(host_id_to_tf_device.format(host_id)):
             dset = input_fn(params, sub_batch_size, sub_batch_i, len(hosts_to_hold_ds))
             ds_iterator = dset.make_initializable_iterator()
             input_initializers.append(ds_iterator.initializer)
@@ -464,7 +459,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     slice_dict[s_begin] = tf_tensor
                     all_laidout_tensors[pnum][idx] = tf_tensor
 
-    with ops.device(HOST_ID_TO_TF_DEVICE.format(hosts_to_hold_ds[0])):
+    with ops.device(host_id_to_tf_device.format(hosts_to_hold_ds[0])):
         laidout_tensors0 = all_laidout_tensors[0]
         infeed = tpu_feed.InfeedQueue(number_of_tuple_elements=len(laidout_tensors0),
                                       tuple_types=[x.dtype for x in laidout_tensors0],
@@ -489,7 +484,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         # Create outfeed_dequeue_ops.
         for host_id in range(params.num_hosts):
             # pylint: disable=protected-access
-            with ops.device(HOST_ID_TO_TF_DEVICE.format(host_id)):
+            with ops.device(host_id_to_tf_device.format(host_id)):
                 for device_ordinal in range(params.num_cores_per_host):
                     outfeed_dequeue_op = tpu_ops.outfeed_dequeue_tuple(
                             dtypes=output_dtypes,
