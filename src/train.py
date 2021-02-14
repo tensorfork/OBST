@@ -68,6 +68,9 @@ class CheckpointLoaderHook(tf.estimator.SessionRunHook):
 
 def computation_func(params: ModelParameter, input_fn: typing.Callable,
                      session_config, tpu_cluster_resolver, callback_fns):
+    # TODO(Lucas): move tf dataset to iterator/queue
+    # TODO(Lucas): clean up code + optimize
+
     captured_hooks = CapturedObject()
     captured_output_dtypes_shapes = CapturedObject()
     tf.config.optimizer.set_experimental_options(params.tensorflow_optimization_settings)
