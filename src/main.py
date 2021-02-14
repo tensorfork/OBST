@@ -37,7 +37,7 @@ def main(args: argparse.Namespace) -> None:
     with open(model_path) as f:
         params = json.load(f)
     params = ModelParameter(params)
-    params.run_mode = args.run_mode
+    params.train = args.run_mode
     # Read params of model
 
     params.current_step = int(estimator_lib._load_global_step_from_checkpoint_dir(params.model_path))
@@ -129,7 +129,7 @@ def main(args: argparse.Namespace) -> None:
                                  session_config,
                                  tpu_cluster_resolver,
                                  [lambda x: print(f"Current step: {x}")] * params.debug_train_step)
-        else:  # run_mode == 'sample'
+        else:  # train == 'sample'
             computation_func(params,
                              input_fn,
                              session_config,

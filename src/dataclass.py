@@ -36,7 +36,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.three_axes = True
         self.dataset_configs = []
         self.data_seed = 456772
-        self.run_mode = "train"
+        self.train = True
         self.padding_token = 0
         self.n_ctx = 32
         self.n_head = 8
@@ -54,6 +54,23 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.layout = "batch:x,heads:y,height:h"
         self.prefix = "datasets/full_hd_video"
         self.model_path = "gs://text-datasets/video-transformer/ctx=32-layer=64-heads=8-feat=256"
+        self.tensorflow_optimization_settings = {"layout_optimizer":           True,
+                                              "constant_folding":              True,
+                                              "shape_optimization":            True,
+                                              "remapping":                     True,
+                                              "arithmetic_optimization":       True,
+                                              "dependency_optimization":       True,
+                                              "loop_optimization":             True,
+                                              "function_optimization":         True,
+                                              "debug_stripper":                True,
+                                              "disable_model_pruning":         False,
+                                              "scoped_allocator_optimization": True,
+                                                 "pin_to_host_optimization":      False,
+                                                 "implementation_selector":       True,
+                                                 "auto_mixed_precision":          True,
+                                                 "disable_meta_optimizer":        False,
+                                                 "min_graph_nodes":               0
+                                                 }
         self.language_token_per_frame = 0
         self.weight_decay = 0.1
         self.train_steps = 150000

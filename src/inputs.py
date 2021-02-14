@@ -413,7 +413,7 @@ def gpt_neo_input(params, sub_batch_size, slice_index, slice_count):
 
     params = ModelParameter(params)
 
-    if params.run_mode == 'sample' and not params.current_step:
+    if not params.train and not params.current_step:
         raise ValueError
 
     filenames = []
