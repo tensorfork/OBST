@@ -37,7 +37,7 @@ def main(args: argparse.Namespace) -> None:
     with open(model_path) as f:
         params = json.load(f)
     params = ModelParameter(params)
-    params.train = args.run_mode
+    params.train = args.run_mode == 'train'
     # Read params of model
 
     params.current_step = int(estimator_lib._load_global_step_from_checkpoint_dir(params.model_path))
@@ -121,7 +121,7 @@ def main(args: argparse.Namespace) -> None:
             params.mesh_impl = mtf.simd_mesh_impl.SimdMeshImpl(mtf_mesh_shape, params.layout_rules,
                                                                None, params.d_assignment)
 
-        if args.run_mode == 'train':
+        if params.train:
             summary_writer = summary.create_file_writer(params.model_path)
             with summary_writer.as_default(), (summary.always_record_summaries()):
                 computation_func(params,
