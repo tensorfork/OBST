@@ -186,8 +186,8 @@ def build(params: ModelParameter,
           txt_src: typing.Optional[mtf.Tensor],
           txt_tgt: typing.Optional[mtf.Tensor],
           vid_msk: typing.Optional[mtf.Tensor],
-          tkn_msk: typing.Optional[mtf.Tensor],
-          ) -> typing.Tuple[mtf.Tensor, mtf.Tensor, mtf.Tensor, mtf.Tensor]:
+          txt_msk: typing.Optional[mtf.Tensor],
+          ) -> typing.Tuple[mtf.Tensor, mtf.Tensor, mtf.Tensor, mtf.Tensor, mtf.Tensor]:
     """
     Build Mesh Tensorflow graph of a model given parameters previously inserted.
     The model slices the video input itself (to save on TPU CPU <--> TPU Core bandwidth), but needs both
@@ -197,14 +197,14 @@ def build(params: ModelParameter,
     :param txt_src: Optional tokenized text source, will be embedded
     :param txt_tgt: Optional tokenized text target, required when source is given
     :param vid_msk: Optional mask to remove loss for certain video frames
-    :param tkn_msk: Optional mask to remove loss for certain token positions
+    :param txt_msk: Optional mask to remove loss for certain token positions
     :return: (Generated Video, Total Loss, Video Loss, Token Loss)
     """
     with mtf.utils.outside_all_rewrites(), tf.variable_scope(params.model_mode):
-        if tkn_msk is None:
-            tkn_msk = mtf.ones(params.mesh, [], params.variable_dtype.activation_dtype)
+        if txt_msk is None:
+            txt_msk = mtf.ones(params.mesh, [], params.variable_dtype.activation_dtype)
         else:
-            tkn_msk = mtf.cast(tkn_msk, params.variable_dtype.activation_dtype)
+            txt_msk = mtf.cast(txt_msk, params.variable_dtype.activation_dtype)
         if vid_msk is None:
             vid_msk = mtf.ones(params.mesh, [], params.variable_dtype.activation_dtype)
         else:
@@ -268,7 +268,7 @@ def build(params: ModelParameter,
                                               [txt_tgt.shape[-1], params.vocab_dim])
             cross_entropy = mtf.layers.softmax_cross_entropy_with_logits(token_out, txt_tgt, params.vocab_dim,
                                                                          params.z_loss)
-            token_loss = mtf.reduce_mean(tkn_msk * cross_entropy)
+            token_loss = mtf.reduce_mean(txt_msk * cross_entropy)
 
         # Video Loss
         if params.use_video:
@@ -278,4 +278,8 @@ def build(params: ModelParameter,
 
         params.layer_idx = 0
 
-        return video_loss, token_loss, frame_out, token_out
+        loss = video_loss + token_loss
+        video_loss = video_loss * vid_msk.size / mtf.reduce_sum(vid_msk)
+        token_loss = token_loss * txt_msk.size / mtf.reduce_sum(txt_msk)
+
+        return loss, video_loss, token_loss, frame_out, token_out

@@ -161,7 +161,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         if self.use_language and self.use_video:
             self.token_dim_shape._dims.insert(2, mtf.Dimension("height", self.language_token_patch))
             self.input_pipeline_shape['vid_msk'] = self.frame_mask_shape
-            self.input_pipeline_shape['tkn_msk'] = self.token_dim_shape
+            self.input_pipeline_shape['txt_msk'] = self.token_dim_shape
 
         self.input_pipeline_shape = align_tensor_op(self.input_pipeline_shape)
         self.attention_idx = 0
@@ -204,5 +204,5 @@ def align_tensor_op(x):
     if 'token_x' in x:
         tensors.extend([x['token_x'], x['token_y']])
     if 'vid_msk' in x:
-        tensors.extend([x['vid_msk'], x['tkn_msk']])
+        tensors.extend([x['vid_msk'], x['txt_msk']])
     return tensors

@@ -177,7 +177,7 @@ def dataset_text(path: str, params: ModelParameter, sub_batch_size: int, slice_i
                                          (sub_batch_size, time_patch_size, language_token_patch, token_patch_size))
 
         return {'frame':   _padding_frame, 'token_x': token_x, 'token_y': token_y,
-                'vid_msk': _padding_frame_mask, 'tkn_msk': _padding_token_mask
+                'vid_msk': _padding_frame_mask, 'txt_msk': _padding_token_mask
                 }
 
     data: Dataset = tf.data.Dataset.from_tensor_slices(split_files(path, slice_index, slice_count,
@@ -276,7 +276,7 @@ def dataset_video(path: str, params: ModelParameter, sub_batch_size: int, slice_
             token_mask = tf.cast(token_mask, tf.bool)
 
         return {k: v for k, v in {'frame':   out_frame, 'token_x': token_x, 'token_y': token_y,
-                                  'vid_msk': frame_mask, 'tkn_msk': token_mask
+                                  'vid_msk': frame_mask, 'txt_msk': token_mask
                                   }.items() if v is not None}
 
     if language_token_per_frame > 0:

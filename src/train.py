@@ -143,7 +143,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 frame_mask = mtf.import_laid_out_tensor(mesh, params.mesh_impl.LaidOutTensor([args[3]]),
                                                         params.frame_mask_shape, "vid_msk")
                 token_mask = mtf.import_laid_out_tensor(mesh, params.mesh_impl.LaidOutTensor([args[4]]),
-                                                        params.token_dim_shape, "tkn_msk")
+                                                        params.token_dim_shape, "txt_msk")
 
         elif params.use_language:
 
@@ -152,127 +152,127 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             token_y_input = mtf.import_laid_out_tensor(mesh, params.mesh_impl.LaidOutTensor([args[1]]),
                                                        params.token_dim_shape, "tkn_tgt")
 
-        if not params.train and params.use_autoregressive_sampling:
+        if not params.train:  # params.use_autoregressive_sampling
             sequence_dim = mtf.Dimension("sequence", params.time_patch_size)
-
-            def cond_fn(position):
-                is_done = mtf.greater_equal(position, sequence_dim.size)
-                is_done = mtf.logical_or(is_done, mtf.greater_equal(position - params.initial_autoregressive_position,
-                                                                    sequence_dim))
-                is_done = mtf.reduce_sum(is_done)
-
-                return mtf.logical_not(is_done)
-
-            def body_fn(position, frame_input, token_x_input, token_y_input, frame_mask, token_mask, *states):
-                video_loss, _, frame_out, token_out = build(params,
-                                                            frame_input,
-                                                            token_x_input,
-                                                            token_y_input,
-                                                            frame_mask,
-                                                            token_mask)
-
-                language_token_per_frame_dim = mtf.Dimension("language_token_per_frame",
-                                                             params.language_token_per_frame)
-
-                # (batch, sequence_dim, language_token_patch, token_patch_size, vocab_size) ->
-                # (batch, sequence_dim, language_token_per_frame, vocab_size)
-                token_out = mtf.reshape(token_out, new_shape=mtf.Shape([params.batch_dim,
-                                                                        sequence_dim,
-                                                                        language_token_per_frame_dim,
-                                                                        params.vocab_dim]))
-
-                # (batch, sequence_dim, language_token_per_frame, vocab_size) ->
-                # (batch, sequence_dim, language_token_per_frame)
-                token_out: mtf.Tensor = mtf.argmax(token_out, reduced_dim=params.vocab_dim)
-
-                # (language_token_per_frame_dim)
-                token_mask_out_range = mtf.range(mesh, language_token_per_frame_dim, dtype=tf.int32)
-                # (language_token_per_frame_dim) -> (batch, sequence_dim, language_token_per_frame, vocab_size)
-                token_mask_out_range = mtf.broadcast(token_mask_out_range, new_shape=token_out.shape)
-
-                # (batch, sequence_dim, language_token_per_frame) -> (batch, sequence_dim)
-                token_mask_out_argmin = mtf.argmax(mtf.negative(token_out), reduced_dim=language_token_per_frame_dim)
-
-                # (batch, sequence_dim) -> (batch, sequence_dim, language_token_per_frame, vocab_size)
-                token_mask_out_argmin = mtf.broadcast(token_mask_out_argmin, new_shape=token_out.shape)
-
-                token_mask_out = mtf.less_equal(token_mask_out_range, token_mask_out_argmin)
-
-                # (batch, sequence_dim, language_token_per_frame, vocab_size) ->
-                # (batch_dim, sequence_dim, language_token_patch, token_patch_size)
-                token_out = mtf.reshape(token_out, new_shape=params.token_dim_shape)
-                token_mask_out = mtf.reshape(token_mask_out, new_shape=params.token_dim_shape)
-
-                # (sequence_dim)
-                one_hot_sequence = mtf.one_hot(position, sequence_dim, dtype=tf.int32)
-                neg_one_hot_sequence = (1 - one_hot_sequence)
-
-                # frame_input = mtf.pad(anonymize(frame_out, sequence_dim),[1, 0], anonymize_dim(sequence_dim)).name * mtf.cast(one_hot_sequence, tf.float32) + frame_input * mtf.cast(neg_one_hot_sequence, tf.float32)
-                token_x_input = token_out * one_hot_sequence + token_x_input * neg_one_hot_sequence
-                token_mask = token_mask_out * one_hot_sequence + token_mask * neg_one_hot_sequence
-
-                position_out = position + 1
-
-                return [position_out, frame_input, token_x_input, token_y_input, frame_mask, token_mask, video_loss]
-
-            while_loop_inputs = [params.initial_autoregressive_position, frame_input,
-                                 token_x_input, token_y_input, frame_mask, token_mask]
-
-            def cond_fn(position, *states):
-                is_done = mtf.greater_equal(position, params.sequence_dim.size)
-                is_done = mtf.logical_or(is_done, mtf.greater_equal(position - params.initial_autoregressive_position,
-                                                                    params.sequence_dim.size))
-                is_done = mtf.reduce_sum(is_done)
-
-                return mtf.logical_not(is_done)
-
-            def body_fn(position, token_x, token_y, *states):
-                with tf.variable_scope('jannet'):
-                    _, _, frame_out, token_out = build(params,
-                                                       mtf.ones(params.mesh, [], tf.float32),
-                                                       token_x,
-                                                       token_y_input, mtf.ones(params.mesh, [], tf.float32),
-                                                       mtf.ones(params.mesh, [], tf.float32))
-
-                # (batch, sequence_dim, 1, vocab_size) ->
-                # (batch, sequence_dim, language_token_per_frame)
-                _token_out: mtf.Tensor = mtf.argmax(token_out, reduced_dim=params.vocab_dim)
-
-                # (sequence_dim)
-                one_hot_sequence = mtf.one_hot(position, output_dim=params.sequence_dim, dtype=tf.int32)
-                neg_one_hot_sequence = (1 - one_hot_sequence)
-
-                token_x = _token_out * one_hot_sequence + token_x * neg_one_hot_sequence
-
-                position_out = position + 1
-
-                return [position_out, token_x, token_y]
-
-            while_loop_inputs = [(mtf.zeros(params.mesh, [], tf.int32) + params.initial_autoregressive_position),
-                                 token_x_input, token_y_input]
-
-            _, token_out, _ = mtf.while_loop(cond_fn=cond_fn, body_fn=body_fn, inputs=while_loop_inputs)
-
-        else:
-            video_loss, token_loss, frame_out, token_out = build(params,
-                                                                 frame_input,
-                                                                 token_x_input,
-                                                                 token_y_input,
-                                                                 frame_mask,
-                                                                 token_mask)
-            loss = video_loss + token_loss
-            video_loss = video_loss * frame_mask.size / mtf.reduce_sum(frame_mask)
-            token_loss = token_loss * token_mask.size / mtf.reduce_sum(token_mask)
-
-        if params.train:
-            update_ops = get_optimizer(mesh, loss, params)
-        else:  # train == 'sample'
-
             if params.use_video:
-                frame_out = mtf.anonymize(frame_out)
+                def cond_fn(position):
+                    is_done = mtf.greater_equal(position, sequence_dim.size)
+                    is_done = mtf.logical_or(is_done,
+                                             mtf.greater_equal(position - params.initial_autoregressive_position,
+                                                               sequence_dim))
+                    is_done = mtf.reduce_sum(is_done)
+
+                    return mtf.logical_not(is_done)
+
+                def body_fn(position, video_loss, token_x_input, token_y_input, frame_input, frame_mask, token_mask,
+                            *states):
+                    _, video_loss, _, frame_out, token_out = build(params,
+                                                                   frame_input,
+                                                                   token_x_input,
+                                                                   token_y_input,
+                                                                   frame_mask,
+                                                                   token_mask)
+
+                    language_token_per_frame_dim = mtf.Dimension("language_token_per_frame",
+                                                                 params.language_token_per_frame)
+
+                    # (batch, sequence_dim, language_token_patch, token_patch_size, vocab_size) ->
+                    # (batch, sequence_dim, language_token_per_frame, vocab_size)
+                    token_out = mtf.reshape(token_out, new_shape=mtf.Shape([params.batch_dim,
+                                                                            sequence_dim,
+                                                                            language_token_per_frame_dim,
+                                                                            params.vocab_dim]))
+
+                    # (batch, sequence_dim, language_token_per_frame, vocab_size) ->
+                    # (batch, sequence_dim, language_token_per_frame)
+                    token_out: mtf.Tensor = mtf.argmax(token_out, reduced_dim=params.vocab_dim)
+
+                    # (language_token_per_frame_dim)
+                    token_mask_out_range = mtf.range(mesh, language_token_per_frame_dim, dtype=tf.int32)
+                    # (language_token_per_frame_dim) -> (batch, sequence_dim, language_token_per_frame, vocab_size)
+                    token_mask_out_range = mtf.broadcast(token_mask_out_range, new_shape=token_out.shape)
+
+                    # (batch, sequence_dim, language_token_per_frame) -> (batch, sequence_dim)
+                    token_mask_out_argmin = mtf.argmax(mtf.negative(token_out),
+                                                       reduced_dim=language_token_per_frame_dim)
+
+                    # (batch, sequence_dim) -> (batch, sequence_dim, language_token_per_frame, vocab_size)
+                    token_mask_out_argmin = mtf.broadcast(token_mask_out_argmin, new_shape=token_out.shape)
+
+                    token_mask_out = mtf.less_equal(token_mask_out_range, token_mask_out_argmin)
+
+                    # (batch, sequence_dim, language_token_per_frame, vocab_size) ->
+                    # (batch_dim, sequence_dim, language_token_patch, token_patch_size)
+                    token_out = mtf.reshape(token_out, new_shape=params.token_dim_shape)
+                    token_mask_out = mtf.reshape(token_mask_out, new_shape=params.token_dim_shape)
+
+                    # (sequence_dim)
+                    one_hot_sequence = mtf.one_hot(position, sequence_dim, dtype=tf.int32)
+                    neg_one_hot_sequence = (1 - one_hot_sequence)
+
+                    # frame_input = mtf.pad(anonymize(frame_out, sequence_dim),[1, 0], anonymize_dim(sequence_dim)).name * mtf.cast(one_hot_sequence, tf.float32) + frame_input * mtf.cast(neg_one_hot_sequence, tf.float32)
+                    token_x_input = token_out * one_hot_sequence + token_x_input * neg_one_hot_sequence
+                    token_mask = token_mask_out * one_hot_sequence + token_mask * neg_one_hot_sequence
+
+                    position_out = position + 1
+
+                    return position_out, video_loss, token_x_input, token_y_input, frame_input, frame_mask, token_mask
+
+                while_loop_inputs = [params.initial_autoregressive_position,
+                                     mtf.zeros(params.mesh, [], params.variable_dtype.activation_dtype),
+                                     token_x_input, token_y_input, frame_input, frame_mask, token_mask]
+            else:  # -> params.use_language
+                def cond_fn(position, *states):
+                    is_done = mtf.greater_equal(position, params.sequence_dim.size)
+                    is_done = mtf.logical_or(is_done,
+                                             mtf.greater_equal(position - params.initial_autoregressive_position,
+                                                               params.sequence_dim.size))
+                    is_done = mtf.reduce_sum(is_done)
+
+                    return mtf.logical_not(is_done)
+
+                def body_fn(position, token_x, token_y, *states):
+                    with tf.variable_scope('jannet'):
+                        _, _, token_loss, frame_out, token_out = build(params,
+                                                                       mtf.ones(params.mesh, [], tf.float32),
+                                                                       token_x,
+                                                                       token_y_input,
+                                                                       mtf.ones(params.mesh, [], tf.float32),
+                                                                       mtf.ones(params.mesh, [], tf.float32))
+
+                    # (batch, sequence_dim, 1, vocab_size) ->
+                    # (batch, sequence_dim, language_token_per_frame)
+                    _token_out: mtf.Tensor = mtf.argmax(token_out, reduced_dim=params.vocab_dim)
+
+                    # (sequence_dim)
+                    one_hot_sequence = mtf.one_hot(position, output_dim=params.sequence_dim, dtype=tf.int32)
+                    neg_one_hot_sequence = (1 - one_hot_sequence)
+
+                    token_x = _token_out * one_hot_sequence + token_x * neg_one_hot_sequence
+
+                    position_out = position + 1
+
+                    return position_out, token_loss, token_x, token_y
+
+                while_loop_inputs = [mtf.zeros(params.mesh, [], tf.int32) + params.initial_autoregressive_position,
+                                     mtf.zeros(params.mesh, [], params.variable_dtype.activation_dtype),
+                                     token_x_input, token_y_input]
+
+            loop_out = mtf.while_loop(cond_fn=cond_fn, body_fn=body_fn, inputs=while_loop_inputs)
 
             if params.use_language:
-                token_out = mtf.anonymize(token_out)
+                token_out = mtf.anonymize(loop_out[2])
+            if params.use_video:
+                frame_out = mtf.anonymize(loop_out[4])
+
+        else:
+            loss, video_loss, token_loss, frame_out, token_out = build(params,
+                                                                       frame_input,
+                                                                       token_x_input,
+                                                                       token_y_input,
+                                                                       frame_mask,
+                                                                       token_mask)
+            update_ops = get_optimizer(mesh, loss, params)
 
         total_parameters = 0
         for variable in graph.trainable_variables:

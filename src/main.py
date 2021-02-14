@@ -69,7 +69,7 @@ def main(args: argparse.Namespace) -> None:
     '''
     if args.dry:
         inp = {'token_x': tf.zeros([1]), 'token_y': tf.zeros([1]), 'frame': tf.zeros([1]), 'vid_msk': tf.zeros([1]),
-               'tkn_msk': tf.zeros([1])
+               'txt_msk': tf.zeros([1])
                }
         get_model_fn(params)(inp)
         return
