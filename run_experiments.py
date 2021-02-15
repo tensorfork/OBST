@@ -77,7 +77,7 @@ if __name__ == '__main__':
         for repetition_idx in range(args.repetition_start_idx, args.number_of_repetitions):
             tpu_name = f"tpu-{tpu_type}-euw4a-{tpu_id}" + args.tpu_name_subfix
 
-            cors = str(tpu_type).split('-')[-1]
+            cors = int(str(tpu_type).split('-')[-1])
             if cors == 8:
                 tpu_range = f"10.48.{tpu_id}.0/29"
             else:
@@ -98,7 +98,7 @@ if __name__ == '__main__':
             experiment_command = f"python3 main.py --model buffer_configs/{tpu_id}.json --tpu {tpu_name}"
             delete_command = f"pu delete {tpu_name} --yes"
             tpu_creat_command = f"gcloud compute tpus create {tpu_name} --zone europe-west4-a " \
-                                f"--range {range} --network tpu-euw4a --version 1.15.5 " \
+                                f"--range {tpu_range} --network tpu-euw4a --version 1.15.5 " \
                                 f"--accelerator-type {tpu_type_str} --project {args.project}"
 
             if str2bool(args.use_preemptible):
