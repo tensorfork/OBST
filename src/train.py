@@ -17,6 +17,7 @@ from tensorflow.python.tpu.ops import tpu_ops
 from .dataclass import ModelParameter
 from .model import build
 from .optimizers import get_optimizer
+from .utils_mtf import weighted_add
 
 
 class CapturedObject(object):
@@ -60,65 +61,45 @@ class CheckpointLoaderHook(tf.estimator.SessionRunHook):
                 saver_collection[0].restore(session, check_point)
 
 
+def masked_add(left, right, position):
+    return weighted_add(left, right, mtf.one_hot(position, s))
+
+
+def add_summary(tf_loss, value, global_step):
+    """Add all summaries."""
+
+    def _host_loss_summary(local_tf_loss, local_value, local_global_step):
+        """Add summary.scalar in host side."""
+        gs = tf.cast(local_global_step, tf.int64)
+        with tf.control_dependencies([summary.scalar(key, local_value[key], step=gs) for key in local_value.keys()]):
+            return tf.identity(local_tf_loss)
+
+    # Cast the global step to tf.int32, since
+    # outside_compilation does not support tf.int64.
+    return tpu.outside_compilation(_host_loss_summary, tf_loss, value, tf.cast(global_step, tf.int32))
+
+
 def computation_func(params: ModelParameter, input_fn: typing.Callable,
                      session_config, tpu_cluster_resolver, callback_fns):
     # TODO(Lucas): move tf dataset to iterator/queue
     # TODO(Lucas): clean up code + optimize
-
     host_id_to_tf_device = "/job:worker/task:{:d}/device:CPU:0"
-    captured_hooks = CapturedObject()
-    captured_output_dtypes_shapes = CapturedObject()
+    hooks = []
+    output_dtypes_shapes = []
     tf.config.optimizer.set_experimental_options(params.tensorflow_optimization_settings)
 
-    def model_fn(*args):
-        """
-        Create model partitioned graph given example input tensor
-        :param features: inputs and targets in dict
-        :param mode: training mode
-        :param params: serialized dict of ModelParameters instance
-        :return: tpu estimator spec
-        """
+    def _import_tensor(tensor, shape, name):
+        return mtf.import_laid_out_tensor(params.mesh, params.mesh_impl.LaidOutTensor([tensor]), shape, name)
 
-        def _add_summary(tf_loss, value, global_step):
-            """Add all summaries."""
-
-            def _host_loss_summary(tf_loss, value, global_step):
-                """Add summary.scalar in host side."""
-                gs = tf.cast(global_step, tf.int64)
-
-                sum_ops = []
-
-                for key in value.keys():
-                    sum_ops.append(summary.scalar(key, value[key], step=gs))
-                with tf.control_dependencies(sum_ops):
-                    return tf.identity(tf_loss)
-
-            # Cast the global step to tf.int32, since
-            # outside_compilation does not support tf.int64.
-            tf_loss = tpu.outside_compilation(_host_loss_summary, tf_loss, value, tf.cast(global_step, tf.int32))
-
-            return tf_loss
-
+    def _model_fn(*args):
         # Get global step
         global_step = tf.train.get_or_create_global_step()
 
         # Construct mtf graph + mesh from params
         graph = mtf.Graph()
-        mesh_shape = mtf.convert_to_shape(params.mesh_shape)
-        layout_rules = mtf.convert_to_layout_rules(params.layout)
-
-        # Mesh setup
-        replica_cache_size = 300 * 1024 * 1024  # 300M per replica.
-        worker0_mem = replica_cache_size * 8 * params.num_hosts
-        devices_memory_usage = [worker0_mem] + [0] * (params.num_hosts - 1)
-        var_placer = mtf.utils.BalancedVariablePlacer(params.cpu_devices, devices_memory_usage)
-        mesh_devices = [""] * mesh_shape.size
-        # mesh_impl = mtf.simd_mesh_impl.SimdMeshImpl(
-        #        mesh_shape, layout_rules, mesh_devices, params.context.device_assignment)
 
         # Build mtf mesh object
-        mesh = mtf.Mesh(graph, "mesh", var_placer)
-        params.mesh = mesh
+        params.mesh = mtf.Mesh(graph, "mesh", mtf.utils.BalancedVariablePlacer(params.cpu_devices))
 
         # Build mtf_features & seq length dict for getting number of microbatches
         # We need to pack inputs into a dict to pass into serialize_training_step
@@ -131,38 +112,31 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         token_mask = None
 
         if params.use_video:
-            frame_input = mtf.import_laid_out_tensor(mesh, params.mesh_impl.LaidOutTensor([args[0]]),
-                                                     params.frame_input_shape, "frame_input")
+            frame_input = _import_tensor(args[0], params.frame_input_shape, "frame_input")
 
             if params.use_language:
-                token_x_input = mtf.import_laid_out_tensor(mesh, params.mesh_impl.LaidOutTensor([args[1]]),
-                                                           params.token_dim_shape, "tkn_src")
-                token_y_input = mtf.import_laid_out_tensor(mesh, params.mesh_impl.LaidOutTensor([args[2]]),
-                                                           params.token_dim_shape, "tkn_tgt")
+                token_x_input = _import_tensor(args[1], params.token_dim_shape, "tkn_src")
+                token_y_input = _import_tensor(args[2], params.token_dim_shape, "tkn_tgt")
+                frame_mask = _import_tensor(args[3], params.frame_mask_shape, "vid_msk")
+                token_mask = _import_tensor(args[4], params.token_dim_shape, "txt_msk")
 
-                frame_mask = mtf.import_laid_out_tensor(mesh, params.mesh_impl.LaidOutTensor([args[3]]),
-                                                        params.frame_mask_shape, "vid_msk")
-                token_mask = mtf.import_laid_out_tensor(mesh, params.mesh_impl.LaidOutTensor([args[4]]),
-                                                        params.token_dim_shape, "txt_msk")
+        else:  # params.use_language
+            token_x_input = _import_tensor(args[0], params.token_dim_shape, "tkn_src")
+            token_y_input = _import_tensor(args[1], params.token_dim_shape, "tkn_tgt")
 
-        elif params.use_language:
-
-            token_x_input = mtf.import_laid_out_tensor(mesh, params.mesh_impl.LaidOutTensor([args[0]]),
-                                                       params.token_dim_shape, "tkn_src")
-            token_y_input = mtf.import_laid_out_tensor(mesh, params.mesh_impl.LaidOutTensor([args[1]]),
-                                                       params.token_dim_shape, "tkn_tgt")
-
-        if not params.train:  # params.use_autoregressive_sampling
-            sequence_dim = mtf.Dimension("sequence", params.time_patch_size)
+        if params.train:  # params.use_autoregressive_sampling
+            loss, video_loss, token_loss, frame_out, token_out = build(params,
+                                                                       frame_input,
+                                                                       token_x_input,
+                                                                       token_y_input,
+                                                                       frame_mask,
+                                                                       token_mask)
+            update_ops = get_optimizer(params.mesh, loss, params)
+        else:
             if params.use_video:
-                def cond_fn(position):
-                    is_done = mtf.greater_equal(position, sequence_dim.size)
-                    is_done = mtf.logical_or(is_done,
-                                             mtf.greater_equal(position - params.initial_autoregressive_position,
-                                                               sequence_dim))
-                    is_done = mtf.reduce_sum(is_done)
-
-                    return mtf.logical_not(is_done)
+                language_token_per_frame_dim = mtf.Dimension("language_token_per_frame",
+                                                             params.language_token_per_frame)
+                steps = params.time_patch_size
 
                 def body_fn(position, video_loss, token_x_input, token_y_input, frame_input, frame_mask, token_mask,
                             *states):
@@ -172,91 +146,59 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                                    token_y_input,
                                                                    frame_mask,
                                                                    token_mask)
+                    shape = [params.batch_dim, params.sequence_dim, language_token_per_frame_dim, params.vocab_dim]
+                    token_out: mtf.Tensor = mtf.argmax(mtf.reshape(token_out, new_shape=shape),
+                                                       reduced_dim=params.vocab_dim)
 
-                    language_token_per_frame_dim = mtf.Dimension("language_token_per_frame",
-                                                                 params.language_token_per_frame)
-
-                    # (batch, sequence_dim, language_token_patch, token_patch_size, vocab_size) ->
-                    # (batch, sequence_dim, language_token_per_frame, vocab_size)
-                    token_out = mtf.reshape(token_out, new_shape=mtf.Shape([params.batch_dim,
-                                                                            sequence_dim,
-                                                                            language_token_per_frame_dim,
-                                                                            params.vocab_dim]))
-
-                    # (batch, sequence_dim, language_token_per_frame, vocab_size) ->
-                    # (batch, sequence_dim, language_token_per_frame)
-                    token_out: mtf.Tensor = mtf.argmax(token_out, reduced_dim=params.vocab_dim)
-
-                    # (language_token_per_frame_dim)
-                    token_mask_out_range = mtf.range(mesh, language_token_per_frame_dim, dtype=tf.int32)
-                    # (language_token_per_frame_dim) -> (batch, sequence_dim, language_token_per_frame, vocab_size)
-                    token_mask_out_range = mtf.broadcast(token_mask_out_range, new_shape=token_out.shape)
-
-                    # (batch, sequence_dim, language_token_per_frame) -> (batch, sequence_dim)
-                    token_mask_out_argmin = mtf.argmax(mtf.negative(token_out),
-                                                       reduced_dim=language_token_per_frame_dim)
-
-                    # (batch, sequence_dim) -> (batch, sequence_dim, language_token_per_frame, vocab_size)
-                    token_mask_out_argmin = mtf.broadcast(token_mask_out_argmin, new_shape=token_out.shape)
-
-                    token_mask_out = mtf.less_equal(token_mask_out_range, token_mask_out_argmin)
-
-                    # (batch, sequence_dim, language_token_per_frame, vocab_size) ->
-                    # (batch_dim, sequence_dim, language_token_patch, token_patch_size)
-                    token_out = mtf.reshape(token_out, new_shape=params.token_dim_shape)
-                    token_mask_out = mtf.reshape(token_mask_out, new_shape=params.token_dim_shape)
-
-                    # (sequence_dim)
-                    one_hot_sequence = mtf.one_hot(position, sequence_dim, dtype=tf.int32)
-                    neg_one_hot_sequence = (1 - one_hot_sequence)
+                    one_hot_sequence = mtf.one_hot(position, params.sequence_dim, dtype=tf.int32)
 
                     # frame_input = mtf.pad(anonymize(frame_out, sequence_dim),[1, 0], anonymize_dim(sequence_dim)).name * mtf.cast(one_hot_sequence, tf.float32) + frame_input * mtf.cast(neg_one_hot_sequence, tf.float32)
-                    token_x_input = token_out * one_hot_sequence + token_x_input * neg_one_hot_sequence
-                    token_mask = token_mask_out * one_hot_sequence + token_mask * neg_one_hot_sequence
 
-                    position_out = position + 1
-
-                    return position_out, video_loss, token_x_input, token_y_input, frame_input, frame_mask, token_mask
+                    return (position + 1,
+                            video_loss,
+                            weighted_add(mtf.reshape(token_out, new_shape=params.token_dim_shape), token_x_input,
+                                         one_hot_sequence),
+                            token_y_input,
+                            frame_input,
+                            frame_mask,
+                            weighted_add(mtf.reshape(mtf.less_equal(
+                                    mtf.broadcast(mtf.range(params.mesh, language_token_per_frame_dim, dtype=tf.int32),
+                                                  new_shape=shape),
+                                    mtf.broadcast(mtf.argmax(-token_out, reduced_dim=language_token_per_frame_dim),
+                                                  new_shape=shape)),
+                                    new_shape=params.token_dim_shape), token_mask, one_hot_sequence))
 
                 while_loop_inputs = [params.initial_autoregressive_position,
                                      mtf.zeros(params.mesh, [], params.variable_dtype.activation_dtype),
                                      token_x_input, token_y_input, frame_input, frame_mask, token_mask]
             else:  # -> params.use_language
-                def cond_fn(position, *states):
-                    is_done = mtf.greater_equal(position, params.sequence_dim.size)
-                    is_done = mtf.logical_or(is_done,
-                                             mtf.greater_equal(position - params.initial_autoregressive_position,
-                                                               params.sequence_dim.size))
-                    is_done = mtf.reduce_sum(is_done)
-
-                    return mtf.logical_not(is_done)
+                steps = params.sequence_dim.size
 
                 def body_fn(position, token_x, token_y, *states):
-                    with tf.variable_scope('jannet'):
-                        _, _, token_loss, frame_out, token_out = build(params,
-                                                                       mtf.ones(params.mesh, [], tf.float32),
-                                                                       token_x,
-                                                                       token_y_input,
-                                                                       mtf.ones(params.mesh, [], tf.float32),
-                                                                       mtf.ones(params.mesh, [], tf.float32))
-
-                    # (batch, sequence_dim, 1, vocab_size) ->
-                    # (batch, sequence_dim, language_token_per_frame)
-                    _token_out: mtf.Tensor = mtf.argmax(token_out, reduced_dim=params.vocab_dim)
-
-                    # (sequence_dim)
-                    one_hot_sequence = mtf.one_hot(position, output_dim=params.sequence_dim, dtype=tf.int32)
-                    neg_one_hot_sequence = (1 - one_hot_sequence)
-
-                    token_x = _token_out * one_hot_sequence + token_x * neg_one_hot_sequence
-
-                    position_out = position + 1
-
-                    return position_out, token_loss, token_x, token_y
+                    _, _, token_loss, _, token_out = build(params,
+                                                           mtf.ones(params.mesh, [], tf.float32),
+                                                           token_x,
+                                                           token_y_input,
+                                                           mtf.ones(params.mesh, [], tf.float32),
+                                                           mtf.ones(params.mesh, [], tf.float32))
+                    return (position + 1,
+                            token_loss,
+                            weighted_add(mtf.argmax(token_out, reduced_dim=params.vocab_dim), token_x,
+                                         mtf.one_hot(position, output_dim=params.sequence_dim, dtype=tf.int32)),
+                            token_y)
 
                 while_loop_inputs = [mtf.zeros(params.mesh, [], tf.int32) + params.initial_autoregressive_position,
                                      mtf.zeros(params.mesh, [], params.variable_dtype.activation_dtype),
                                      token_x_input, token_y_input]
+
+            def cond_fn(position, *states):
+                is_done = mtf.greater_equal(position, steps)
+                is_done = mtf.logical_or(is_done,
+                                         mtf.greater_equal(position - params.initial_autoregressive_position,
+                                                           steps))
+                is_done = mtf.reduce_sum(is_done)
+
+                return mtf.logical_not(is_done)
 
             loop_out = mtf.while_loop(cond_fn=cond_fn, body_fn=body_fn, inputs=while_loop_inputs)
 
@@ -264,15 +206,6 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 token_out = mtf.anonymize(loop_out[2])
             if params.use_video:
                 frame_out = mtf.anonymize(loop_out[4])
-
-        else:
-            loss, video_loss, token_loss, frame_out, token_out = build(params,
-                                                                       frame_input,
-                                                                       token_x_input,
-                                                                       token_y_input,
-                                                                       frame_mask,
-                                                                       token_mask)
-            update_ops = get_optimizer(mesh, loss, params)
 
         total_parameters = 0
         for variable in graph.trainable_variables:
@@ -284,25 +217,16 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             total_parameters += variable_parameters
 
         print(f"\n\nN TRAINABLE VARS:\n{total_parameters:,}\n\n")
-        all_dim_names = []
-
-        for variable in graph.all_variables:
-            names = variable.shape.dimension_names
-            all_dim_names.append(names)
-
-        # Print all dim names in graph & write to file
-        all_dim_names = [item for sublist in all_dim_names for item in sublist]  # Flatten all dims
-        unique_dims = list(set(all_dim_names))
         print("ALL DIM NAMES:")
-        for dim_name in unique_dims:
+        for dim_name in sorted(list(set([item for variable in graph.all_variables
+                                         for item in variable.shape.dimension_names]))):
             print(dim_name)
         print('\n')
 
-        lowering = mtf.Lowering(graph, {mesh: params.mesh_impl}, autostack=True)
-
-        log_dict = {}
+        lowering = mtf.Lowering(graph, {params.mesh: params.mesh_impl}, autostack=True)
 
         if params.train:
+            log_dict = {}
             if params.use_video:
                 video_loss = lowering.export_to_tf_tensor(video_loss)
                 video_loss = tf.cast(video_loss, tf.float32)
@@ -315,8 +239,29 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
             tf_loss = lowering.export_to_tf_tensor(loss)
             tf_loss = tf.cast(tf_loss, tf.float32)
-            tf_loss = _add_summary(tf_loss=tf_loss, value=log_dict, global_step=global_step)
+            tf_loss = add_summary(tf_loss=tf_loss, value=log_dict, global_step=global_step)
+            tf_update_ops = [lowering.lowered_operation(op) for op in update_ops]
+            tf_update_ops.append(tf.assign_add(global_step, 1))  # Need to manually increment global_step
+            tf.logging.info(f"tf_update_ops: {tf_update_ops}")
 
+            with mtf.utils.outside_all_rewrites():
+
+                hooks.append(mtf.MtfRestoreHook(lowering))
+                if params.use_checkpointing:
+                    saver = tf.train.Saver(tf.global_variables(),
+                                           sharded=True,
+                                           max_to_keep=1,
+                                           keep_checkpoint_every_n_hours=2,
+                                           defer_build=False,
+                                           save_relative_paths=True)
+                    tf.add_to_collection(tf.GraphKeys.SAVERS, saver)
+
+                    hooks.append(tf.train.CheckpointSaverHook(params.model_path,
+                                                              save_steps=params.steps_per_checkpoint,
+                                                              saver=saver,
+                                                              listeners=[mtf.MtfCheckpointSaverListener(lowering)]))
+
+                return tf.group([tf_loss] + tf_update_ops)
         else:  # train == 'sample'
             predictions = {}
             if params.use_video:
@@ -329,44 +274,11 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     predictions.update({'token_tgt': args[2]})
                 else:
                     predictions.update({'token_tgt': args[1]})
-
-        if params.train:
-
-            # Creates train_op
-            tf_update_ops = [lowering.lowered_operation(op) for op in update_ops]
-            tf_update_ops.append(tf.assign_add(global_step, 1))  # Need to manually increment global_step
-            tf.logging.info(f"tf_update_ops: {tf_update_ops}")
-
-            with mtf.utils.outside_all_rewrites():
-
-                hooks = [mtf.MtfRestoreHook(lowering)]
-                if params.use_checkpointing:
-                    saver = tf.train.Saver(
-                            tf.global_variables(),
-                            sharded=True,
-                            max_to_keep=10,
-                            keep_checkpoint_every_n_hours=2,
-                            defer_build=False,
-                            save_relative_paths=True)
-                    tf.add_to_collection(tf.GraphKeys.SAVERS, saver)
-
-                    hooks.append(tf.train.CheckpointSaverHook(
-                            params.model_path,
-                            save_steps=params.steps_per_checkpoint,
-                            saver=saver,
-                            listeners=[mtf.MtfCheckpointSaverListener(lowering)]))
-
-                captured_hooks.capture(hooks)
-
-                return tf.group([tf_loss] + tf_update_ops)
-
-        else:  # train == 'sample'
-
             predictions = [tf.cast(predictions[key], tf.float32) for key in predictions.keys()]
             predictions_dtypes = [pred.dtype for pred in predictions]
             predictions_shapes = [pred.shape for pred in predictions]
-            captured_hooks.capture([mtf.MtfRestoreHook(lowering), None])
-            captured_output_dtypes_shapes.capture([predictions_dtypes, predictions_shapes])
+            hooks.append(mtf.MtfRestoreHook(lowering))
+            output_dtypes_shapes.extend([predictions_dtypes, predictions_shapes])
 
             return tpu_ops.outfeed_enqueue_tuple(predictions)
 
@@ -473,12 +385,12 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         while True:
             sess.run(enqueue)
 
-    computation = tpu.replicate(computation=model_fn,
+    computation = tpu.replicate(computation=_model_fn,
                                 inputs=[[]] * params.num_cores,
                                 infeed_queue=infeed,
                                 device_assignment=params.d_assignment)
     if not params.train:
-        output_dtypes, output_shapes = captured_output_dtypes_shapes.get()
+        output_dtypes, output_shapes = output_dtypes_shapes
         outfeed_dequeue_ops = []
 
         # Create outfeed_dequeue_ops.
@@ -497,18 +409,15 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     else:
                         outfeed_dequeue_ops.append(outfeed_dequeue_op)
 
-    slice_hook = [hook for hook in captured_hooks.get()]
     ckpt_loader_hook = CheckpointLoaderHook(params.model_path)
     if params.train:
-
-        step_counter_hook = tf.train.StepCounterHook(every_n_steps=10)
-        all_hooks = [ckpt_loader_hook, step_counter_hook] + slice_hook
-
         # if params.write_summary:
         flush_summary = summary.flush()
 
         with tf.train.MonitoredTrainingSession(master=tpu_cluster_resolver.master(),
-                                               hooks=all_hooks, config=session_config) as sess:
+                                               hooks=[ckpt_loader_hook,
+                                                      tf.train.StepCounterHook(every_n_steps=10)] + hooks,
+                                               config=session_config) as sess:
             sess.run(input_initializers)
             infeed_thread = threading.Thread(target=_thread_fn, args=(sess,))
             infeed_thread.start()
@@ -522,13 +431,10 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     fn(i)
 
     else:  # train == 'sample'
-
-        all_hooks = [ckpt_loader_hook, slice_hook[0]]
-
         with tf.train.MonitoredSession(
                 session_creator=tf.train.ChiefSessionCreator(master=tpu_cluster_resolver.master(),
                                                              config=session_config),
-                hooks=all_hooks) as sess:
+                hooks=[ckpt_loader_hook, hooks[0]]) as sess:
 
             sess.run(input_initializers)
             infeed_thread = threading.Thread(target=_thread_fn, args=(sess,))

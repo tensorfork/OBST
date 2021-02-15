@@ -8,6 +8,7 @@ import typing
 import mesh_tensorflow as mtf
 import tensorflow.compat.v1 as tf
 
+from .utils_mtf import weighted_add
 from .dataclass import ModelParameter
 
 
@@ -97,9 +98,6 @@ def get_optimizer(mesh: mtf.Mesh, loss: mtf.Tensor, params: ModelParameter
                         update_ops.append(mtf.assign_sub(var, weight_update))
     return mesh.graph.trainable_variables[0].graph.combine_assignments(update_ops)
 
-
-def weighted_add(left, right, alpha):
-    return left * alpha + right * (1 - alpha)
 
 
 def get_variable(params: ModelParameter, var, name, shape):
