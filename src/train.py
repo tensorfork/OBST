@@ -19,32 +19,6 @@ from .optimizers import get_optimizer
 from .utils_mtf import weighted_add
 
 
-class CapturedObject(object):
-    """A placeholder to capture an object.
-    This is useful when we need to capture a Python object in the Tensorflow
-    control flow body function and use it outside the control flow.
-    """
-
-    def __init__(self):
-        self._object = None
-        self._captured = False
-
-    def capture(self, o):
-        if self._captured:
-            raise RuntimeError(
-                    'InternalError: Object can capture only once. Please file bug.')
-
-        self._captured = True
-        self._object = o
-
-    def get(self):
-        if not self._captured:
-            raise RuntimeError(
-                    'InternalError: Object is not captured properly before `get`. '
-                    'Please file bug.')
-        return self._object
-
-
 class CheckpointLoaderHook(tf.estimator.SessionRunHook):
     """Load checkpoint right after the session started."""
 
@@ -52,7 +26,6 @@ class CheckpointLoaderHook(tf.estimator.SessionRunHook):
         self.checkpoint_dir = checkpoint_dir
 
     def after_create_session(self, session, coord):
-        # pylint: disable=protected-access
         saver_collection = tf.get_collection(tf.GraphKeys.SAVERS)
         if saver_collection:
             check_point = tf.train.latest_checkpoint(self.checkpoint_dir)
@@ -77,6 +50,8 @@ def add_summary(tf_loss, value, global_step):
     # outside_compilation does not support tf.int64.
     return tpu.outside_compilation(_host_loss_summary, tf_loss, value, tf.cast(global_step, tf.int32))
 
+def _import_tensor(params, tensor, shape, name):
+    return mtf.import_laid_out_tensor(params.mesh, params.mesh_impl.LaidOutTensor([tensor]), shape, name)
 
 def computation_func(params: ModelParameter, input_fn: typing.Callable,
                      session_config, cluster_resolver, callback_fns):
@@ -87,8 +62,6 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
     output_shapes = []
     tf.config.optimizer.set_experimental_options(params.tensorflow_optimization_settings)
 
-    def _import_tensor(tensor, shape, name):
-        return mtf.import_laid_out_tensor(params.mesh, params.mesh_impl.LaidOutTensor([tensor]), shape, name)
 
     def _model_fn(*args):
         # Construct mtf graph + mesh from params
@@ -108,17 +81,17 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         token_mask = None
 
         if params.use_video:
-            frame_input = _import_tensor(args[0], params.frame_input_shape, "frame_input")
+            frame_input = _import_tensor(params, args[0], params.frame_input_shape, "frame_input")
 
             if params.use_language:
-                token_x_input = _import_tensor(args[1], params.token_dim_shape, "tkn_src")
-                token_y_input = _import_tensor(args[2], params.token_dim_shape, "tkn_tgt")
-                frame_mask = _import_tensor(args[3], params.frame_mask_shape, "vid_msk")
-                token_mask = _import_tensor(args[4], params.token_dim_shape, "txt_msk")
+                token_x_input = _import_tensor(params, args[1], params.token_dim_shape, "tkn_src")
+                token_y_input = _import_tensor(params, args[2], params.token_dim_shape, "tkn_tgt")
+                frame_mask = _import_tensor(params, args[3], params.frame_mask_shape, "vid_msk")
+                token_mask = _import_tensor(params, args[4], params.token_dim_shape, "txt_msk")
 
         else:  # params.use_language
-            token_x_input = _import_tensor(args[0], params.token_dim_shape, "tkn_src")
-            token_y_input = _import_tensor(args[1], params.token_dim_shape, "tkn_tgt")
+            token_x_input = _import_tensor(params, args[0], params.token_dim_shape, "tkn_src")
+            token_y_input = _import_tensor(params, args[1], params.token_dim_shape, "tkn_tgt")
 
         if params.train:  # params.use_autoregressive_sampling
             loss, video_loss, token_loss, frame_out, token_out = build(params,
@@ -375,19 +348,14 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
         # Create outfeed_dequeue_ops.
         for host_id in range(params.num_hosts):
-            # pylint: disable=protected-access
             with ops.device(host_id_to_tf_device.format(host_id)):
                 for device_ordinal in range(params.num_cores_per_host):
-                    outfeed_dequeue_op = tpu_ops.outfeed_dequeue_tuple(
-                            dtypes=[tf.float32] * len(output_shapes),
-                            shapes=output_shapes,
-                            device_ordinal=device_ordinal)
-
+                    outfeed_dequeue_op = tpu_ops.outfeed_dequeue_tuple(dtypes=[tf.float32] * len(output_shapes),
+                                                                       shapes=output_shapes,
+                                                                       device_ordinal=device_ordinal)
                     # We don't need output other than from core 0.
-                    if outfeed_dequeue_ops:
-                        outfeed_dequeue_ops.append([tf.reduce_mean(x) for x in outfeed_dequeue_op])
-                    else:
-                        outfeed_dequeue_ops.append(outfeed_dequeue_op)
+                    outfeed_dequeue_ops.append([tf.reduce_mean(x) for x in outfeed_dequeue_op]
+                                               if outfeed_dequeue_ops else outfeed_dequeue_op)
 
     ckpt_loader_hook = CheckpointLoaderHook(params.model_path)
     if params.train:
