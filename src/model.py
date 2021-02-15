@@ -232,6 +232,10 @@ def build(params: ModelParameter,
     elif not params.use_video:
         src: mtf.Tensor = txt_src
 
+    # Add global position embedding
+    if params.use_initial_position_embedding:
+        src = src + _normal_var(params, src.shape[1:-1], params.embedding_stddev)
+
     if params.use_revnet:
         out = (src, None, src, None)
 
