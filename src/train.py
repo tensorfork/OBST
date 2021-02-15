@@ -8,10 +8,9 @@ import typing
 import mesh_tensorflow as mtf
 import numpy as np
 import tensorflow.compat.v1 as tf
-from tensorflow.compat.v1 import tpu
 from tensorflow.python.framework import ops
 from tensorflow.python.ops import summary_ops_v2 as summary
-from tensorflow.python.tpu import tpu_feed
+from tensorflow.python.tpu import tpu, tpu_feed
 from tensorflow.python.tpu.ops import tpu_ops
 
 from .dataclass import ModelParameter
@@ -80,21 +79,18 @@ def add_summary(tf_loss, value, global_step):
 
 
 def computation_func(params: ModelParameter, input_fn: typing.Callable,
-                     session_config, tpu_cluster_resolver, callback_fns):
+                     session_config, cluster_resolver, callback_fns):
     # TODO(Lucas): move tf dataset to iterator/queue
     # TODO(Lucas): clean up code + optimize
     host_id_to_tf_device = "/job:worker/task:{:d}/device:CPU:0"
     hooks = []
-    output_dtypes_shapes = []
+    output_shapes = []
     tf.config.optimizer.set_experimental_options(params.tensorflow_optimization_settings)
 
     def _import_tensor(tensor, shape, name):
         return mtf.import_laid_out_tensor(params.mesh, params.mesh_impl.LaidOutTensor([tensor]), shape, name)
 
     def _model_fn(*args):
-        # Get global step
-        global_step = tf.train.get_or_create_global_step()
-
         # Construct mtf graph + mesh from params
         graph = mtf.Graph()
 
@@ -228,24 +224,12 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         if params.train:
             log_dict = {}
             if params.use_video:
-                video_loss = lowering.export_to_tf_tensor(video_loss)
-                video_loss = tf.cast(video_loss, tf.float32)
-                log_dict.update({'video_loss': video_loss})
+                log_dict['video_loss'] = tf.cast(lowering.export_to_tf_tensor(video_loss), tf.float32)
 
             if params.use_language:
-                token_loss = lowering.export_to_tf_tensor(token_loss)
-                token_loss = tf.cast(token_loss, tf.float32)
-                log_dict.update({'token_loss': token_loss})
-
-            tf_loss = lowering.export_to_tf_tensor(loss)
-            tf_loss = tf.cast(tf_loss, tf.float32)
-            tf_loss = add_summary(tf_loss=tf_loss, value=log_dict, global_step=global_step)
-            tf_update_ops = [lowering.lowered_operation(op) for op in update_ops]
-            tf_update_ops.append(tf.assign_add(global_step, 1))  # Need to manually increment global_step
-            tf.logging.info(f"tf_update_ops: {tf_update_ops}")
+                log_dict['token_loss'] = tf.cast(lowering.export_to_tf_tensor(token_loss), tf.float32)
 
             with mtf.utils.outside_all_rewrites():
-
                 hooks.append(mtf.MtfRestoreHook(lowering))
                 if params.use_checkpointing:
                     saver = tf.train.Saver(tf.global_variables(),
@@ -255,31 +239,26 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                            defer_build=False,
                                            save_relative_paths=True)
                     tf.add_to_collection(tf.GraphKeys.SAVERS, saver)
-
                     hooks.append(tf.train.CheckpointSaverHook(params.model_path,
                                                               save_steps=params.steps_per_checkpoint,
                                                               saver=saver,
                                                               listeners=[mtf.MtfCheckpointSaverListener(lowering)]))
 
-                return tf.group([tf_loss] + tf_update_ops)
+                return tf.group([add_summary(tf_loss=tf.cast(lowering.export_to_tf_tensor(loss), tf.float32),
+                                             value=log_dict,
+                                             global_step=tf.train.get_or_create_global_step())] +
+                                [lowering.lowered_operation(op) for op in update_ops] +
+                                [tf.assign_add(tf.train.get_or_create_global_step(), 1)])
         else:  # train == 'sample'
             predictions = {}
             if params.use_video:
-                predictions.update({'frame_out': lowering.export_to_tf_tensor(frame_out)})
-                predictions.update({'frame_tgt': args[0]})
-
+                predictions['frame_out'] = lowering.export_to_tf_tensor(frame_out)
+                predictions['frame_tgt'] = args[0]
             if params.use_language:
-                predictions.update({'token_out': lowering.export_to_tf_tensor(token_out)})
-                if params.model_mode == 'jannet':
-                    predictions.update({'token_tgt': args[2]})
-                else:
-                    predictions.update({'token_tgt': args[1]})
-            predictions = [tf.cast(predictions[key], tf.float32) for key in predictions.keys()]
-            predictions_dtypes = [pred.dtype for pred in predictions]
-            predictions_shapes = [pred.shape for pred in predictions]
+                predictions['token_out'] = lowering.export_to_tf_tensor(token_out)
+                predictions['token_tgt'] = args[1 + int(params.model_mode == 'jannet')]
+            output_shapes.extend([pred.shape for pred in predictions.values()])
             hooks.append(mtf.MtfRestoreHook(lowering))
-            output_dtypes_shapes.extend([predictions_dtypes, predictions_shapes])
-
             return tpu_ops.outfeed_enqueue_tuple(predictions)
 
     input_initializers = []
@@ -385,12 +364,13 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         while True:
             sess.run(enqueue)
 
-    computation = tpu.replicate(computation=_model_fn,
-                                inputs=[[]] * params.num_cores,
-                                infeed_queue=infeed,
-                                device_assignment=params.d_assignment)
+    compilation_state, computation = tpu.split_compile_and_replicate(_model_fn,
+                                                                     [[]] * params.num_cores,
+                                                                     infeed,
+                                                                     params.d_assignment,
+                                                                     None,
+                                                                     maximum_shapes=None)
     if not params.train:
-        output_dtypes, output_shapes = output_dtypes_shapes
         outfeed_dequeue_ops = []
 
         # Create outfeed_dequeue_ops.
@@ -399,7 +379,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             with ops.device(host_id_to_tf_device.format(host_id)):
                 for device_ordinal in range(params.num_cores_per_host):
                     outfeed_dequeue_op = tpu_ops.outfeed_dequeue_tuple(
-                            dtypes=output_dtypes,
+                            dtypes=[tf.float32] * len(output_shapes),
                             shapes=output_shapes,
                             device_ordinal=device_ordinal)
 
@@ -414,7 +394,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         # if params.write_summary:
         flush_summary = summary.flush()
 
-        with tf.train.MonitoredTrainingSession(master=tpu_cluster_resolver.master(),
+        with tf.train.MonitoredTrainingSession(master=cluster_resolver.master(),
                                                hooks=[ckpt_loader_hook,
                                                       tf.train.StepCounterHook(every_n_steps=10)] + hooks,
                                                config=session_config) as sess:
@@ -431,11 +411,9 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     fn(i)
 
     else:  # train == 'sample'
-        with tf.train.MonitoredSession(
-                session_creator=tf.train.ChiefSessionCreator(master=tpu_cluster_resolver.master(),
-                                                             config=session_config),
-                hooks=[ckpt_loader_hook, hooks[0]]) as sess:
-
+        with tf.train.MonitoredSession(session_creator=tf.train.ChiefSessionCreator(master=cluster_resolver.master(),
+                                                                                    config=session_config),
+                                       hooks=[ckpt_loader_hook, hooks[0]]) as sess:
             sess.run(input_initializers)
             infeed_thread = threading.Thread(target=_thread_fn, args=(sess,))
             infeed_thread.start()
