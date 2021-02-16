@@ -12,11 +12,10 @@ from .utils_mtf import weighted_add
 from .dataclass import ModelParameter
 
 
-def get_optimizer(mesh: mtf.Mesh, loss: mtf.Tensor, params: ModelParameter
+def get_optimizer(loss: mtf.Tensor, params: ModelParameter
                   ) -> typing.Tuple[mtf.Tensor, typing.List[mtf.Assign], typing.List[mtf.Tensor]]:
     """
     Creates optimizing and update/training operations.
-    :param mesh: Mesh Tensorflow mesh
     :param loss: Final scalar loss of the model
     :param params: ModelParameter instance
     :return: scalar learning rate, update operations, gradients
@@ -34,12 +33,12 @@ def get_optimizer(mesh: mtf.Mesh, loss: mtf.Tensor, params: ModelParameter
         learning_rate = (learning_rate * (is_warmup * global_steps_float / warmup_steps_float + (1 - is_warmup)))
 
     def _import_constant(name, x):
-        return mtf.import_fully_replicated(mesh,
+        return mtf.import_fully_replicated(params.mesh,
                                            tf.constant(x, dtype, []),
                                            mtf.Shape([]),
                                            name=name)
 
-    learning_rate = mtf.import_fully_replicated(mesh, tf.cast(learning_rate, dtype), [], "learning_rate")
+    learning_rate = mtf.import_fully_replicated(params.mesh, tf.cast(learning_rate, dtype), [], "learning_rate")
     beta1 = _import_constant("beta1", 0.9)
     beta2 = _import_constant("beta2", 0.95)
     mtf.scalar_summary("learning_rate", learning_rate)
@@ -47,11 +46,11 @@ def get_optimizer(mesh: mtf.Mesh, loss: mtf.Tensor, params: ModelParameter
     if params.optimizer not in OPTIMIZERS:
         raise ValueError(f'Unknown optimizer "{params.optimizer}". Supported optimizers: {list(OPTIMIZERS.keys())}')
     optimizer = OPTIMIZERS[params.optimizer](params, learning_rate, params.weight_decay, beta1, beta2)
-    clip_value = mtf.constant(mesh, params.gradient_clip, dtype=dtype)
+    clip_value = mtf.constant(params.mesh, params.gradient_clip, dtype=dtype)
     update_ops = []
     operations = loss.graph.operations
-    xs = [x.outputs[0] for x in mesh.graph.trainable_variables]
-    tensor_to_var = dict(zip(xs, mesh.graph.trainable_variables))
+    xs = [x.outputs[0] for x in params.mesh.graph.trainable_variables]
+    tensor_to_var = dict(zip(xs, params.mesh.graph.trainable_variables))
     loss_grad = mtf.Constant(loss.mesh, 1.0, loss.shape, loss.dtype).outputs[0]
     downstream = set(xs)
     for op in operations:
@@ -96,7 +95,7 @@ def get_optimizer(mesh: mtf.Mesh, loss: mtf.Tensor, params: ModelParameter
                             weight_update += mtf.reduce_mean(var.value)
                         update_ops.extend(buffer)
                         update_ops.append(mtf.assign_sub(var, weight_update))
-    return mesh.graph.trainable_variables[0].graph.combine_assignments(update_ops)
+    return params.mesh.graph.trainable_variables[0].graph.combine_assignments(update_ops)
 
 
 

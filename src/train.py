@@ -333,7 +333,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                               tpu_ordinal_function=lambda x: ordered_ordinals[x],
                                               placement_function=lambda x: ordered_hosts[x])
 
-    def _thread_fn(sess):
+    def _thread_fn(sess: tf.Session):
         time.sleep(1)
         while True:
             sess.run(enqueue)
