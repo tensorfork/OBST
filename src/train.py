@@ -50,8 +50,10 @@ def add_summary(tf_loss, value, global_step):
     # outside_compilation does not support tf.int64.
     return tpu.outside_compilation(_host_loss_summary, tf_loss, value, tf.cast(global_step, tf.int32))
 
+
 def _import_tensor(params, tensor, shape, name):
     return mtf.import_laid_out_tensor(params.mesh, params.mesh_impl.LaidOutTensor([tensor]), shape, name)
+
 
 def computation_func(params: ModelParameter, input_fn: typing.Callable,
                      session_config, cluster_resolver, callback_fns):
@@ -61,7 +63,6 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
     hooks = []
     output_shapes = []
     tf.config.optimizer.set_experimental_options(params.tensorflow_optimization_settings)
-
 
     def _model_fn(*args):
         # Construct mtf graph + mesh from params
@@ -250,7 +251,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         ordered_ordinals[pnum] = params.mesh_impl.device_assignment.tpu_ordinal(replica=physical_pnum, logical_core=0)
         ordered_hosts[pnum] = host_device
         ordered_host_ids[pnum] = int(host_device.lower().split("/task:")[1].split("/device:")[0])
-    num_hosts = len(np.unique(ordered_host_ids))
+    num_hosts = len(set(ordered_host_ids))
     pnum_maps = []
     batch_size = params.input_pipeline_shape[0].to_integer_list[0]
     for shape in params.input_pipeline_shape:
@@ -293,8 +294,8 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
     all_laidout_tensors = [[None] * len(params.input_pipeline_shape) for _ in range(num_cores)]
     for sub_batch_i, host_id in enumerate(hosts_to_hold_ds):
         with ops.device(host_id_to_tf_device.format(host_id)):
-            dset = input_fn(params, sub_batch_size, sub_batch_i, len(hosts_to_hold_ds))
-            ds_iterator = dset.make_initializable_iterator()
+            ds_iterator = input_fn(params, sub_batch_size, sub_batch_i,
+                                   len(hosts_to_hold_ds)).make_initializable_iterator()
             input_initializers.append(ds_iterator.initializer)
 
             all_input_tensors = ds_iterator.get_next()
@@ -343,21 +344,8 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                                      params.d_assignment,
                                                                      None,
                                                                      maximum_shapes=None)
-    if not params.train:
-        outfeed_dequeue_ops = []
-
-        # Create outfeed_dequeue_ops.
-        for host_id in range(params.num_hosts):
-            with ops.device(host_id_to_tf_device.format(host_id)):
-                for device_ordinal in range(params.num_cores_per_host):
-                    outfeed_dequeue_op = tpu_ops.outfeed_dequeue_tuple(dtypes=[tf.float32] * len(output_shapes),
-                                                                       shapes=output_shapes,
-                                                                       device_ordinal=device_ordinal)
-                    # We don't need output other than from core 0.
-                    outfeed_dequeue_ops.append([tf.reduce_mean(x) for x in outfeed_dequeue_op]
-                                               if outfeed_dequeue_ops else outfeed_dequeue_op)
-
     ckpt_loader_hook = CheckpointLoaderHook(params.model_path)
+
     if params.train:
         # if params.write_summary:
         flush_summary = summary.flush()
@@ -379,10 +367,21 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     fn(i)
 
     else:  # train == 'sample'
+        outfeed_dequeue_ops = []
+        for host_id in range(params.num_hosts):
+            with ops.device(host_id_to_tf_device.format(host_id)):
+                for device_ordinal in range(params.num_cores_per_host):
+                    outfeed_dequeue_op = tpu_ops.outfeed_dequeue_tuple(dtypes=[tf.float32] * len(output_shapes),
+                                                                       shapes=output_shapes,
+                                                                       device_ordinal=device_ordinal)
+                    # We don't need output other than from core 0.
+                    outfeed_dequeue_ops.append([tf.reduce_mean(x) for x in outfeed_dequeue_op]
+                                               if outfeed_dequeue_ops else outfeed_dequeue_op)
         with tf.train.MonitoredSession(session_creator=tf.train.ChiefSessionCreator(master=cluster_resolver.master(),
                                                                                     config=session_config),
                                        hooks=[ckpt_loader_hook, hooks[0]]) as sess:
             sess.run(input_initializers)
+            # error probably here -> it didnt run init
             infeed_thread = threading.Thread(target=_thread_fn, args=(sess,))
             infeed_thread.start()
             while True:
