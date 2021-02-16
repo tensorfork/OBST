@@ -6,6 +6,7 @@ import math
 import time
 import os
 
+import numpy as np
 
 def str2bool(v: str) -> bool:
     if isinstance(v, bool):
@@ -57,22 +58,20 @@ if __name__ == '__main__':
         os.makedirs("buffer_configs/")
 
     tpu_id = args.tpu_start_id
-    run_config_key = run_config.keys()
-    run_param_pos = [0] * len(run_config_key)
-    param_pos = 0
+    run_config_key = list(run_config.keys())
 
-    run = True
+    _key = [np.arange(len(run_config[key])) for key in run_config_key]
+    key_pos = np.meshgrid(*_key, sparse=False)
+    key_pos = np.stack(key_pos, axis=-1)
+    _shape = key_pos.shape
+    key_pos = np.reshape(key_pos, newshape=(np.prod(_shape[:-1]), _shape[-1]))
 
-    while True:
+    for pos in key_pos:
 
         copy_base_config = base_config.copy()
 
         for idx, key in enumerate(run_config_key):
-            copy_base_config[key] = run_config[key][run_param_pos[idx]]
-            run_param_pos[idx] = run_param_pos[idx] + 1
-            if run_param_pos[idx] >= len(run_config[key]):
-                run_param_pos[idx] = 0
-                param_pos = param_pos + 1
+            copy_base_config[key] = run_config[key][pos[idx]]
 
         for repetition_idx in range(args.repetition_start_idx, args.number_of_repetitions):
             tpu_name = f"tpu-{tpu_type}-euw4a-{tpu_id}" + args.tpu_name_subfix
@@ -105,7 +104,7 @@ if __name__ == '__main__':
                 tpu_creat_command = tpu_creat_command + " --preemptible"
 
             if len(run_name) > 66:
-                run_name = hashlib.blake2b(run_name.encode('utf-8')).hexdigest()
+                run_name = hashlib.sha256(run_name.encode('utf-8')).hexdigest()
 
             prosses_name = f"tpu_id:{tpu_id}--{run_name}"
 
@@ -116,6 +115,3 @@ if __name__ == '__main__':
 
             print(f"Creating {prosses_name}")
             time.sleep(args.start_up_sleep)
-
-        if param_pos >= len(run_config_key):
-            break
