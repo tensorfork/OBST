@@ -18,7 +18,10 @@ def render_video(model_output: typing.List[typing.Tuple[np.ndarray, typing.List[
                  text_pos: typing.Tuple[int, int] = (10, 625),
                  text_size: float = 1.27,
                  text_thickness: int = 3,
-                 text_line_offset: int = 50):
+                 text_line_offset: int = 50,
+                 prompt_sample_color: typing.Tuple[int, int, int] = (0, 128, 255),
+                 prompt_sample_pos: typing.Tuple[int, int] = (50, 50),
+                 ):
     writer = cv2.VideoWriter(f"{save_prefix}_{count}.avi", cv2.VideoWriter_fourcc(*"MJPG"), 1,
                              (params.frame_width * upscale * len(model_output), params.frame_height * upscale))
 
@@ -37,6 +40,11 @@ def render_video(model_output: typing.List[typing.Tuple[np.ndarray, typing.List[
                 for i, _text in enumerate(chunks(text[idx], params.language_token_per_frame // line_split)):
                     cv2.putText(sub_frame, _text, (text_pos[0], text_pos[1] + text_line_offset * i),
                                 cv2.FONT_HERSHEY_SIMPLEX, text_size, text_color, text_thickness)
+
+            if params.use_autoregressive_sampling:
+                prompt_sample_text = 'prompt' if idx < params.initial_autoregressive_position else 'sample'
+                cv2.putText(sub_frame, prompt_sample_text, prompt_sample_pos, cv2.FONT_HERSHEY_SIMPLEX,
+                            text_size, prompt_sample_color, text_thickness)
 
             frame.append(sub_frame)
 
@@ -61,7 +69,7 @@ def process_token_output(token_out: np.ndarray, padding_token: int = -1, do_argm
             if padding_token in token:
                 token = token[:token.tolist().index(padding_token)]
 
-        token_out_str.append("".join([chr(tok) if tok > 31 and tok != 127 else " " for tok in token]))
+        token_out_str.append("".join([chr(tok) if tok > 31 and tok != 127 and tok != 10 else " " for tok in token]))
 
     return token_out_str
 
@@ -87,11 +95,13 @@ def gen_sample_fn(params: ModelParameter):
         render_input = []
 
         frame_out = out[0][0]
+        if params.use_autoregressive_sampling:
+            frame_out = frame_out[:-1]
 
         frame_out = process_video_output(frame_out, params)
 
         if params.use_language:
-            token_out = process_token_output(out[2][0], params.padding_token)
+            token_out = process_token_output(out[2][0], params.padding_token, not params.use_autoregressive_sampling)
 
         if not params.use_autoregressive_sampling:
             frame_inp = out[1][0]
@@ -115,7 +125,7 @@ def gen_sample_fn(params: ModelParameter):
         print('sample_idx:', state['sample_index'])
 
         if params.use_autoregressive_sampling:
-            print('Promt:')
+            print('Prompt:')
             print(process_token_output(out[1], do_argmax=False)[0][:params.initial_autoregressive_position])
             print('\noutput:')
             print(process_token_output(out[0], do_argmax=False)[0][params.initial_autoregressive_position:])
