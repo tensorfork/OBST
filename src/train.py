@@ -202,7 +202,9 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
             if params.use_language:
                 log_dict['token_loss'] = tf.cast(lowering.export_to_tf_tensor(token_loss), tf.float32)
-
+            write_summary = [add_summary(tf_loss=tf.cast(lowering.export_to_tf_tensor(loss), tf.float32),
+                                         value=log_dict,
+                                         global_step=tf.train.get_or_create_global_step())]
             with mtf.utils.outside_all_rewrites():
                 hooks.append(mtf.MtfRestoreHook(lowering))
                 if params.use_checkpointing:
@@ -218,9 +220,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                               saver=saver,
                                                               listeners=[mtf.MtfCheckpointSaverListener(lowering)]))
 
-                return tf.group([add_summary(tf_loss=tf.cast(lowering.export_to_tf_tensor(loss), tf.float32),
-                                             value=log_dict,
-                                             global_step=tf.train.get_or_create_global_step())] +
+                return tf.group(write_summary +
                                 [lowering.lowered_operation(op) for op in update_ops] +
                                 [tf.assign_add(tf.train.get_or_create_global_step(), 1)])
         else:  # train == 'sample'
