@@ -19,16 +19,20 @@
     "z_loss": 0.001,
 
     "lr": 0.0005,
-    "train_batch_size": 16,
+    "train_batch_size": 1,
     "recompute_grad": true,
     "three_axes": false,
     "use_language": true,
 
-    "mesh_shape": "x:4,y:8,z:1,h:1,w:1",
+    "mesh_shape": "x:1,y:8,z:1,h:1,w:1",
     "layout": "batch:x,heads:y,embd:z,height:h,width:w",
     "dataset_configs": [{"type":  "video", "path":  "gs://text-datasets/datasets/video_with_language_v4/*", "weight":  1}],
 
-    "model_path": "gs://text-datasets/video-transformer/label-smoothing=0dot1-ctx=256-blocks=16-heads=8-feat=2048-data-parallel",
+    "model_path": "gs://text-datasets/video-transformer/label-smoothing=0dot1-ctx=256-layer=30-heads=8-feat=2048-ffpa=2-iffm=0dot25-timepatch=1-imgpatch=16-lang-sign",
+
+    "block_config": [{"layers": ["normalize", "feed-forward"], "skip": true, "rezero": true},
+                     {"layers": ["normalize", "group-feed-forward"], "skip": true, "rezero": true},
+                     {"layers": ["normalize", "attention"], "skip": true, "rezero": true}],
 
     "local_attention_radius": 256,
     "n_vocab": 256,

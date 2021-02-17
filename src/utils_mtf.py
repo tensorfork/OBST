@@ -202,9 +202,6 @@ def activate(block_input: mtf.Tensor) -> mtf.Tensor:
     return mtf.relu(block_input)
 
 
-def weighted_add(left, right, alpha):
-    return left * alpha + right * (1 - alpha)
-
 def slice(tensor: mtf.Tensor, start: int, end: int, dim: typing.Union[mtf.Dimension, str]):
     """
     Slice across a given (potentially non-anonymous) dimension in mtf.Tensor. This first anonymizes the dimension to

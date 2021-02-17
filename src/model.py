@@ -186,8 +186,8 @@ def build(params: ModelParameter,
           txt_src: typing.Optional[mtf.Tensor],
           txt_tgt: typing.Optional[mtf.Tensor],
           vid_msk: typing.Optional[mtf.Tensor],
-          txt_msk: typing.Optional[mtf.Tensor],
-          ) -> typing.Tuple[mtf.Tensor, mtf.Tensor, mtf.Tensor, mtf.Tensor, mtf.Tensor]:
+          tkn_msk: typing.Optional[mtf.Tensor],
+          ) -> typing.Tuple[mtf.Tensor, mtf.Tensor, mtf.Tensor, mtf.Tensor]:
     """
     Build Mesh Tensorflow graph of a model given parameters previously inserted.
     The model slices the video input itself (to save on TPU CPU <--> TPU Core bandwidth), but needs both
@@ -197,90 +197,78 @@ def build(params: ModelParameter,
     :param txt_src: Optional tokenized text source, will be embedded
     :param txt_tgt: Optional tokenized text target, required when source is given
     :param vid_msk: Optional mask to remove loss for certain video frames
-    :param txt_msk: Optional mask to remove loss for certain token positions
+    :param tkn_msk: Optional mask to remove loss for certain token positions
     :return: (Generated Video, Total Loss, Video Loss, Token Loss)
     """
+    video_loss: typing.Union[int, mtf.Tensor] = 0
+    token_loss: typing.Union[int, mtf.Tensor] = 0
+    frame_out: typing.Union[int, mtf.Tensor] = 0
+    token_out: typing.Union[int, mtf.Tensor] = 0
 
-    with mtf.utils.outside_all_rewrites(), tf.variable_scope(params.model_mode):
-        if txt_msk is None:
-            txt_msk = mtf.ones(params.mesh, [], params.variable_dtype.activation_dtype)
-        else:
-            txt_msk = mtf.cast(txt_msk, params.variable_dtype.activation_dtype)
-        if vid_msk is None:
-            vid_msk = mtf.ones(params.mesh, [], params.variable_dtype.activation_dtype)
-        else:
-            vid_msk = mtf.cast(vid_msk, params.variable_dtype.activation_dtype)
-        if vid is not None:
-            vid = mtf.cast(vid, params.variable_dtype.activation_dtype)
-        video_loss: typing.Union[int, mtf.Tensor] = 0
-        token_loss: typing.Union[int, mtf.Tensor] = 0
-        frame_out: typing.Union[int, mtf.Tensor] = 0
-        token_out: typing.Union[int, mtf.Tensor] = 0
+    spatial_ctx: mtf.Dimension = txt_tgt.shape[-2] if params.use_language else vid.shape[2]
 
-        spatial_ctx: mtf.Dimension = txt_tgt.shape[-2] if params.use_language else vid.shape[2]
+    # Slice and Normalize the Video input add a zero frame memory token.
+    if params.use_video:
+        context_dimension = vid.shape[1]
+        input_features = vid.shape[-1:]
+        tgt = slice(vid, 1, context_dimension.size, context_dimension)
+        src = slice(vid, 0, context_dimension.size - 1, context_dimension)
+        src = src * vid_msk + _normal_var(params, shape=vid.shape[2:]) * (1 - vid_msk)
+        src = _linear_to_features(params, src, input_features)
 
-        # Slice and Normalize the Video input add a zero frame memory token.
-        if params.use_video:
-            context_dimension = vid.shape[1]
-            input_features = vid.shape[-1:]
-            tgt = slice(vid, 1, context_dimension.size, context_dimension)
-            src = slice(vid, 0, context_dimension.size - 1, context_dimension)
-            src = src * vid_msk + _normal_var(params, shape=vid.shape[2:]) * (1 - vid_msk)
-            src = _linear_to_features(params, src, input_features)
+    # Language embedding and initial feed forward.
+    if params.use_language:
+        txt_src = _linear_to_features(params,
+                                      mtf.one_hot(txt_src, params.vocab_dim,
+                                                  dtype=params.variable_dtype.activation_dtype),
+                                      [params.vocab_dim])
+        txt_src = _linear(params, txt_src, [txt_tgt.shape[-1], params.key_dim], [params.key_dim])
 
-        # Language embedding and initial feed forward.
-        if params.use_language:
-            txt_src = _linear_to_features(params,
-                                          mtf.one_hot(txt_src, params.vocab_dim,
-                                                      dtype=params.variable_dtype.activation_dtype),
-                                          [params.vocab_dim])
-            txt_src = _linear(params, txt_src, [txt_tgt.shape[-1], params.key_dim], [params.key_dim])
+    # Connect video and language Input.
+    if params.use_video and params.use_language:
+        src = concat([src, txt_src], spatial_ctx)
 
-        # Connect video and language Input.
-        if params.use_video and params.use_language:
-            src = concat([src, txt_src], spatial_ctx)
+    # If language only mode, set the language input as src.
+    elif not params.use_video:
+        src: mtf.Tensor = txt_src
 
-        # If language only mode, set the language input as src.
-        elif not params.use_video:
-            src: mtf.Tensor = txt_src
+    # Add global position embedding
+    if params.use_initial_position_embedding:
+        src = src + _normal_var(params, src.shape[1:-1], params.embedding_stddev)
 
-        if params.use_revnet:
-            out = (src, None, src, None)
+    if params.use_revnet:
+        out = (src, None, src, None)
 
-            def _layer_builder(block_input: typing.Tuple[mtf.Tensor], block_config: BlockConfig):
-                return mtf.layers.reversible_half_residual_and_swap(*block_input,
-                                                                    lambda x: _block_part_fn(params, block_config, x))
-        else:
-            out = src
+        def _layer_builder(block_input: typing.Tuple[mtf.Tensor], block_config: BlockConfig):
+            return mtf.layers.reversible_half_residual_and_swap(*block_input,
+                                                                lambda x: _block_part_fn(params, block_config, x))
+    else:
+        out = src
 
-            def _layer_builder(block_input: mtf.Tensor, block_config: BlockConfig):
-                return mtf.recompute_grad(lambda x: _block_part_fn(params, block_config, x), [block_input])
+        def _layer_builder(block_input: mtf.Tensor, block_config: BlockConfig):
+            return mtf.recompute_grad(lambda x: _block_part_fn(params, block_config, x), [block_input])
 
-        for _ in range(params.n_blocks):
-            for block_part in params.block_config:
-                out = _layer_builder(out, block_part)
+    for _ in range(params.n_blocks):
+        for block_part in params.block_config:
+            out = _layer_builder(out, block_part)
 
-        if params.use_revnet:
-            out = out[0] + out[2]
+    if params.use_revnet:
+        out = out[0] + out[2]
 
-        # Language Loss
-        if params.use_language:
-            token_out = _linear_from_features(params, slice(out, 0, params.language_token_patch, spatial_ctx),
-                                              [txt_tgt.shape[-1], params.vocab_dim])
-            cross_entropy = mtf.layers.softmax_cross_entropy_with_logits(token_out, txt_tgt, params.vocab_dim,
-                                                                         params.z_loss)
-            token_loss = mtf.reduce_mean(txt_msk * cross_entropy)
+    # Language Loss
+    if params.use_language:
+        token_out = _linear_from_features(params, slice(out, 0, params.language_token_patch, spatial_ctx),
+                                          [txt_tgt.shape[-1], params.vocab_dim])
+        cross_entropy = mtf.layers.softmax_cross_entropy_with_logits(token_out, txt_tgt, params.vocab_dim,
+                                                                     params.z_loss)
+        token_loss = mtf.reduce_mean(tkn_msk * cross_entropy)
 
-        # Video Loss
-        if params.use_video:
-            out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)
-            frame_out = mtf.sigmoid(_linear_from_features(params, out, input_features))
-            video_loss: mtf.Tensor = mtf.reduce_mean(mtf.abs(frame_out - tgt) * vid_msk)
+    # Video Loss
+    if params.use_video:
+        out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)
+        frame_out = mtf.sigmoid(_linear_from_features(params, out, input_features))
+        video_loss: mtf.Tensor = mtf.reduce_mean(mtf.abs(frame_out - tgt) * vid_msk)
 
-        params.layer_idx = 0
+    params.layer_idx = 0
 
-        loss = video_loss + token_loss
-        video_loss = video_loss * vid_msk.size / mtf.reduce_sum(vid_msk)
-        token_loss = token_loss * txt_msk.size / mtf.reduce_sum(txt_msk)
-
-        return loss, video_loss, token_loss, frame_out, token_out
+    return video_loss, token_loss, frame_out, token_out

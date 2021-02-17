@@ -5,7 +5,6 @@ import typing
 
 import mesh_tensorflow as mtf
 import tensorflow.compat.v1 as tf
-from tensorflow.python.tpu.device_assignment import DeviceAssignment
 
 from .utils_mtf import anonymize_dim
 
@@ -14,7 +13,7 @@ class BlockConfig:
     def __init__(self, config):
         if isinstance(config, BlockConfig):
             config = config.__dict__
-        self.layer = []
+        self.layer = [{}]
         self.skip = False
         self.__dict__.update(config)
 
@@ -36,7 +35,6 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.three_axes = True
         self.dataset_configs = []
         self.data_seed = 456772
-        self.train = True
         self.padding_token = 0
         self.n_ctx = 32
         self.n_head = 8
@@ -49,28 +47,10 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.storage_dtype = "float32"
         self.calculation_dtype = "float32"
         self.train_batch_size = 1
-        self.current_step = 0
         self.mesh_shape = "x:1,y:1,h:32"
         self.layout = "batch:x,heads:y,height:h"
         self.prefix = "datasets/full_hd_video"
         self.model_path = "gs://text-datasets/video-transformer/ctx=32-layer=64-heads=8-feat=256"
-        self.tensorflow_optimization_settings = {"layout_optimizer":              True,
-                                                 "constant_folding":              True,
-                                                 "shape_optimization":            True,
-                                                 "remapping":                     True,
-                                                 "arithmetic_optimization":       True,
-                                                 "dependency_optimization":       True,
-                                                 "loop_optimization":             True,
-                                                 "function_optimization":         True,
-                                                 "debug_stripper":                True,
-                                                 "disable_model_pruning":         False,
-                                                 "scoped_allocator_optimization": True,
-                                                 "pin_to_host_optimization":      False,
-                                                 "implementation_selector":       True,
-                                                 "auto_mixed_precision":          True,
-                                                 "disable_meta_optimizer":        False,
-                                                 "min_graph_nodes":               0
-                                                 }
         self.language_token_per_frame = 0
         self.weight_decay = 0.1
         self.train_steps = 150_000
@@ -81,10 +61,9 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.iterations = 2500
         self.initial_autoregressive_position = 128
         self.use_autoregressive_sampling = False
-        self.shuffle_input_filenames = True
         self.num_of_sample = 10
         self.z_loss = 0.1
-        self.gradient_clip = 0.01
+        self.gradient_clipping = 1.0
         self.intermediate_feed_forward_multiplier = 1
         self.group_linear_factor = 4
         self.embedding_stddev = 0.004
@@ -99,7 +78,6 @@ class ModelParameter(typing.Dict[str, typing.Any]):
                              {'layer': ["group_instance_norm", "embedded_attention", "rezero"]}]
 
         self.mesh: typing.Optional[mtf.Mesh] = None
-        self.d_assignment: typing.Optional[DeviceAssignment] = None
         self.mesh_impl: typing.Optional[mtf.simd_mesh_impl.SimdMeshImpl] = None
         self.num_cores = 0
         self.num_hosts = 0
@@ -165,7 +143,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         if self.use_language and self.use_video:
             self.token_dim_shape._dims.insert(2, mtf.Dimension("height", self.language_token_patch))
             self.input_pipeline_shape['vid_msk'] = self.frame_mask_shape
-            self.input_pipeline_shape['txt_msk'] = self.token_dim_shape
+            self.input_pipeline_shape['tkn_msk'] = self.token_dim_shape
 
         self.input_pipeline_shape = align_tensor_op(self.input_pipeline_shape)
         self.attention_idx = 0
@@ -208,5 +186,5 @@ def align_tensor_op(x):
     if 'token_x' in x:
         tensors.extend([x['token_x'], x['token_y']])
     if 'vid_msk' in x:
-        tensors.extend([x['vid_msk'], x['txt_msk']])
+        tensors.extend([x['vid_msk'], x['tkn_msk']])
     return tensors

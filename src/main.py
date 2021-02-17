@@ -37,16 +37,15 @@ def main(args: argparse.Namespace) -> None:
     with open(model_path) as f:
         params = json.load(f)
     params = ModelParameter(params)
-    params.train = args.run_mode == 'train'
     # Read params of model
 
-    params.current_step = int(estimator_lib._load_global_step_from_checkpoint_dir(params.model_path))
+    current_step = int(estimator_lib._load_global_step_from_checkpoint_dir(params.model_path))
 
     # Fetch appropriate input functions
     if params.model_mode == 'jannet':
-        input_fn = dataset
+        input_fn = partial(dataset, params=params, step=current_step, train=args.run_mode == 'train')
     elif params.model_mode == 'gpt':
-        input_fn = gpt_neo_input
+        input_fn = partial(gpt_neo_input, params=params, step=current_step, eval=False)
 
         # Set params for text only GPT mode.
         params.use_language = True
@@ -69,7 +68,7 @@ def main(args: argparse.Namespace) -> None:
     '''
     if args.dry:
         inp = {'token_x': tf.zeros([1]), 'token_y': tf.zeros([1]), 'frame': tf.zeros([1]), 'vid_msk': tf.zeros([1]),
-               'txt_msk': tf.zeros([1])
+               'tkn_msk': tf.zeros([1])
                }
         get_model_fn(params)(inp)
         return
@@ -112,8 +111,7 @@ def main(args: argparse.Namespace) -> None:
             params.num_cores = int(np.prod(topo_object.mesh_shape))
             params.num_hosts = int(topo_object.num_tasks)
             params.num_cores_per_host = int(params.num_cores // params.num_hosts)
-            if params.num_cores_per_host != int(topo_object.num_tpus_per_task):
-                raise ValueError
+            assert params.num_cores_per_host == int(topo_object.num_tpus_per_task)
 
             params.d_assignment = device_assignment(topology, num_replicas=params.num_cores,
                                                     computation_shape=[1, ] * mtf.utils.topology_rank(topology))
@@ -121,20 +119,23 @@ def main(args: argparse.Namespace) -> None:
             params.mesh_impl = mtf.simd_mesh_impl.SimdMeshImpl(mtf_mesh_shape, params.layout_rules,
                                                                None, params.d_assignment)
 
-        if params.train:
+        if args.run_mode == 'train':
             summary_writer = summary.create_file_writer(params.model_path)
             with summary_writer.as_default(), (summary.always_record_summaries()):
                 computation_func(params,
                                  input_fn,
                                  session_config,
                                  tpu_cluster_resolver,
-                                 [lambda x: print(f"Current step: {x}")] * params.debug_train_step)
-        else:  # train == 'sample'
+                                 [lambda x: print(f"Current step: {x}")] * params.debug_train_step,
+                                 run_mode=args.run_mode,
+                                 current_step=current_step)
+        else:  # run_mode == 'sample'
             computation_func(params,
                              input_fn,
                              session_config,
                              tpu_cluster_resolver,
-                             [gen_sample_fn(params)])
+                             [gen_sample_fn(params)],
+                             run_mode=args.run_mode)
     tf.logging.info('finished.')
 
     with tf.Session(target=tpu_cluster_resolver.get_master(), config=session_config) as sess:
