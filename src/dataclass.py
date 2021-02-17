@@ -53,8 +53,11 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.model_path = "gs://text-datasets/video-transformer/ctx=32-layer=64-heads=8-feat=256"
         self.language_token_per_frame = 0
         self.weight_decay = 0.1
-        self.train_steps = 150000
+        self.train_steps = 150_000
         self.warmup_steps = 3000
+        self.learning_rate_decay_multi = 1
+        self.learning_rate_decay_start_step = 100_000
+        self.learning_rate_decay_min = 5e-10
         self.iterations = 2500
         self.initial_autoregressive_position = 128
         self.use_autoregressive_sampling = False
