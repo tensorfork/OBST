@@ -76,7 +76,7 @@ def get_video_decoder(language_token_num_per_frame=0, frame_height=None, frame_w
     return tf.function(frame_decoder, experimental_compile=False)
 
 
-def _text_decoder(name: tf.Tensor, ctx: int, patch_size: int, chunk_size: int):
+def _text_decoder(decoder, name: tf.Tensor, ctx: int, patch_size: int, chunk_size: int):
     """
     Read a given tfrecord and windowed text dataset out of it.
     :param name: protobuf object to decode
@@ -84,7 +84,6 @@ def _text_decoder(name: tf.Tensor, ctx: int, patch_size: int, chunk_size: int):
     :param chunk_size: batch size directly after creating the dataset
     :return: tensorflow dataset of token
     """
-    decoder = decode_intstring if name.startswith('int64') else decode_bytestring
 
     def chunk(tfrecorddataset):
         data = decoder(tfrecorddataset)
@@ -233,7 +232,6 @@ def dataset_video(path: str, params: ModelParameter, sub_batch_size: int, slice_
         ("Time patch and language token are currently not supported together")
 
     def _decode_func(name: tf.Tensor):
-
         data = tf.data.TFRecordDataset(filenames=tf.convert_to_tensor(name), buffer_size=2 ** 26, num_parallel_reads=1)
         data = data.map(frame_decoder, num_parallel_calls=1)
 
@@ -438,7 +436,8 @@ def gpt_neo_input(params, sub_batch_size, slice_index, slice_count):
 
         return {'token_x': vals1, 'token_y': vals2}
 
-    dset = dset.interleave(lambda x: _text_decoder(x, params.n_ctx, params.token_patch_size, -1))
+    decoder = decode_intstring if 'int64' in filenames[0] else decode_bytestring
+    dset = dset.interleave(lambda x: _text_decoder(decoder, x, params.n_ctx, params.token_patch_size, -1))
 
     dset = dset.shuffle(512, seed=params.data_seed)
     dset = dset.batch(sub_batch_size)
