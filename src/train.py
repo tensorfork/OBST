@@ -177,7 +177,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
         if params.train:
             update_ops = get_optimizer(loss, params)
-        parameters = sum(np.prod([d.size for d in variable.shape.dims]) for variable in graph.trainable_variables)
+        parameters = int(sum(np.prod([d.size for d in variable.shape.dims]) for variable in graph.trainable_variables))
         print(f"\n\nParameters:{parameters:,}\n\n")
         print("Dimensions:")
         for dim_name in sorted(list(set([item for variable in graph.all_variables
