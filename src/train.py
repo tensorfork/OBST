@@ -1,7 +1,6 @@
 """
 Contains functions to create a training loop and log its outputs to tensorboard
 """
-import collections
 import threading
 import time
 import typing
@@ -17,7 +16,7 @@ from tensorflow.python.tpu.ops import tpu_ops
 from .dataclass import ModelParameter
 from .model import build
 from .optimizers import get_optimizer
-from .utils_mtf import weighted_add
+from .utils_mtf import pad, to_float, weighted_add
 
 
 class CheckpointLoaderHook(tf.estimator.SessionRunHook):
@@ -95,18 +94,18 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             token_x_input = _import_tensor(params, args[0], params.token_dim_shape, "tkn_src")
             token_y_input = _import_tensor(params, args[1], params.token_dim_shape, "tkn_tgt")
 
-        if params.train:  # params.use_autoregressive_sampling
+        if params.train or params.use_autoregressive_sampling:
             loss, video_loss, token_loss, frame_out, token_out = build(params,
                                                                        frame_input,
                                                                        token_x_input,
                                                                        token_y_input,
                                                                        frame_mask,
                                                                        token_mask)
-            update_ops = get_optimizer(params.mesh, loss, params)
         else:
             if params.use_video:
-                language_token_per_frame_dim = mtf.Dimension("language_token_per_frame",
-                                                             params.language_token_per_frame)
+                tkn_per_frame = mtf.Dimension("language_token_per_frame",
+                                              params.language_token_per_frame)
+                shape = [params.batch_dim, params.sequence_dim, tkn_per_frame, params.vocab_dim]
                 steps = params.time_patch_size
 
                 def body_fn(position, video_loss, token_x_input, token_y_input, frame_input, frame_mask, token_mask,
@@ -117,41 +116,33 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                                    token_y_input,
                                                                    frame_mask,
                                                                    token_mask)
-                    shape = [params.batch_dim, params.sequence_dim, language_token_per_frame_dim, params.vocab_dim]
-                    token_out: mtf.Tensor = mtf.argmax(mtf.reshape(token_out, new_shape=shape),
-                                                       reduced_dim=params.vocab_dim)
-                    one_hot_sequence_pad = pad(anonymize(one_hot_sequence, params.sequence_dim), [0, 1],
-                                                   anonymize_dim(params.sequence_dim).name)
-                    neg_one_hot_sequence_pad = pad(anonymize(neg_one_hot_sequence, params.sequence_dim), [0, 1],
-                                                       anonymize_dim(params.sequence_dim).name)
-                    frame_out_pad = pad(anonymize(frame_out, params.sequence_dim), [0, 1],
-                                            anonymize_dim(params.sequence_dim).name)
 
-                    one_hot_sequence = mtf.one_hot(position, params.sequence_dim, dtype=tf.int32)
+                    frame_input = weighted_add(pad(frame_out, params.sequence_dim, (0, 1)), frame_input,
+                                               mtf.one_hot(position, params.frame_input_sequence, dtype=tf.float32))
 
-                    # frame_input = mtf.pad(anonymize(frame_out, sequence_dim),[1, 0], anonymize_dim(sequence_dim)).name * mtf.cast(one_hot_sequence, tf.float32) + frame_input * mtf.cast(neg_one_hot_sequence, tf.float32)
+                    if params.use_language:
+                        one_hot_sequence = mtf.one_hot(position, params.sequence_dim, dtype=tf.float32)
+                        token_out = mtf.argmax(mtf.reshape(token_out, new_shape=shape), reduced_dim=params.vocab_dim)
+                        padding_token = to_float(mtf.equal(token_out, params.padding_token))
+                        token_x_input = weighted_add(to_float(mtf.reshape(token_out, new_shape=params.token_dim_shape)),
+                                                     to_float(token_x_input), one_hot_sequence)
+                        token_pad = mtf.less_equal(mtf.range(params.mesh, tkn_per_frame, dtype=tf.float32),
+                                                   to_float(mtf.argmax(padding_token, reduced_dim=tkn_per_frame)),
+                                                   output_shape=token_out.shape)
+                        token_mask = weighted_add(mtf.reshape(to_float(token_pad), new_shape=params.token_dim_shape),
+                                                  token_mask, one_hot_sequence)
+                        frame_pad = to_float(mtf.equal(mtf.reduce_sum(padding_token, reduced_dim=tkn_per_frame), 0))
+                        frame_mask = weighted_add(frame_pad, frame_mask, one_hot_sequence)
 
-                    return (position + 1,
-                            video_loss,
-                            weighted_add(mtf.reshape(token_out, new_shape=params.token_dim_shape), token_x_input,
-                                         one_hot_sequence),
-                            token_y_input,
-                            frame_input,
-                            frame_mask,
-                            weighted_add(mtf.reshape(mtf.less_equal(
-                                    mtf.broadcast(mtf.range(params.mesh, language_token_per_frame_dim, dtype=tf.int32),
-                                                  new_shape=shape),
-                                    mtf.broadcast(mtf.argmax(-token_out, reduced_dim=language_token_per_frame_dim),
-                                                  new_shape=shape)),
-                                    new_shape=params.token_dim_shape), token_mask, one_hot_sequence))
+                    return position + 1, video_loss, token_x_input, token_y_input, frame_input, frame_mask, token_mask
 
-                while_loop_inputs = [params.initial_autoregressive_position,
+                while_loop_inputs = [mtf.zeros(params.mesh, [], tf.int32) + params.initial_autoregressive_position,
                                      mtf.zeros(params.mesh, [], params.variable_dtype.activation_dtype),
                                      token_x_input, token_y_input, frame_input, frame_mask, token_mask]
             else:  # -> params.use_language
                 steps = params.sequence_dim.size
 
-                def body_fn(position, token_x, token_y, *states):
+                def body_fn(position, token_loss, token_x, token_y, *states):
                     _, _, token_loss, _, token_out = build(params,
                                                            mtf.ones(params.mesh, [], tf.float32),
                                                            token_x,
@@ -160,8 +151,8 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                            mtf.ones(params.mesh, [], tf.float32))
                     return (position + 1,
                             token_loss,
-                            weighted_add(mtf.argmax(token_out, reduced_dim=params.vocab_dim), token_x,
-                                         mtf.one_hot(position, output_dim=params.sequence_dim, dtype=tf.int32)),
+                            weighted_add(to_float(mtf.argmax(token_out, reduced_dim=params.vocab_dim)), token_x,
+                                         mtf.one_hot(position, output_dim=params.sequence_dim, dtype=tf.float32)),
                             token_y)
 
                 while_loop_inputs = [mtf.zeros(params.mesh, [], tf.int32) + params.initial_autoregressive_position,
@@ -184,17 +175,11 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             if params.use_video:
                 frame_out = mtf.anonymize(loop_out[4])
 
-        total_parameters = 0
-        for variable in graph.trainable_variables:
-            shape = variable.shape.dims
-            variable_parameters = 1
+        if params.train:
+            update_ops = get_optimizer(params.mesh, loss, params)
 
-            for dim in shape:
-                variable_parameters *= dim.size
-            total_parameters += variable_parameters
-
-        print(f"\n\nN TRAINABLE VARS:\n{total_parameters:,}\n\n")
-        print("ALL DIM NAMES:")
+        print(f"\n\nParameters:{sum(np.prod(variable.shape.dims) for variable in graph.trainable_variables):,}\n\n")
+        print("Dimensions:")
         for dim_name in sorted(list(set([item for variable in graph.all_variables
                                          for item in variable.shape.dimension_names]))):
             print(dim_name)

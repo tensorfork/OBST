@@ -137,8 +137,9 @@ class ModelParameter(typing.Dict[str, typing.Any]):
 
         self.vocab_dim = mtf.Dimension("vocab", self.vocab_size)
         self.batch_dim = mtf.Dimension("batch", self.train_batch_size)
+        self.frame_input_sequence = mtf.Dimension("_sequence", self.time_patch_size + 1)
 
-        frame_input_shape = [self.batch_dim, mtf.Dimension("_sequence", self.time_patch_size + 1)]
+        frame_input_shape = [self.batch_dim, self.frame_input_sequence]
 
         if self.three_axes:
             frame_input_shape = frame_input_shape + [mtf.Dimension("height", self.frame_height_patch),

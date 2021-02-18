@@ -84,28 +84,33 @@ def _text_decoder(name: tf.Tensor, ctx: int, patch_size: int, chunk_size: int):
     :param chunk_size: batch size directly after creating the dataset
     :return: tensorflow dataset of token
     """
+    decoder = decode_intstring if name.startswith('int64') else decode_bytestring
 
-    @tf.function
-    def _decode_protobuf(proto):
-        text_slice = tf.parse_single_example(proto, {'text': tf.FixedLenFeature([], tf.string)})['text']
-        data = tf.data.Dataset.from_tensor_slices(
-                tf.reshape(tf.strings.unicode_decode(text_slice, 'UTF-8'), (-1, 1)))
+    def chunk(tfrecorddataset):
+        data = decoder(tfrecorddataset)
         if chunk_size > 0:
             data = data.batch(chunk_size)
         data = data.window(size=ctx + patch_size, shift=ctx, stride=1, drop_remainder=True)
         data = data.interleave(lambda x: x.batch(ctx + patch_size, drop_remainder=True))
         return data
 
-    return tf.data.TFRecordDataset(filenames=name).interleave(_decode_protobuf)
+    return tf.data.TFRecordDataset(filenames=name).interleave(chunk)
 
 
-def text_decode(proto):
+@tf.function
+def decode_bytestring(proto):
+    text_slice = tf.parse_single_example(proto, {'text': tf.FixedLenFeature([], tf.string)})['text']
+    data = tf.data.Dataset.from_tensor_slices(tf.reshape(tf.strings.unicode_decode(text_slice, 'UTF-8'), (-1, 1)))
+    return data
+
+
+@tf.function
+def decode_intstring(proto):
     x = tf.parse_single_example(proto, {'text': tf.VarLenFeature(tf.int64)})
     x = x['text']
     x = tf.sparse.to_dense(x)
     x = tf.cast(x, tf.int32)
     x = tf.data.Dataset.from_tensor_slices(x)
-
     return x
 
 
@@ -186,7 +191,7 @@ def dataset_text(path: str, params: ModelParameter, sub_batch_size: int, slice_i
 
     data = data.map(tf.data.TFRecordDataset, num_parallel_calls=tf.data.experimental.AUTOTUNE)
 
-    data = data.interleave(lambda x: x.flat_map(text_decode))
+    data = data.interleave(lambda x: x.flat_map(decode_intstring))
     data = data.window(size=(time_patch_size + 1) * (language_token_per_frame - 1),
                        shift=time_patch_size * (language_token_per_frame - 1), stride=1, drop_remainder=True)
     data = data.interleave(lambda x: x.batch((time_patch_size + 1) * (language_token_per_frame - 1)))
