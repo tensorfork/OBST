@@ -137,6 +137,10 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
                     return position + 1, video_loss, token_x_input, token_y_input, frame_input, frame_mask, token_mask
 
+                if token_mask is not None:
+                    token_mask = to_float(token_mask)
+                if frame_mask is not None:
+                    frame_mask = to_float(frame_mask)
                 while_loop_inputs = [mtf.zeros(params.mesh, [], tf.int32) + params.initial_autoregressive_position,
                                      mtf.zeros(params.mesh, [], params.variable_dtype.activation_dtype),
                                      token_x_input, token_y_input, frame_input, frame_mask, token_mask]
