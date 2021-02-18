@@ -24,13 +24,23 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter
     dtype = params.variable_dtype.activation_dtype
     learning_rate = tf.constant(value=params.learning_rate, shape=[], dtype=tf.float32)
     global_steps_float = tf.cast(global_step, tf.float32)
-    # Cast to full precision
-    learning_rate = tf.train.cosine_decay(learning_rate, global_step, params.train_steps, alpha=0.1)
-    # Alpha is min learning_rate value as a fraction of init learning_rate.
+
+    # Warmup the learning rate.
     if params.warmup_steps > 0:
         warmup_steps_float = tf.constant(params.warmup_steps, dtype=tf.float32)
         is_warmup = tf.cast(global_steps_float < warmup_steps_float, tf.float32)
         learning_rate = (learning_rate * (is_warmup * global_steps_float / warmup_steps_float + (1 - is_warmup)))
+
+    # Decay the learning rate.
+    if params.learning_rate_decay_multi != 0 and params.learning_rate_decay_multi != 1:
+        learning_rate_decay_multi = tf.constant(params.learning_rate_decay_multi, tf.float32)
+        learning_rate_decay_start_step = tf.constant(params.learning_rate_decay_start_step, tf.float32)
+        learning_rate_decay_min = tf.constant(params.learning_rate_decay_min, tf.float32)
+
+        is_decay = tf.cast(global_steps_float > learning_rate_decay_start_step, tf.float32) * \
+                   tf.cast(learning_rate > learning_rate_decay_min, tf.float32)
+
+        learning_rate = (learning_rate * (is_decay * learning_rate_decay_multi + (1 - is_decay)))
 
     def _import_constant(name, x):
         return mtf.import_fully_replicated(params.mesh,

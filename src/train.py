@@ -1,6 +1,7 @@
 """
 Contains functions to create a training loop and log its outputs to tensorboard
 """
+import collections
 import threading
 import time
 import typing
@@ -119,6 +120,12 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     shape = [params.batch_dim, params.sequence_dim, language_token_per_frame_dim, params.vocab_dim]
                     token_out: mtf.Tensor = mtf.argmax(mtf.reshape(token_out, new_shape=shape),
                                                        reduced_dim=params.vocab_dim)
+                    one_hot_sequence_pad = pad(anonymize(one_hot_sequence, params.sequence_dim), [0, 1],
+                                                   anonymize_dim(params.sequence_dim).name)
+                    neg_one_hot_sequence_pad = pad(anonymize(neg_one_hot_sequence, params.sequence_dim), [0, 1],
+                                                       anonymize_dim(params.sequence_dim).name)
+                    frame_out_pad = pad(anonymize(frame_out, params.sequence_dim), [0, 1],
+                                            anonymize_dim(params.sequence_dim).name)
 
                     one_hot_sequence = mtf.one_hot(position, params.sequence_dim, dtype=tf.int32)
 
