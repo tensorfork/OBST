@@ -224,7 +224,8 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             if params.use_language:
                 predictions['token_out'] = lowering.export_to_tf_tensor(token_out)
                 predictions['token_tgt'] = args[1 + int(params.model_mode == 'jannet')]
-            output_shapes.extend([pred.shape for pred in predictions.values()])
+            predictions = [val if val.dtype == tf.float32 else tf.cast(val, tf.float32) for val in predictions.values()]
+            output_shapes.extend([pred.shape for pred in predictions])
             hooks.append(mtf.MtfRestoreHook(lowering))
             return tpu_ops.outfeed_enqueue_tuple(predictions)
 
