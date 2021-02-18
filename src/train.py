@@ -124,8 +124,9 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                         one_hot_sequence = mtf.one_hot(position, params.sequence_dim, dtype=tf.float32)
                         token_out = mtf.argmax(mtf.reshape(token_out, new_shape=shape), reduced_dim=params.vocab_dim)
                         padding_token = to_float(mtf.equal(token_out, params.padding_token))
-                        token_x_input = weighted_add(to_float(mtf.reshape(token_out, new_shape=params.token_dim_shape)),
-                                                     to_float(token_x_input), one_hot_sequence)
+                        token_x_input = weighted_add(mtf.reshape(token_out, new_shape=params.token_dim_shape),
+                                                     token_x_input,
+                                                     mtf.one_hot(position, params.sequence_dim, dtype=tf.int32))
                         token_pad = mtf.less_equal(mtf.range(params.mesh, tkn_per_frame, dtype=tf.float32),
                                                    to_float(mtf.argmax(padding_token, reduced_dim=tkn_per_frame)),
                                                    output_shape=token_out.shape)
@@ -151,8 +152,8 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                            mtf.ones(params.mesh, [], tf.float32))
                     return (position + 1,
                             token_loss,
-                            weighted_add(to_float(mtf.argmax(token_out, reduced_dim=params.vocab_dim)), token_x,
-                                         mtf.one_hot(position, output_dim=params.sequence_dim, dtype=tf.float32)),
+                            weighted_add(mtf.argmax(token_out, reduced_dim=params.vocab_dim), token_x,
+                                         mtf.one_hot(position, output_dim=params.sequence_dim, dtype=tf.int32)),
                             token_y)
 
                 while_loop_inputs = [mtf.zeros(params.mesh, [], tf.int32) + params.initial_autoregressive_position,
