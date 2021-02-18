@@ -146,7 +146,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     _, _, token_loss, _, token_out = build(params,
                                                            mtf.ones(params.mesh, [], tf.float32),
                                                            token_x,
-                                                           token_y_input,
+                                                           token_y,
                                                            mtf.ones(params.mesh, [], tf.float32),
                                                            mtf.ones(params.mesh, [], tf.float32))
                     return (position + 1,
