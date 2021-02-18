@@ -171,13 +171,13 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
             loop_out = mtf.while_loop(cond_fn=cond_fn, body_fn=body_fn, inputs=while_loop_inputs)
 
+        if params.train:
+            update_ops = get_optimizer(loss, params)
+        else:
             if params.use_language:
                 token_out = mtf.anonymize(loop_out[2])
             if params.use_video:
                 frame_out = mtf.anonymize(loop_out[4])
-
-        if params.train:
-            update_ops = get_optimizer(loss, params)
         parameters = int(sum(np.prod([d.size for d in variable.shape.dims]) for variable in graph.trainable_variables))
         print(f"\n\nParameters: {parameters:,}\n\n")
         print("Dimensions:")
