@@ -131,9 +131,9 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                    to_float(mtf.argmax(padding_token, reduced_dim=tkn_per_frame)),
                                                    output_shape=token_out.shape)
                         token_mask = weighted_add(mtf.reshape(to_float(token_pad), new_shape=params.token_dim_shape),
-                                                  token_mask, one_hot_sequence)
+                                                  to_float(token_mask), one_hot_sequence)
                         frame_pad = to_float(mtf.equal(mtf.reduce_sum(padding_token, reduced_dim=tkn_per_frame), 0))
-                        frame_mask = weighted_add(frame_pad, frame_mask, one_hot_sequence)
+                        frame_mask = weighted_add(frame_pad, to_float(frame_mask), one_hot_sequence)
 
                     return position + 1, video_loss, token_x_input, token_y_input, frame_input, frame_mask, token_mask
 
