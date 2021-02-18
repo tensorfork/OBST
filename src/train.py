@@ -176,7 +176,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 frame_out = mtf.anonymize(loop_out[4])
 
         if params.train:
-            update_ops = get_optimizer(params.mesh, loss, params)
+            update_ops = get_optimizer(loss, params)
 
         print(f"\n\nParameters:{sum(np.prod(variable.shape.dims) for variable in graph.trainable_variables):,}\n\n")
         print("Dimensions:")
