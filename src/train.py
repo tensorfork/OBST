@@ -167,8 +167,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             def cond_fn(position, *states):
                 is_done = mtf.greater_equal(position, steps)
                 is_done = mtf.logical_or(is_done,
-                                         mtf.greater_equal(position - params.initial_autoregressive_position,
-                                                           steps))
+                                         mtf.greater_equal(position - params.initial_autoregressive_position, steps))
                 is_done = mtf.reduce_sum(is_done)
 
                 return mtf.logical_not(is_done)
@@ -230,7 +229,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 predictions['frame_tgt'] = args[0]
             if params.use_language:
                 predictions['token_out'] = lowering.export_to_tf_tensor(token_out)
-                predictions['token_tgt'] = args[1 + int(params.model_mode == 'jannet')]
+                predictions['token_tgt'] = args[1 + int(params.use_video)]
             predictions = [val if val.dtype == tf.float32 else tf.cast(val, tf.float32) for val in predictions.values()]
             output_shapes.extend([pred.shape for pred in predictions])
             hooks.append(mtf.MtfRestoreHook(lowering))
