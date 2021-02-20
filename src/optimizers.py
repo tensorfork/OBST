@@ -95,10 +95,10 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter
                         grad = grad_list[2]
                         var: mtf.Variable = tensor_to_var[inp]
                         optim = adam if var.shape.ndims == 0 else optimizer
-                        norm = mtf.reduce_sum(mtf.square(grad)) / mtf.reduce_sum(mtf.square(var.value))
-                        clipped = weighted_add(mtf.rsqrt(norm) * params.gradient_clip * grad, grad,
-                                               mtf.cast(mtf.greater(mtf.sqrt(norm), params.gradient_clip), dtype))
-                        weight_update, buffer = optim.apply_grad(clipped, var)
+                        # norm = mtf.reduce_sum(mtf.square(grad)) / mtf.reduce_sum(mtf.square(var.value))
+                        # clipped = weighted_add(mtf.rsqrt(norm) * params.gradient_clip * grad, grad,
+                        #                        mtf.cast(mtf.greater(mtf.sqrt(norm), params.gradient_clip), dtype))
+                        weight_update, buffer = optim.apply_grad(grad, var)
                         if params.weight_decay > 0:
                             weight_update += params.weight_decay * var.value
                         if var.shape.size > 1:
