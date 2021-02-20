@@ -209,7 +209,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                          for item in variable.shape.dimension_names]))):
             print(dim_name)
         print('\n')
-        exit()
+
         lowering = mtf.Lowering(graph, {params.mesh: params.mesh_impl}, autostack=True)
 
         if params.train:
