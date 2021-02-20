@@ -42,6 +42,11 @@ def main(args: argparse.Namespace) -> None:
 
     params.current_step = int(estimator_lib._load_global_step_from_checkpoint_dir(params.model_path))
 
+    # If run mode == sample, set the batch size to one
+    if not params.train:
+        params.train_batch_size = 1
+        params = ModelParameter(params)
+
     # Fetch appropriate input functions
     if params.model_mode == 'jannet':
         input_fn = dataset
@@ -51,7 +56,6 @@ def main(args: argparse.Namespace) -> None:
         # Set params for text only GPT mode.
         params.use_language = True
         params.use_video = False
-
         params = ModelParameter(params)
 
     else:
