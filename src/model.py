@@ -5,6 +5,7 @@ TODO(Lucas): Write docstrings for all functions
 
 import typing
 
+import numpy as np
 import mesh_tensorflow as mtf
 import tensorflow.compat.v1 as tf
 
@@ -31,11 +32,11 @@ def _get_variable(params: ModelParameter, shape: typing.Union[typing.List[mtf.Di
 
 
 def _orthogonal_var(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape]) -> mtf.Tensor:
-    return _get_variable(params, shape, tf.random_normal_initializer(stddev=0.002))
+    return _get_variable(params, shape, tf.random_normal_initializer(stddev=0.02))
 
 
 def _normal_var(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
-                stddev: float = 0.002, mean: float = 0.) -> mtf.Tensor:
+                stddev: float = 0.02, mean: float = 0.) -> mtf.Tensor:
     return _get_variable(params, shape, tf.random_normal_initializer(stddev=stddev, mean=mean))
 
 
@@ -89,9 +90,15 @@ def _attention(params: ModelParameter, base: mtf.Tensor, key: mtf.Tensor):
     return out
 
 
-def _embed(params: ModelParameter, block_input: typing.Union[mtf.Tensor, mtf.Shape]) -> mtf.Tensor:
+def _embed(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape]) -> mtf.Tensor:
+    params.embedding_param_count = params.embedding_param_count + np.prod([s.size for s in shape])
+
+    return _normal_var(params, shape, params.embedding_stddev)
+
+
+def _attention_embed(params: ModelParameter, block_input: typing.Union[mtf.Tensor, mtf.Shape]) -> mtf.Tensor:
     idx, dim = _get_attention_dim(params, block_input)
-    return _normal_var(params, [dim] + params.feature_dims, params.embedding_stddev)
+    return _embed(params, [dim] + params.feature_dims)
 
 
 def _rezero(params, block_input: mtf.Tensor, init: float = 0.) -> mtf.Tensor:
@@ -119,7 +126,7 @@ def _positional_attention(params: ModelParameter, block_input: mtf.Tensor) -> mt
     dim = _get_attention_dim(params, block_input).dim
     base = activate(_linear_from_features(params, block_input))
 
-    return _attention(params, base, _embed(params, anonymize_shape(base.shape, dim)))
+    return _attention(params, base, _attention_embed(params, anonymize_shape(base.shape, dim)))
 
 
 def _embedded_attention(params: ModelParameter, block_input: mtf.Tensor) -> mtf.Tensor:
@@ -127,7 +134,8 @@ def _embedded_attention(params: ModelParameter, block_input: mtf.Tensor) -> mtf.
     base = activate(_linear_from_features(params, block_input))
 
     return _attention(params, base,
-                      anonymize(_linear_to_features(params, base) * dim.size ** -0.5 + _embed(params, base.shape), dim))
+                      anonymize(_linear_to_features(params, base) * dim.size ** -0.5 + \
+                                _attention_embed(params, base.shape), dim))
 
 
 def _base_normalization(params: ModelParameter, block_input: mtf.Tensor, normalized_shape: typing.List[mtf.Dimension],
@@ -224,7 +232,7 @@ def build(params: ModelParameter,
             input_features = vid.shape[-1:]
             tgt = slice(vid, 1, context_dimension.size, context_dimension)
             src = slice(vid, 0, context_dimension.size - 1, context_dimension)
-            src = src * vid_msk + _normal_var(params, shape=vid.shape[2:]) * (1 - vid_msk)
+            src = src * vid_msk + _embed(params, shape=vid.shape[2:]) * (1 - vid_msk)
             src = _linear_to_features(params, src, input_features)
 
         # Language embedding and initial feed forward.
@@ -244,7 +252,7 @@ def build(params: ModelParameter,
             src: mtf.Tensor = txt_src
 
         if params.use_initial_position_embedding:
-            src = src + _normal_var(params, src.shape[1:-1], params.embedding_stddev)
+            src = src + _embed(params, src.shape[1:-1], params.embedding_stddev)
 
         if params.use_revnet:
             out = (src, None, src, None)

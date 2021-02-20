@@ -193,7 +193,13 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 frame_out = mtf.anonymize(frame_out)
 
         parameters = int(sum(np.prod([d.size for d in variable.shape.dims]) for variable in graph.trainable_variables))
-        print(f"\n\nParameters: {parameters:,}\n\n")
+        total_parameters = f"Total       parameters: {parameters:,}"
+
+        print(f"\n\nModel       parameters: {(parameters - params.embedding_param_count):,}" +
+              f"\nEmbedding   parameters: {params.embedding_param_count:,}" +
+              "\n\n" + "-" * len(total_parameters) +
+              "\n" + total_parameters + "\n\n")
+
         print("Dimensions:")
         for dim_name in sorted(list(set([item for variable in graph.all_variables
                                          for item in variable.shape.dimension_names]))):
