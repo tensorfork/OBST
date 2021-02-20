@@ -20,10 +20,10 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--name", type=str, default="text",
                     help="Name of output files will be name_i.tfrecords where i is the number of the file")
 parser.add_argument("--procs", type=int, default=2, help="Number of processes in multiprocessing")
-parser.add_argument("--output_dir", type=str, default="gs://jannet/the-bpe-pile/", help="Where to put tfrecords (in a bucket)")
+parser.add_argument("--output_dir", type=str, default="gs://jannet/the-bpe-pile/",
+                    help="Where to put tfrecords (in a bucket)")
 parser.add_argument("--int64", type=bool, default=True, help="Whether to encode as bytes or int64")
-parser.add_argument("--service_account_json_path", type=str, default="a.json", help="Service account json from"
-                                                                                         " gcp")
+parser.add_argument("--service_account_json_path", type=str, default="a.json", help="Service account json from gcp")
 parser.add_argument("--buffer_size", type=int, default=2 ** 25, help="This is a minimum size, not a maximum size. "
                                                                      "tfrecords will have this minimum size as well.")
 parser.add_argument("--separator", nargs="+", type=int, default=50256,
