@@ -88,6 +88,7 @@ if __name__ == '__main__':
             run_name = f"-run={repetition_idx}"
             run_name = "-".join([f"{key}={copy_base_config[key]}" for key in run_config_key]) + run_name
             run_name = run_name.replace(' ', '_').replace("'", '').replace(":", '=').replace(",", '-')
+            run_name = run_name.replace('<', '+').replace('>', '+').replace('[', '|').replace(']', '|')
 
             copy_base_config['model_path'] = args.run_name_prefix + run_name
 

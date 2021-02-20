@@ -3,6 +3,7 @@ import typing
 import cv2
 import numpy as np
 import scipy.ndimage
+from transformers import GPT2TokenizerFast
 
 from src.dataclass import ModelParameter
 from src.utils_core import chunks
@@ -54,7 +55,9 @@ def render_video(model_output: typing.List[typing.Tuple[np.ndarray, typing.List[
     writer.release()
 
 
-def process_token_output(token_out: np.ndarray, padding_token: int = -1, do_argmax: bool = True) -> typing.List[str]:
+def process_token_output(token_out: np.ndarray, padding_token: int = -1, do_argmax: bool = True,
+                         bpe_tokenizer: GPT2TokenizerFast = None) -> typing.List[str]:
+
     _shape = token_out.shape
     if do_argmax:
         token_out = np.reshape(token_out, newshape=(_shape[0], _shape[1] * _shape[2], _shape[3]))
@@ -69,7 +72,10 @@ def process_token_output(token_out: np.ndarray, padding_token: int = -1, do_argm
             if padding_token in token:
                 token = token[:token.tolist().index(padding_token)]
 
-        token_out_str.append("".join([chr(tok) if tok > 31 and tok != 127 and tok != 10 else " " for tok in token]))
+        if bpe_tokenizer is None:
+            token_out_str.append("".join([chr(tok) if tok > 31 and tok != 127 and tok != 10 else " " for tok in token]))
+        else:
+            token_out_str.append(bpe_tokenizer.decode([int(tok) for tok in token]))
 
     return token_out_str
 
@@ -124,16 +130,21 @@ def gen_sample_fn(params: ModelParameter):
     def _text_fn(out):
         print('sample_idx:', state['sample_index'])
 
+        bpe_tokenizer = GPT2TokenizerFast.from_pretrained('gpt2') if params.vocab_size != 256 and\
+                                                                     params.vocab_size > 256 else None
+
         if params.use_autoregressive_sampling:
             print('Prompt:')
-            print(process_token_output(out[1], do_argmax=False)[0][:params.initial_autoregressive_position])
+            print(process_token_output(out[1], do_argmax=False,
+                                       bpe_tokenizer=bpe_tokenizer)[0][:params.initial_autoregressive_position])
             print('\noutput:')
-            print(process_token_output(out[0], do_argmax=False)[0][params.initial_autoregressive_position:])
+            print(process_token_output(out[0], do_argmax=False,
+                                       bpe_tokenizer=bpe_tokenizer)[0][params.initial_autoregressive_position:])
         else:
             print('target:')
-            print(process_token_output(out[1], do_argmax=False)[0])
+            print(process_token_output(out[1], do_argmax=False, bpe_tokenizer=bpe_tokenizer)[0])
             print('\nsample:')
-            print(process_token_output(out[0], do_argmax=True)[0])
+            print(process_token_output(out[0], do_argmax=True, bpe_tokenizer=bpe_tokenizer)[0])
 
         state['sample_index'] += 1
         if state['sample_index'] >= params.num_of_sample:
