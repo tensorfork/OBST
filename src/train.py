@@ -281,7 +281,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         num_dss_per_host = np.zeros((num_hosts,))
         for sub_batch_pnum_map in pnum_maps[0]:
             host_id = np.argmax(np.sum(np.equal(ordered_host_ids.take(sub_batch_pnum_map.flatten(), 0).reshape(1, -1),
-                                                np.arange(num_hosts).reshape(-1, 1)), 1) - num_dss_per_host)
+                                                np.arange(num_hosts).reshape(-1, 1)), 1) + num_dss_per_host)
             num_dss_per_host[host_id] -= 0.1 / num_hosts
             hosts_to_hold_ds.append(host_id)
     sub_batch_size = batch_size // len(hosts_to_hold_ds)
