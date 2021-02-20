@@ -252,7 +252,7 @@ def build(params: ModelParameter,
             src: mtf.Tensor = txt_src
 
         if params.use_initial_position_embedding:
-            src = src + _embed(params, src.shape[1:-1], params.embedding_stddev)
+            src = src + _embed(params, src.shape[1:-1])
 
         if params.use_revnet:
             out = (src, None, src, None)
