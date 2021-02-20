@@ -124,14 +124,18 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                         one_hot_sequence = mtf.one_hot(position, params.sequence_dim, dtype=tf.float32)
                         token_out = mtf.argmax(mtf.reshape(token_out, new_shape=shape), reduced_dim=params.vocab_dim)
                         padding_token = to_float(mtf.equal(token_out, params.padding_token))
+
                         token_x_input = weighted_add(mtf.reshape(token_out, new_shape=params.token_dim_shape),
                                                      token_x_input,
                                                      mtf.one_hot(position, params.sequence_dim, dtype=tf.int32))
+
                         token_pad = mtf.less_equal(mtf.range(params.mesh, tkn_per_frame, dtype=tf.float32),
                                                    to_float(mtf.argmax(padding_token, reduced_dim=tkn_per_frame)),
                                                    output_shape=token_out.shape)
+
                         token_mask = weighted_add(mtf.reshape(to_float(token_pad), new_shape=params.token_dim_shape),
                                                   to_float(token_mask), one_hot_sequence)
+
                         frame_pad = to_float(mtf.equal(mtf.reduce_sum(padding_token, reduced_dim=tkn_per_frame), 0))
                         frame_mask = weighted_add(frame_pad, to_float(frame_mask), one_hot_sequence)
 
@@ -141,6 +145,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     token_mask = to_float(token_mask)
                 if frame_mask is not None:
                     frame_mask = to_float(frame_mask)
+
                 while_loop_inputs = [mtf.zeros(params.mesh, [], tf.int32) + params.initial_autoregressive_position,
                                      mtf.zeros(params.mesh, [], params.variable_dtype.activation_dtype),
                                      token_x_input, token_y_input, frame_input, frame_mask, token_mask]
@@ -173,10 +178,12 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 return mtf.logical_not(is_done)
 
             loop_out = mtf.while_loop(cond_fn=cond_fn, body_fn=body_fn, inputs=while_loop_inputs)
+
             if params.use_language:
                 token_out = loop_out[2]
             if params.use_video:
                 frame_out = loop_out[4]
+
         if params.train:
             update_ops = get_optimizer(loss, params)
         else:
@@ -184,6 +191,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 token_out = mtf.anonymize(token_out)
             if params.use_video:
                 frame_out = mtf.anonymize(frame_out)
+
         parameters = int(sum(np.prod([d.size for d in variable.shape.dims]) for variable in graph.trainable_variables))
         print(f"\n\nParameters: {parameters:,}\n\n")
         print("Dimensions:")
@@ -251,9 +259,11 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         ordered_ordinals[pnum] = params.mesh_impl.device_assignment.tpu_ordinal(replica=physical_pnum, logical_core=0)
         ordered_hosts[pnum] = host_device
         ordered_host_ids[pnum] = int(host_device.lower().split("/task:")[1].split("/device:")[0])
+
     num_hosts = len(set(ordered_host_ids))
     pnum_maps = []
     batch_size = params.input_pipeline_shape[0].to_integer_list[0]
+
     for shape in params.input_pipeline_shape:
         # Make sure that the batch size is the same across all input tensors.
         if batch_size != shape.to_integer_list[0]:
@@ -279,11 +289,13 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
     if params.train:
         hosts_to_hold_ds.clear()
         num_dss_per_host = np.zeros((num_hosts,))
+
         for sub_batch_pnum_map in pnum_maps[0]:
             host_id = np.argmax(np.sum(np.equal(ordered_host_ids.take(sub_batch_pnum_map.flatten(), 0).reshape(1, -1),
                                                 np.arange(num_hosts).reshape(-1, 1)), 1) + num_dss_per_host)
             num_dss_per_host[host_id] -= 0.1 / num_hosts
             hosts_to_hold_ds.append(host_id)
+
     sub_batch_size = batch_size // len(hosts_to_hold_ds)
 
     if sub_batch_size * len(hosts_to_hold_ds) != batch_size:

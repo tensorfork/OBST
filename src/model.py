@@ -31,11 +31,11 @@ def _get_variable(params: ModelParameter, shape: typing.Union[typing.List[mtf.Di
 
 
 def _orthogonal_var(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape]) -> mtf.Tensor:
-    return _get_variable(params, shape, tf.random_normal_initializer(stddev=0.02))
+    return _get_variable(params, shape, tf.random_normal_initializer(stddev=0.002))
 
 
 def _normal_var(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
-                stddev: float = 0.02, mean: float = 0.) -> mtf.Tensor:
+                stddev: float = 0.002, mean: float = 0.) -> mtf.Tensor:
     return _get_variable(params, shape, tf.random_normal_initializer(stddev=stddev, mean=mean))
 
 
