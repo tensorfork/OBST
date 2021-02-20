@@ -193,19 +193,23 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 frame_out = mtf.anonymize(frame_out)
 
         parameters = int(sum(np.prod([d.size for d in variable.shape.dims]) for variable in graph.trainable_variables))
-        total_parameters = f"Total       parameters: {parameters:,}"
+        all_parameters = int(sum(np.prod([d.size for d in variable.shape.dims]) for variable in graph.all_variables))
 
-        print(f"\n\nModel       parameters: {(parameters - params.embedding_param_count):,}" +
-              f"\nEmbedding   parameters: {params.embedding_param_count:,}" +
-              "\n\n" + "-" * len(total_parameters) +
-              "\n" + total_parameters + "\n\n")
+        total_untrainable_parameters = f"Total              variables: {all_parameters:,}"
+
+        print(f"\n\nModel              variables: {(parameters - params.embedding_param_count):,}" +
+              f"\nEmbedding          variables: {params.embedding_param_count:,}" +
+              f"\nUntrainable        variables: {(all_parameters - parameters):,}" +
+              "\n\n" + "-" * len(total_untrainable_parameters) +
+              f"\nTotal trainable    variables: {parameters:,}" +
+              "\n" + total_untrainable_parameters + "\n\n")
 
         print("Dimensions:")
         for dim_name in sorted(list(set([item for variable in graph.all_variables
                                          for item in variable.shape.dimension_names]))):
             print(dim_name)
         print('\n')
-
+        exit()
         lowering = mtf.Lowering(graph, {params.mesh: params.mesh_impl}, autostack=True)
 
         if params.train:
