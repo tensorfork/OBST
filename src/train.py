@@ -228,7 +228,9 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 log_dict['token_loss'] = tf.cast(lowering.export_to_tf_tensor(token_loss), tf.float32)
             write_summary = [add_summary(tf_loss=tf.cast(lowering.export_to_tf_tensor(loss), tf.float32),
                                          value=log_dict,
-                                         global_step=tf.train.get_or_create_global_step())]
+                                         global_step=tf.train.get_or_create_global_step()),
+                             tf.assign_add(tf.train.get_or_create_global_step(), 1)
+                             ] + [lowering.lowered_operation(op) for op in update_ops]
             with mtf.utils.outside_all_rewrites():
                 hooks.append(mtf.MtfRestoreHook(lowering))
                 if params.use_checkpointing:
@@ -244,9 +246,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                               saver=saver,
                                                               listeners=[mtf.MtfCheckpointSaverListener(lowering)]))
 
-                return tf.group(write_summary +
-                                [lowering.lowered_operation(op) for op in update_ops] +
-                                [tf.assign_add(tf.train.get_or_create_global_step(), 1)])
+                return tf.group(write_summary)
         else:  # train == 'sample'
             predictions = {}
             if params.use_video:
