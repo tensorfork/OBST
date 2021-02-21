@@ -192,17 +192,24 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             if params.use_video:
                 frame_out = mtf.anonymize(frame_out)
 
-        parameters = int(sum(np.prod([d.size for d in variable.shape.dims]) for variable in graph.trainable_variables))
-        all_parameters = int(sum(np.prod([d.size for d in variable.shape.dims]) for variable in graph.all_variables))
+        param_count = int(sum(np.prod([d.size for d in variable.shape.dims]) for variable in graph.trainable_variables))
+        var_count = int(sum(np.prod([d.size for d in variable.shape.dims]) for variable in graph.all_variables))
 
-        total_untrainable_parameters = f"Total              variables: {all_parameters:,}"
-
-        print(f"\n\nModel              variables: {(parameters - params.embedding_param_count):,}" +
-              f"\nEmbedding          variables: {params.embedding_param_count:,}" +
-              f"\nUntrainable        variables: {(all_parameters - parameters):,}" +
-              "\n\n" + "-" * len(total_untrainable_parameters) +
-              f"\nTotal trainable    variables: {parameters:,}" +
-              "\n" + total_untrainable_parameters + "\n\n")
+        constant = '  variables: '
+        variable_mapping = [('Model', param_count - params.embedding_param_count),
+                            ('Embedding', params.embedding_param_count),
+                            ('Untrainable', var_count - param_count),
+                            ('', 0),
+                            ('Total trainable', param_count),
+                            ('Total', var_count)]
+        variable_mapping = [(name, str(count)) for name, count in variable_mapping]
+        max_str = max(len(name) for name, _ in variable_mapping)
+        max_int = max(len(count) for _, count in variable_mapping)
+        for name, count in variable_mapping:
+            if not name:
+                print('-' * (max_str + max_int + len(constant)))
+                continue
+            print(f'{name:{max_str}<s}{constant}{count:{max_int}>s}')
 
         print("Dimensions:")
         for dim_name in sorted(list(set([item for variable in graph.all_variables
