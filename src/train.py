@@ -329,20 +329,18 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             input_initializers.append(ds_iterator.initializer)
 
             all_input_tensors = ds_iterator.get_next()
-            all_sub_batch_pnums = [pnum_map.flatten().tolist() if not params.train else
-                                   pnum_map[sub_batch_i, ...].flatten().tolist()
-                                   for pnum_map in pnum_maps]
             if len(all_input_tensors) != len(params.input_pipeline_shape):
                 raise ValueError
 
-            for idx, input_tensor in enumerate(all_input_tensors):
-                sub_batch_pnums = all_sub_batch_pnums[idx]
+            for idx, (pnum_map, input_tensor) in enumerate(zip(pnum_maps, all_input_tensors)):
+                if params.train:
+                    pnum_map = pnum_map[sub_batch_i, ...]
                 mtf_input_shape = params.input_pipeline_shape[idx]
 
                 # Initialize the cache for each
                 slice_dict = {}
 
-                for pnum in sub_batch_pnums:
+                for pnum in pnum_map.flatten().tolist():
                     s_begin = params.mesh_impl.slice_begin(mtf_input_shape, pnum)
                     s_begin[0] = s_begin[0] % sub_batch_size * (not params.train)
                     s_begin = tuple(s_begin)
