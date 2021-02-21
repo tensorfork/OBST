@@ -192,6 +192,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             if params.use_video:
                 frame_out = mtf.anonymize(frame_out)
 
+        print('\n')
         param_count = int(sum(np.prod([d.size for d in variable.shape.dims]) for variable in graph.trainable_variables))
         var_count = int(sum(np.prod([d.size for d in variable.shape.dims]) for variable in graph.all_variables))
 
@@ -209,9 +210,9 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             if not name:
                 print('-' * (max_str + max_int + len(constant)))
                 continue
-            print(f'{name:{max_str}<s}{constant}{count:{max_int}>s}')
+            print(f'{name:<{max_str}s}{constant}{count:>{max_int}s}')
 
-        print("Dimensions:")
+        print("\nDimensions:")
         for dim_name in sorted(list(set([item for variable in graph.all_variables
                                          for item in variable.shape.dimension_names]))):
             print(dim_name)
