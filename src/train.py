@@ -347,7 +347,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     s_begin[0] = s_begin[0] % sub_batch_size * (not params.train)
                     s_begin = tuple(s_begin)
                     if s_begin in slice_dict:
-                        all_laidout_tensors[pnum][idx] = tf_tensor
+                        all_laidout_tensors[pnum][idx] = slice_dict[s_begin]
                         continue
                     tf_tensor = tf.slice(input_tensor, s_begin, params.mesh_impl.slice_shape(mtf_input_shape))
 
