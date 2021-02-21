@@ -203,7 +203,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                             ('', 0),
                             ('Total trainable', param_count),
                             ('Total', var_count)]
-        variable_mapping = [(name, str(count)) for name, count in variable_mapping]
+        variable_mapping = [(name, f'{int(count):,}') for name, count in variable_mapping]
         max_str = max(len(name) for name, _ in variable_mapping)
         max_int = max(len(count) for _, count in variable_mapping)
         for name, count in variable_mapping:
