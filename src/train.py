@@ -326,8 +326,6 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         with ops.device(host_id_to_tf_device.format(host_id)):
             ds_iterator = input_fn(params, sub_batch_size, sub_batch_i,
                                    len(hosts_to_hold_ds)).make_initializable_iterator()
-            input_initializers.append(ds_iterator.initializer)
-
             all_input_tensors = ds_iterator.get_next()
             if len(all_input_tensors) != len(params.input_pipeline_shape):
                 raise ValueError
@@ -351,6 +349,8 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
                     slice_dict[s_begin] = tf_tensor
                     all_laidout_tensors[pnum][idx] = tf_tensor
+        input_initializers.append(ds_iterator.initializer)
+
 
     with ops.device(host_id_to_tf_device.format(hosts_to_hold_ds[0])):
         laidout_tensors0 = all_laidout_tensors[0]
