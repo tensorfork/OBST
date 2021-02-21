@@ -342,7 +342,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
                 for pnum in pnum_map.flatten().tolist():
                     s_begin = params.mesh_impl.slice_begin(mtf_input_shape, pnum)
-                    s_begin[0] = s_begin[0] % sub_batch_size * (not params.train)
+                    s_begin[0] = s_begin[0] % sub_batch_size * params.train
                     s_begin = tuple(s_begin)
                     if s_begin in slice_dict:
                         all_laidout_tensors[pnum][idx] = slice_dict[s_begin]
