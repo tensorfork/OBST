@@ -322,10 +322,12 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
     # For each sub-batch, create a SubBatchSlicer object.
     # Get the list of pnums for each input.
     all_laidout_tensors = [[None] * len(params.input_pipeline_shape) for _ in range(num_cores)]
+    dataset_iterators = []
     for sub_batch_i, host_id in enumerate(hosts_to_hold_ds):
         with ops.device(host_id_to_tf_device.format(host_id)):
             ds_iterator = input_fn(params, sub_batch_size, sub_batch_i,
                                    len(hosts_to_hold_ds)).make_initializable_iterator()
+            dataset_iterators.append(ds_iterator)
             all_input_tensors = ds_iterator.get_next()
             if len(all_input_tensors) != len(params.input_pipeline_shape):
                 raise ValueError
@@ -349,8 +351,6 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
                     slice_dict[s_begin] = tf_tensor
                     all_laidout_tensors[pnum][idx] = tf_tensor
-        input_initializers.append(ds_iterator.initializer)
-
 
     with ops.device(host_id_to_tf_device.format(hosts_to_hold_ds[0])):
         laidout_tensors0 = all_laidout_tensors[0]
@@ -360,6 +360,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         enqueue = infeed.generate_enqueue_ops(all_laidout_tensors,
                                               tpu_ordinal_function=lambda x: ordered_ordinals[x],
                                               placement_function=lambda x: ordered_hosts[x])
+    input_initializers = [ds.initializer for ds in dataset_iterators]
 
     def _thread_fn(sess: tf.Session):
         time.sleep(1)
