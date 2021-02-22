@@ -3,7 +3,7 @@ import subprocess
 import argparse
 import datetime
 import warnings
-import ntpath
+import typing
 import random
 import glob
 import json
@@ -41,6 +41,7 @@ def diveision_zero(x, y):
     except ZeroDivisionError:
         return 0
 
+
 def str2bool(v):
     if isinstance(v, bool):
        return v
@@ -71,7 +72,11 @@ def downloader(url: str, filename: str, max_try: int=3):
     return False
 
 
-def frame_encoder(frame, text_tokens=None, skip_frame: list = [False], mask: list = None):
+def frame_encoder(frame,
+                  text_tokens: typing.List[int] = None,
+                  skip_frame: typing.List[bool] = [False],
+                  mask: typing.List[int] = None,
+                  concat: typing.List[bool] = False):
     '''
     :param frame: A byte String containing a jpg encoded image.
     :param text_tokens: A list containing int ped tokens.
@@ -84,7 +89,8 @@ def frame_encoder(frame, text_tokens=None, skip_frame: list = [False], mask: lis
 
     # Encoding Key.
     feature = {
-        'frame': _bytes_feature(frame)
+        'frame': _bytes_feature(frame),
+        'concat': _int64_feature(concat)
     }
 
     if text_tokens is not None:
@@ -183,7 +189,7 @@ def decode_vtt(content: str):
     else:
 
         # Split the content at line brake.
-        content = [l for l in content.split('\n')]
+        content = content.split('\n')
 
         # Create output lists.
         words_buffer = []
@@ -237,7 +243,6 @@ def decode_vtt(content: str):
             words += wor
 
         return ''.join(words), words, stamps
-
 
 
 def bpe_with_word_split(enc: GPT2Tokenizer, words: list, text: str):
@@ -320,6 +325,7 @@ def worker(work: list,
            tokenizer=None,
            language_tokens_per_frame: int = 4,
            padding_token: int = 50257,
+           concat_token: int = 50256,
            skip_if_no_subtitles: bool = True,
            service_account_json_path: str = '',
            bucket_name: str = '',
@@ -379,259 +385,293 @@ def worker(work: list,
 
         print('worker:', worker_id, 'work idx:', wor_idx)
 
-        # Assume by default the download was successful.
-        download_success = True
+        _tfrecord_name = "|".join(wor)
+        _save_name = os.path.join(buffer_save_dir, _tfrecord_name + '.tfrecord')
 
-        # Assume by default the subtitles are available.
-        subtitles_available = True
+        contains_video_already = False
 
-        video_buffer_path = ""
-        video_urls = ""
-        vtt_url = ""
+        # Create TF Record Writer
+        with tf.io.TFRecordWriter(_save_name) as tf_writer:
 
-        # Check if video needs to be downloaded.
-        if download:
+            for _wor in wor:
+                # Assume by default the download was successful.
+                download_success = True
 
-            # Execute all in try except to so the script is not crashing from a single fails video.
-            try:
+                # Assume by default the subtitles are available.
+                subtitles_available = True
 
-                print(youtube_base + wor)
+                video_buffer_path = ""
+                video_urls = ""
+                vtt_url = ""
 
-                # We have to lock this part because it can lead to errors if multiple thread try to
-                # scrap video Information at the same time.
-                with lock:
-                    # Get video info.
-                    info = youtube_getter.extract_info(youtube_base + wor, download=False)
+                # Check if video needs to be downloaded.
+                if download:
 
-                # Go and find all video links that is as small as possible
-                # and is still larger that the target resolution.
-                if 'formats' in info:
-                    current_res = (9999999, 9999999)
+                    # Execute all in try except to so the script is not crashing from a single fails video.
+                    try:
 
-                    for f in info['formats']:
+                        print(youtube_base + _wor)
 
-                        if 'format_note' in f:
-                            if f['format_note'] != "tiny":
-                                if 'width' in f and 'height' in f:
-                                    width = f['width']
-                                    height = f['height']
+                        # We have to lock this part because it can lead to errors if multiple thread try to
+                        # scrap video Information at the same time.
+                        with lock:
+                            # Get video info.
+                            info = youtube_getter.extract_info(youtube_base + _wor, download=False)
 
-                                    if width is not None and height is not None:
-                                        if width > target_resolution[0] and height > target_resolution[1]:
-                                            if current_res[0] > width and current_res[1] > height:
-                                                video_urls = []
-                                                current_res = (width, height)
+                        # Go and find all video links that is as small as possible
+                        # and is still larger that the target resolution.
+                        if 'formats' in info:
+                            current_res = (9999999, 9999999)
 
-                                            if current_res[0] == width and current_res[1] == height:
-                                                if 'ext' in f and 'url' in f:
-                                                    video_urls.append(
-                                                        {'width': width, 'height': height,
-                                                         'ext': f['ext'], 'url': f['url']})
+                            for f in info['formats']:
 
-                # Go and find the english vtt subtitle link.
-                if 'automatic_captions' in info:
-                    automatic_captions = info['automatic_captions']
-                    if 'en' in automatic_captions:
-                        en_automatic_captions = automatic_captions['en']
+                                if 'format_note' in f:
+                                    if f['format_note'] != "tiny":
+                                        if 'width' in f and 'height' in f:
+                                            width = f['width']
+                                            height = f['height']
 
-                        for en in en_automatic_captions:
-                            if 'ext' in en:
-                                if en['ext'] == 'vtt':
-                                    if 'url' in en:
-                                        vtt_url = en['url']
+                                            if width is not None and height is not None:
+                                                if width > target_resolution[0] and height > target_resolution[1]:
+                                                    if current_res[0] > width and current_res[1] > height:
+                                                        video_urls = []
+                                                        current_res = (width, height)
 
-                                    break
+                                                    if current_res[0] == width and current_res[1] == height:
+                                                        if 'ext' in f and 'url' in f:
+                                                            video_urls.append(
+                                                                {'width': width, 'height': height,
+                                                                 'ext': f['ext'], 'url': f['url']})
 
-            except:
-                download_success = False
-                warnings.warn("worker: " + str(worker_id) + " failed to get info: " + wor)
+                        # Go and find the english vtt subtitle link.
+                        if 'automatic_captions' in info:
+                            automatic_captions = info['automatic_captions']
+                            if 'en' in automatic_captions:
+                                en_automatic_captions = automatic_captions['en']
 
-            # Do some checking to ensure that the information get extracted successfully.
-            if video_urls is None:
-                download_success = False
+                                for en in en_automatic_captions:
+                                    if 'ext' in en:
+                                        if en['ext'] == 'vtt':
+                                            if 'url' in en:
+                                                vtt_url = en['url']
 
-            if not download_success and len(video_urls) == 0:
-                download_success = False
+                                            break
 
-            # Download the video and subtitle.
-            if download_success:
+                    except:
+                        download_success = False
+                        warnings.warn("worker: " + str(worker_id) + " failed to get info: " + _wor)
 
-                # Put .webm at the bottom at the list.
-                for idx in range(len(video_urls)):
-                    if video_urls[idx]['ext'] == 'webm':
-                        video_urls[-1], video_urls[idx] = video_urls[idx], video_urls[-1]
+                    # Do some checking to ensure that the information get extracted successfully.
+                    if video_urls is None:
+                        download_success = False
 
-                for video_url in video_urls:
-                    url = video_url['url']
-                    ext = video_url['ext']
+                    if not download_success and len(video_urls) == 0:
+                        download_success = False
 
-                    if url is not None and ext is not None:
-                        if url != "" and ext != "":
-                            video_buffer_path = os.path.join(download_buffer_dir, wor) + '.' + ext
-                            download_success = downloader(url, video_buffer_path)
+                    # Download the video and subtitle.
+                    if download_success:
 
-                            if download_success:
+                        # Put .webm at the bottom at the list.
+                        for idx in range(len(video_urls)):
+                            if video_urls[idx]['ext'] == 'webm':
+                                video_urls[-1], video_urls[idx] = video_urls[idx], video_urls[-1]
 
-                                # If no mp4 god downloaded yous ffmpag to converted it to mp4.
-                                if ext != 'mp4':
-                                    new_video_buffer_path = os.path.join(download_buffer_dir, wor) + '.mp4'
+                        for video_url_idx, video_url in enumerate(video_urls):
+                            url = video_url['url']
+                            ext = video_url['ext']
 
-                                    subprocess.run(['ffmpeg', '-i', video_buffer_path, '-c',
-                                                    'copy', new_video_buffer_path, '-y'],
-                                                   capture_output=False, stdout=subprocess.DEVNULL,
-                                                   stderr=subprocess.STDOUT)
+                            print(video_url_idx, ext)
 
-                                    if os.path.exists(video_buffer_path):
-                                        os.remove(video_buffer_path)
+                            if url is not None and ext is not None:
+                                if url != "" and ext != "":
+                                    video_buffer_path = os.path.join(download_buffer_dir, _wor) + '.' + ext
+                                    download_success = downloader(url, video_buffer_path)
 
-                                    video_buffer_path = new_video_buffer_path
+                                    if download_success:
 
-                                # Check if the file can be opened.
-                                try:
-                                    video_cap = cv2.VideoCapture(video_buffer_path)
-                                    success, _ = video_cap.read()
-                                    video_cap.release()
-                                except:
-                                    success = False
+                                        # If no mp4 god downloaded yous ffmpag to converted it to mp4.
+                                        if ext != 'mp4':
+                                            new_video_buffer_path = os.path.join(download_buffer_dir, _wor) + '.mp4'
 
-                                if success:
-                                    break
-                                else:
-                                    warnings.warn("worker: " + str(worker_id) + " cv2 failed to open:" + video_buffer_path)
+                                            subprocess.run(['ffmpeg', '-i', video_buffer_path, '-c',
+                                                            'copy', new_video_buffer_path, '-y'],
+                                                           capture_output=False, stdout=subprocess.DEVNULL,
+                                                           stderr=subprocess.STDOUT)
 
-                                    if os.path.exists(video_buffer_path):
-                                        os.remove(video_buffer_path)
+                                            if os.path.exists(video_buffer_path):
+                                                os.remove(video_buffer_path)
+
+                                            video_buffer_path = new_video_buffer_path
+
+                                        # Check if the file can be opened.
+                                        try:
+                                            video_cap = cv2.VideoCapture(video_buffer_path)
+                                            success, _ = video_cap.read()
+                                            video_cap.release()
+                                        except:
+                                            success = False
+
+                                        if success:
+                                            break
+                                        else:
+                                            warnings.warn("worker: " + str(worker_id) + " cv2 failed to open:" +
+                                                          video_buffer_path, [__ff['ext'] for __ff in video_urls])
+
+                                            if os.path.exists(video_buffer_path):
+                                                os.remove(video_buffer_path)
 
 
 
-        else:
-            vtt = os.path.splitext(wor)[0]
-            vtt = os.path.join(download_buffer_dir, (vtt + '.*'))
-            vtt = [v for v in glob.glob(vtt) if '.vtt' in v]
+                else:
+                    vtt = os.path.splitext(_wor)[0]
+                    vtt = os.path.join(download_buffer_dir, (vtt + '.*'))
+                    vtt = [v for v in glob.glob(vtt) if '.vtt' in v]
 
-        # Download and tokenize teh vtt.
-        if use_subtitles and download_success:
+                    if len(vtt) > 0:
+                        bpe_list = tokenizer(words, text)
+                    else:
+                        subtitles_available = False
+                        bpe_list = []
 
-            vtt_download_success = False
-            if vtt_url is not None:
-                if vtt_url != "":
-                    vtt = os.path.join(download_buffer_dir, wor) + '.vtt'
-                    vtt_download_success = downloader(vtt_url, vtt)
 
-            if vtt_download_success:
-                try:
-                    with open(vtt, "r") as r:
-                        text, words, stamp = decode_vtt(r.read())
-                except:
-                    warnings.warn("worker: " + str(worker_id) + " Failed to open and decode: " + vtt)
+                # Download and tokenize teh vtt.
+                if use_subtitles and download_success and download:
+
                     vtt_download_success = False
+                    if vtt_url is not None:
+                        if vtt_url != "":
+                            vtt = os.path.join(download_buffer_dir, _wor) + '.vtt'
+                            vtt_download_success = downloader(vtt_url, vtt)
 
-            if vtt_download_success:
-                bpe_list = tokenizer(words, text)
+                    if vtt_download_success:
+                        try:
+                            with open(vtt, "r") as r:
+                                text, words, stamp = decode_vtt(r.read())
+                        except:
+                            warnings.warn("worker: " + str(worker_id) + " Failed to open and decode: " + vtt)
+                            vtt_download_success = False
 
-            else:
-                subtitles_available = False
-                bpe_list = []
+                    if vtt_download_success:
+                        bpe_list = tokenizer(words, text)
 
-        wor = video_buffer_path
+                    else:
+                        subtitles_available = False
+                        bpe_list = []
 
-        # Check if this video need to be skipt. This will happen if subtitles are required but are not available.
-        if (not use_subtitles or \
-           (subtitles_available or not skip_if_no_subtitles) or \
-           (subtitles_available and skip_if_no_subtitles)) and download_success:
+                _wor = video_buffer_path
 
-            try:
-                # Setup CV2 video reader.
-                video_cap = cv2.VideoCapture(wor)
-                success, frame = video_cap.read()
-            except:
-                success = False
 
-            _save_name = os.path.join(buffer_save_dir, os.path.splitext(ntpath.basename(wor))[0]) + '.tfrecord'
+                # Check if this video need to be skipt. This will happen if subtitles are required but are not available.
+                if (not use_subtitles or \
+                   (subtitles_available or not skip_if_no_subtitles) or \
+                   (subtitles_available and skip_if_no_subtitles)) and download_success:
 
-            if success:
-
-                frame_count = 0
-
-                # Get base video FPS, this is needed to align language and video.
-                fps_raw = video_cap.get(cv2.CAP_PROP_FPS)
-
-                # Calculate Modulo number.
-                fps_split = diveision_zero(round(fps_raw), target_fps)
-
-                # Create TF Record Writer
-                with tf.io.TFRecordWriter(_save_name) as tf_writer:
-                    while success:
-
-                        # Check if frame needs to be saved.
-                        if frame_count % fps_split == 0:
-
-                            # Do resizing if required.
-                            if target_resolution is not None:
-                                frame = cv2.resize(frame, target_resolution)
-
-                            # convert BGR to RGB frames.
-                            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-                            # Encode frame to image string.
-                            frame = cv2.imencode('.jpg', frame)[1].tobytes()
-
-                            if use_subtitles:
-                                token_buffer = []
-                                proto = []
-
-                                while len(bpe_list) > 0 and stamp[0] < (frame_count + fps_split) * (1 / fps_raw):
-                                    token_buffer += bpe_list[0]
-                                    bpe_list.pop(0)
-                                    stamp.pop(0)
-
-                                for i in range(0, len(token_buffer), (language_tokens_per_frame - 1)):
-                                    buffer = token_buffer[i:i + (language_tokens_per_frame - 1)]
-                                    mask = len(buffer)
-                                    buffer += [padding_token] * (language_tokens_per_frame - mask)
-                                    skip_buffer = i > 0
-
-                                    proto.append(frame_encoder(pading_frame if skip_buffer else frame,
-                                                               buffer,
-                                                               [skip_buffer], [mask]))
-
-                                if len(proto) <= 0:
-                                    proto.append(frame_encoder(frame,
-                                                               [padding_token] * language_tokens_per_frame,
-                                                               [False], [0]))
-
-                            else:
-                                # Encode frame to proto buffer.
-                                proto = [frame_encoder(frame)]
-
-                            # print(frame_count, len(proto))
-
-                            # Write proto buffer to TF.record file.
-                            for p in proto:
-                                tf_writer.write(p)
-
-                        # Get next frame.
+                    try:
+                        # Setup CV2 video reader.
+                        video_cap = cv2.VideoCapture(_wor)
                         success, frame = video_cap.read()
-                        frame_count += 1
+                    except:
+                        success = False
 
-            # close video file.
-            video_cap.release()
-            success = True
+                    if success:
 
-        if cloud_storage and success:
-            blob = cloud_storage_bucket.blob(os.path.join(save_dir,
-                                                          os.path.splitext(ntpath.basename(wor))[0] + '.tfrecord'))
+                        # If TFrecord already contains a video, add a separator between it and the new video.
+                        if contains_video_already:
+                            if use_subtitles:
+                                tf_writer.write(frame_encoder(frame=pading_frame,
+                                                              text_tokens=[concat_token] * language_tokens_per_frame,
+                                                              skip_frame=[False],
+                                                              mask=[language_tokens_per_frame],
+                                                              concat=[True]))
+                            else:
+                                tf_writer.write(frame_encoder(frame=pading_frame, concat=[True]))
+
+
+                        # Set frame counter zo zero.
+                        frame_count = 0
+
+                        # Get base video FPS, this is needed to align language and video.
+                        fps_raw = video_cap.get(cv2.CAP_PROP_FPS)
+
+                        # Calculate Modulo number.
+                        fps_split = diveision_zero(round(fps_raw), target_fps)
+
+
+                        while success:
+
+                            # Check if frame needs to be saved.
+                            if frame_count % fps_split == 0:
+
+                                # Do resizing if required.
+                                if target_resolution is not None:
+                                    frame = cv2.resize(frame, target_resolution)
+
+                                # convert BGR to RGB frames.
+                                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+                                # Encode frame to image string.
+                                frame = cv2.imencode('.jpg', frame)[1].tobytes()
+
+                                if use_subtitles:
+                                    token_buffer = []
+                                    proto = []
+
+                                    while len(bpe_list) > 0 and stamp[0] < (frame_count + fps_split) * (1 / fps_raw):
+                                        token_buffer += bpe_list[0]
+                                        bpe_list.pop(0)
+                                        stamp.pop(0)
+
+                                    for i in range(0, len(token_buffer), (language_tokens_per_frame - 1)):
+                                        buffer = token_buffer[i:i + (language_tokens_per_frame - 1)]
+                                        mask = len(buffer)
+                                        buffer += [padding_token] * (language_tokens_per_frame - mask)
+                                        skip_buffer = i > 0
+
+                                        proto.append(frame_encoder(pading_frame if skip_buffer else frame,
+                                                                   buffer,
+                                                                   [skip_buffer], [mask]))
+
+                                    if len(proto) <= 0:
+                                        proto.append(frame_encoder(frame,
+                                                                   [padding_token] * language_tokens_per_frame,
+                                                                   [False], [0]))
+
+                                else:
+                                    # Encode frame to proto buffer.
+                                    proto = [frame_encoder(frame)]
+
+                                # print(frame_count, len(proto))
+
+                                # Write proto buffer to TF.record file.
+                                for p in proto:
+                                    tf_writer.write(p)
+
+                            # Get next frame.
+                            success, frame = video_cap.read()
+                            frame_count += 1
+
+                    # close video file.
+                    video_cap.release()
+                    success = True
+                    contains_video_already = True
+
+                # Remove video file if it was downloaded.
+                if not keep_buffer_download:
+                    if os.path.exists(_wor):
+                        os.remove(_wor)
+
+                    if use_subtitles and subtitles_available:
+                        if os.path.exists(vtt):
+                            os.remove(vtt)
+
+        if not contains_video_already:
+            if os.path.exists(_save_name):
+                os.remove(_save_name)
+
+        if cloud_storage and success and contains_video_already:
+            blob = cloud_storage_bucket.blob(os.path.join(save_dir, _tfrecord_name + '.tfrecord'))
             if os.path.exists(_save_name):
                 blob.upload_from_filename(_save_name)
-
-        # Remove video file if it was downloaded.
-        if download and not keep_buffer_download:
-            if os.path.exists(wor):
-                os.remove(wor)
-
-            if use_subtitles and subtitles_available:
-                if os.path.exists(vtt):
-                    os.remove(vtt)
 
         if cloud_storage and not keep_buffer_download:
             if os.path.exists(_save_name):
@@ -677,6 +717,8 @@ if __name__ == '__main__':
     parser.add_argument('-padding_token', type=int, default=0,
                         help="The token ID that gets usd to pad to the 'language_tokens_per_frame' number"
                              "if not enough tokens are present in the frame.")
+    parser.add_argument('-concat_token', type=int, default=4,
+                        help="The token ID that gets usd to concat multibel videos")
     parser.add_argument('-duration_need_larger', type=int, default=256,
                         help='A single Video needs to be LONGER than this variable in seconds.')
 
@@ -708,6 +750,7 @@ if __name__ == '__main__':
     target_height = args.target_height
     language_tokens_per_frame = args.language_tokens_per_frame
     padding_token = args.padding_token
+    concat_token = args.concat_token
     duration_need_larger = args.duration_need_larger
 
     service_account_json_path = args.service_account_json_path
@@ -723,7 +766,6 @@ if __name__ == '__main__':
     if not os.path.exists(save_path) and service_account_json_path == '':
         os.makedirs(save_path)
 
-
     if os.path.isdir(load_path):
         load_path = [os.path.join(load_path, p) for p in os.listdir(load_path)]
     else:
@@ -737,6 +779,11 @@ if __name__ == '__main__':
 
         ids = ids + json_load['id']
         duration = duration + json_load['duration']
+
+    if type(ids[0]) is not list:
+        ids = [[id] for id in ids]
+    else:
+        duration = [np.sum(_duration) for _duration in duration]
 
     ids, duration = split_equal(ids, duration, num_worker, duration_need_larger)
 
@@ -779,6 +826,7 @@ if __name__ == '__main__':
                                                          lambda words, text: char_level_encoder(words),
                                                          language_tokens_per_frame,
                                                          padding_token,
+                                                         concat_token,
                                                          skip_if_no_subtitles,
                                                          service_account_json_path,
                                                          bucket_name))
@@ -792,9 +840,5 @@ if __name__ == '__main__':
     for w in worker_list:
         w.join()
 
-    if download and not keep_buffer_download:
-        os.remove(download_buffer_path)
-
-    exit()
-
-
+    #if download and not keep_buffer_download:
+    #    os.remove(download_buffer_path)
