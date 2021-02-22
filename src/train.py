@@ -232,8 +232,8 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                          global_step=tf.train.get_or_create_global_step()),
                              tf.assign_add(tf.train.get_or_create_global_step(), 1)
                              ] + [lowering.lowered_operation(op) for op in update_ops]
+            hooks.append(mtf.MtfRestoreHook(lowering))
             with mtf.utils.outside_all_rewrites():
-                hooks.append(mtf.MtfRestoreHook(lowering))
                 if params.use_checkpointing:
                     saver = tf.train.Saver(tf.global_variables(),
                                            sharded=True,
@@ -322,32 +322,30 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
     # For each sub-batch, create a SubBatchSlicer object.
     # Get the list of pnums for each input.
     all_laidout_tensors = [[None] * len(params.input_pipeline_shape) for _ in range(num_cores)]
+    dataset_iterators = []
     for sub_batch_i, host_id in enumerate(hosts_to_hold_ds):
         with ops.device(host_id_to_tf_device.format(host_id)):
             ds_iterator = input_fn(params, sub_batch_size, sub_batch_i,
                                    len(hosts_to_hold_ds)).make_initializable_iterator()
-            input_initializers.append(ds_iterator.initializer)
-
+            dataset_iterators.append(ds_iterator)
             all_input_tensors = ds_iterator.get_next()
-            all_sub_batch_pnums = [pnum_map.flatten().tolist() if not params.train else
-                                   pnum_map[sub_batch_i, ...].flatten().tolist()
-                                   for pnum_map in pnum_maps]
             if len(all_input_tensors) != len(params.input_pipeline_shape):
                 raise ValueError
 
-            for idx, input_tensor in enumerate(all_input_tensors):
-                sub_batch_pnums = all_sub_batch_pnums[idx]
+            for idx, (pnum_map, input_tensor) in enumerate(zip(pnum_maps, all_input_tensors)):
+                if params.train:
+                    pnum_map = pnum_map[sub_batch_i, ...]
                 mtf_input_shape = params.input_pipeline_shape[idx]
 
                 # Initialize the cache for each
                 slice_dict = {}
 
-                for pnum in sub_batch_pnums:
+                for pnum in pnum_map.flatten().tolist():
                     s_begin = params.mesh_impl.slice_begin(mtf_input_shape, pnum)
-                    s_begin[0] = s_begin[0] % sub_batch_size * (not params.train)
+                    s_begin[0] = s_begin[0] % sub_batch_size * params.train
                     s_begin = tuple(s_begin)
                     if s_begin in slice_dict:
-                        all_laidout_tensors[pnum][idx] = tf_tensor
+                        all_laidout_tensors[pnum][idx] = slice_dict[s_begin]
                         continue
                     tf_tensor = tf.slice(input_tensor, s_begin, params.mesh_impl.slice_shape(mtf_input_shape))
 
@@ -362,6 +360,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         enqueue = infeed.generate_enqueue_ops(all_laidout_tensors,
                                               tpu_ordinal_function=lambda x: ordered_ordinals[x],
                                               placement_function=lambda x: ordered_hosts[x])
+    input_initializers = [ds.initializer for ds in dataset_iterators]
 
     def _thread_fn(sess: tf.Session):
         time.sleep(1)
