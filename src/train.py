@@ -232,8 +232,8 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                          global_step=tf.train.get_or_create_global_step()),
                              tf.assign_add(tf.train.get_or_create_global_step(), 1)
                              ] + [lowering.lowered_operation(op) for op in update_ops]
+            hooks.append(mtf.MtfRestoreHook(lowering))
             with mtf.utils.outside_all_rewrites():
-                hooks.append(mtf.MtfRestoreHook(lowering))
                 if params.use_checkpointing:
                     saver = tf.train.Saver(tf.global_variables(),
                                            sharded=True,
