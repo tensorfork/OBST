@@ -54,6 +54,11 @@ if __name__ == '__main__':
         ids = ids + json_load['id']
         duration = duration + json_load['duration']
 
+    if duration[0] is not list:
+        ids = [[id] for id in ids]
+    else:
+        duration = [np.sum(_duration) for _duration in duration]
+
     ids, duration = split_equal(ids, duration, split, -1)
 
     split_video_count = 0
