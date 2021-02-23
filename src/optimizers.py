@@ -173,39 +173,6 @@ class NovoGrad(Optimizer):
                  mtf.assign(exp_avg_p2_ptr, exp_avg_p2)])
 
 
-class FactorizedAdam(Optimizer):
-    def apply_grad(self, grad, var):
-        updates = []
-        grad_factors = []
-
-        for idx, dim in enumerate(var.shape.dims):
-            dim = [dim]
-            p1_ptr = self.variable(var, f"dim{idx}_p1", dim)
-            p2_ptr = self.variable(var, f"dim{idx}_p2", dim)
-            p1 = weighted_add(p1_ptr, mtf.reduce_mean(grad, output_shape=dim), self.beta1)
-            p2 = weighted_add(p2_ptr, mtf.reduce_mean(mtf.square(grad), output_shape=dim), self.beta2)
-            updates.extend([mtf.assign(p1_ptr, p1), mtf.assign(p2_ptr, p2)])
-            grad_factors.append(p1 * mtf.rsqrt(p2 + self.epsilon))
-
-        return mtf.add_n(grad_factors) * self.learning_rate / len(grad_factors), updates
-
-
-class AdaHessian(Optimizer):
-    def apply_grad(self, grad: mtf.Tensor, var: mtf.Variable):
-        hess = grad
-        uniform = mtf.cast(mtf.greater(mtf.random_uniform(var.mesh, var.shape), 0.5), var.dtype) * 2 - 1
-        mtf.reduce_sum(uniform * grad)
-        p1 = p1_ptr = self.variable(var, "p1", var.shape)
-        p2 = p2_ptr = self.variable(var, "p2", var.shape)
-        p1 = p1 + (grad - p1) * (1 - self.beta1)
-        p2 = p2 + (mtf.square(hess) - p2) * (1 - self.beta2)
-        return (self.learning_rate
-                * p1
-                * mtf.rsqrt(p2 / (1 - mtf.pow(self.beta2, self.global_step)) + self.epsilon)
-                / (1 - mtf.pow(self.beta1, self.global_step)),
-                [mtf.assign(p1_ptr, p1), mtf.assign(p2_ptr, p2)])
-
-
 class SM3(Optimizer):
     def apply_grad(self, grad: mtf.Tensor, var: mtf.Variable):
         """
@@ -233,6 +200,5 @@ class SM3(Optimizer):
 OPTIMIZERS = {'adam':            Adam,
               'novograd':        NovoGrad,
               'sm3':             SM3,
-              'factorized_adam': FactorizedAdam,
               'sgd':             SGD
               }
