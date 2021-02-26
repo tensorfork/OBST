@@ -3,6 +3,7 @@ Contains functions to create a training loop and log its outputs to tensorboard
 """
 import threading
 import time
+import collections
 import typing
 
 import mesh_tensorflow as mtf
@@ -31,11 +32,6 @@ class CheckpointLoaderHook(tf.estimator.SessionRunHook):
             check_point = tf.train.latest_checkpoint(self.checkpoint_dir)
             if check_point:
                 saver_collection[0].restore(session, check_point)
-
-
-def masked_add(left, right, position):
-    return weighted_add(left, right, mtf.one_hot(position, s))
-
 
 def add_summary(tf_loss, value, global_step):
     """Add all summaries."""
@@ -261,115 +257,168 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             hooks.append(mtf.MtfRestoreHook(lowering))
             return tpu_ops.outfeed_enqueue_tuple(predictions)
 
-    input_initializers = []
-    enqueue = None
-
     num_cores = params.mesh_impl.device_assignment.num_replicas
 
-    ordered_ordinals = np.zeros((num_cores,), dtype=np.int32)
-    ordered_hosts = np.zeros((num_cores,), dtype=str)
-    ordered_host_ids = np.zeros((num_cores,), dtype=np.int32)
+    ordered_ordinals = []
+    ordered_hosts = []
+    ordered_host_ids = []
+    host_id_to_its_pnums = collections.defaultdict(list)
+    d_assignment = params.mesh_impl.device_assignment
 
     for pnum in range(num_cores):
         physical_pnum = params.mesh_impl.l2p(pnum)
-        host_device = params.mesh_impl.device_assignment.host_device(replica=physical_pnum)
-        # For MTF, there's always 1 core per replica. So logical_core=0.
-        ordered_ordinals[pnum] = params.mesh_impl.device_assignment.tpu_ordinal(replica=physical_pnum, logical_core=0)
-        ordered_hosts[pnum] = host_device
-        ordered_host_ids[pnum] = int(host_device.lower().split("/task:")[1].split("/device:")[0])
 
-    num_hosts = len(set(ordered_host_ids))
+        # For MTF, there's always 1 core per replica. So logical_core=0.
+        ordered_ordinals.append(d_assignment.tpu_ordinal(replica=physical_pnum, logical_core=0))
+        host_device = d_assignment.host_device(replica=physical_pnum)
+        host_id = int(host_device.lower().split("/task:")[1].split("/device:")[0])
+        ordered_hosts.append(host_device)
+        ordered_host_ids.append(host_id)
+        host_id_to_its_pnums[host_id].append(pnum)
+
+    num_hosts = len(set(ordered_hosts))
+
     pnum_maps = []
     batch_size = params.input_pipeline_shape[0].to_integer_list[0]
-
-    for shape in params.input_pipeline_shape:
+    for mtf_shape in params.input_pipeline_shape:
         # Make sure that the batch size is the same across all input tensors.
-        if batch_size != shape.to_integer_list[0]:
-            raise ValueError
-        s_shape = params.mesh_impl.slice_shape(shape)
-        shape_list = [dim_size // s_dim_size for dim_size, s_dim_size in zip(shape.to_integer_list, s_shape)]
-        pnum_map = -np.ones(shape_list + [num_cores // np.prod(shape_list)], dtype=np.int32)
+        assert batch_size == mtf_shape.to_integer_list[0]
+
+        s_shape = params.mesh_impl.slice_shape(mtf_shape)
+        shape_list = [dim_size // s_dim_size for dim_size, s_dim_size in zip(mtf_shape.to_integer_list, s_shape)]
+
+        pnum_map_shape = shape_list + [num_cores // np.prod(shape_list)]
+        assert np.prod(pnum_map_shape) == num_cores
+
+        # Initialize the pnum_map to None.
+        pnum_map = np.empty(pnum_map_shape, dtype=object)
+        pnum_map[:] = None
 
         for pnum in range(num_cores):
-            coord = tuple([d // s for d, s in zip(params.mesh_impl.slice_begin(shape, pnum), s_shape)])
-            pnum_array_ref = pnum_map[coord]
+            s_begin = params.mesh_impl.slice_begin(mtf_shape, pnum)
+            coord = [dim_size // s_dim_size for dim_size, s_dim_size in zip(s_begin, s_shape)]
+            # put pnum in pnum_map[coord]
+            pnum_array_ref = pnum_map[tuple(coord)]
             for idx, value in enumerate(pnum_array_ref):
-                if value == -1:
+                if value is None:
                     pnum_array_ref[idx] = pnum
                     break
 
-        if np.any(pnum_map == -1):
-            raise ValueError
         pnum_maps.append(pnum_map)
 
     # For each sub-batch, we need to know which host should read it.
-    hosts_to_hold_ds = [num_hosts - 1]
     if params.train:
-        hosts_to_hold_ds.clear()
-        num_dss_per_host = np.zeros((num_hosts,))
+        
+        # This records how many datasets (ds) are already stored on each host.
+        num_dss_per_host = [0] * num_hosts
+
+        # A list of host_ids that holds datasets (ds).
+        hosts_to_hold_ds = []
 
         for sub_batch_pnum_map in pnum_maps[0]:
-            host_id = np.argmax(np.sum(np.equal(ordered_host_ids.take(sub_batch_pnum_map.flatten(), 0).reshape(1, -1),
-                                                np.arange(num_hosts).reshape(-1, 1)), 1) + num_dss_per_host)
-            num_dss_per_host[host_id] -= 0.1 / num_hosts
+
+            num_pnums_per_host = [0] * num_hosts
+            for pnum in sub_batch_pnum_map.flatten():
+                num_pnums_per_host[ordered_host_ids[pnum]] += 1
+
+            host_metrics = [(host_id, num_pnums_per_host[host_id], num_dss_per_host[host_id]) for host_id in range(num_hosts)]
+            host_id, _, _ = max(host_metrics, key=lambda keys: (keys[1], -keys[2]))
+
+            num_dss_per_host[host_id] += 1
             hosts_to_hold_ds.append(host_id)
+    
+    else:
+        # There should be just one dataset-holding host. Make the last host do it.
+        hosts_to_hold_ds = [num_hosts - 1]
 
     sub_batch_size = batch_size // len(hosts_to_hold_ds)
+    tf.logging.info("MTF sub_batch_size: {}".format(sub_batch_size))
+    assert sub_batch_size * len(hosts_to_hold_ds) == batch_size
 
-    if sub_batch_size * len(hosts_to_hold_ds) != batch_size:
-        raise ValueError
-
-    # For each sub-batch, create a SubBatchSlicer object.
-    # Get the list of pnums for each input.
+    # Slots for all laidout tensors.
     all_laidout_tensors = [[None] * len(params.input_pipeline_shape) for _ in range(num_cores)]
-    dataset_iterators = []
+
+    ds_iterator = []
+    # For each sub-batch, create a SubBatchSlicer object.
     for sub_batch_i, host_id in enumerate(hosts_to_hold_ds):
-        with ops.device(host_id_to_tf_device.format(host_id)):
-            ds_iterator = input_fn(params, sub_batch_size, sub_batch_i,
+        # Get the list of pnums for each input.
+        if params.train:
+            
+            all_sub_batch_pnums = []
+            for pnum_map in pnum_maps:
+                sub_batch_pnums = pnum_map[sub_batch_i, ...].flatten().tolist()
+                all_sub_batch_pnums.append(sub_batch_pnums)
+
+        else:
+            
+            all_sub_batch_pnums = [pnum_map.flatten().tolist() for pnum_map in pnum_maps]
+    
+        with ops.device(f"/job:worker/task:{host_id}/device:CPU:0"):
+
+            _ds_iterator = input_fn(params, sub_batch_size, sub_batch_i,
                                    len(hosts_to_hold_ds)).make_initializable_iterator()
-            dataset_iterators.append(ds_iterator)
-            all_input_tensors = ds_iterator.get_next()
-            if len(all_input_tensors) != len(params.input_pipeline_shape):
-                raise ValueError
+            ds_iterator.append(_ds_iterator)
+            all_input_tensors = _ds_iterator.get_next()
 
-            for idx, (pnum_map, input_tensor) in enumerate(zip(pnum_maps, all_input_tensors)):
-                if params.train:
-                    pnum_map = pnum_map[sub_batch_i, ...]
-                mtf_input_shape = params.input_pipeline_shape[idx]
+            if isinstance(all_input_tensors, tf.Tensor):
+                all_input_tensors = [all_input_tensors]
+            assert len(all_input_tensors) == len(all_sub_batch_pnums)
 
-                # Initialize the cache for each
-                slice_dict = {}
+            for input_i in range(len(all_input_tensors)):
+                input_tensor = all_input_tensors[input_i]
+                sub_batch_pnums = all_sub_batch_pnums[input_i]
+                mtf_input_shape = params.input_pipeline_shape[input_i]
 
-                for pnum in pnum_map.flatten().tolist():
+                # Initialize the cache for each input_i
+                _slice_dict = collections.defaultdict(list)
+
+                for idx, pnum in enumerate(sub_batch_pnums):
+
                     s_begin = params.mesh_impl.slice_begin(mtf_input_shape, pnum)
-                    s_begin[0] = s_begin[0] % sub_batch_size * params.train
-                    s_begin = tuple(s_begin)
-                    if s_begin in slice_dict:
-                        all_laidout_tensors[pnum][idx] = slice_dict[s_begin]
-                        continue
-                    tf_tensor = tf.slice(input_tensor, s_begin, params.mesh_impl.slice_shape(mtf_input_shape))
+                    if not not params.train:
+                        # Always slice from 0 in the first dimension (batch dimension), since
+                        # input_tensor a sub-batch tensor.
+                        s_begin[0] = 0
+                    if tuple(s_begin) in _slice_dict:
+                        input_slice = _slice_dict[tuple(s_begin)]
+                    else:
+                        s_shape = params.mesh_impl.slice_shape(mtf_input_shape)
+                        input_slice = tf.slice(input_tensor, s_begin, s_shape)
 
-                    slice_dict[s_begin] = tf_tensor
-                    all_laidout_tensors[pnum][idx] = tf_tensor
+                    all_laidout_tensors[pnum][input_i] = input_slice
 
-    with ops.device(host_id_to_tf_device.format(hosts_to_hold_ds[0])):
+    # Make sure that there are no Nones in all_laidout_tensors.
+    for laidout_tensors in all_laidout_tensors:
+        assert None not in laidout_tensors
+
+    with ops.device(f"/job:worker/task:{hosts_to_hold_ds[0]}/device:CPU:0"):
+
+        def _tpu_ordinal_function_impl(pnum):
+            return ordered_ordinals[pnum]
+
+        def _placement_function_impl(pnum):
+            return ordered_hosts[pnum]
+
         laidout_tensors0 = all_laidout_tensors[0]
-        infeed = tpu_feed.InfeedQueue(number_of_tuple_elements=len(laidout_tensors0),
-                                      tuple_types=[x.dtype for x in laidout_tensors0],
-                                      tuple_shapes=[x.shape for x in laidout_tensors0])
-        enqueue = infeed.generate_enqueue_ops(all_laidout_tensors,
-                                              tpu_ordinal_function=lambda x: ordered_ordinals[x],
-                                              placement_function=lambda x: ordered_hosts[x])
-    input_initializers = [ds.initializer for ds in dataset_iterators]
+        infeed_queue = tpu_feed.InfeedQueue(
+            number_of_tuple_elements=len(laidout_tensors0),
+            tuple_types=[x.dtype for x in laidout_tensors0],
+            tuple_shapes=[x.shape for x in laidout_tensors0])
+        enqueue_ops = infeed_queue.generate_enqueue_ops(
+            all_laidout_tensors,
+            tpu_ordinal_function=_tpu_ordinal_function_impl,
+            placement_function=_placement_function_impl)
+
+    input_initializers = [ds.initializer for ds in ds_iterator]
 
     def _thread_fn(sess: tf.Session):
         time.sleep(1)
         while True:
-            sess.run(enqueue)
+            sess.run(enqueue_ops)
 
     compilation_state, computation = tpu.split_compile_and_replicate(_model_fn,
                                                                      [[]] * params.num_cores,
-                                                                     infeed,
+                                                                     infeed_queue,
                                                                      params.d_assignment,
                                                                      None,
                                                                      maximum_shapes=None)
@@ -383,9 +432,11 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                hooks=[ckpt_loader_hook,
                                                       tf.train.StepCounterHook(every_n_steps=10)] + hooks,
                                                config=session_config) as sess:
+
             sess.run(input_initializers)
             infeed_thread = threading.Thread(target=_thread_fn, args=(sess,))
             infeed_thread.start()
+
             summary.initialize(session=sess)
 
             for i in range(params.current_step, params.train_steps):
