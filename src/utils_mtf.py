@@ -1,7 +1,7 @@
 import typing
 
 import mesh_tensorflow as mtf
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
 
 from .utils_core import default
 
