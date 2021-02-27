@@ -13,7 +13,8 @@ from .utils_mtf import weighted_add
 
 
 def get_optimizer(loss: mtf.Tensor, params: ModelParameter
-                  ) -> typing.Tuple[mtf.Tensor, typing.List[mtf.Assign], typing.List[mtf.Tensor]]:
+                  ) -> typing.Tuple[typing.Tuple[mtf.Tensor, typing.List[mtf.Assign],
+                                                 typing.List[mtf.Tensor]], tf.Tensor]:
     """
     Creates optimizing and update/training operations.
     :param loss: Final scalar loss of the model
@@ -48,14 +49,13 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter
                                            mtf.Shape([]),
                                            name=name)
 
-    learning_rate = mtf.import_fully_replicated(params.mesh, tf.cast(learning_rate, dtype), [], "learning_rate")
+    _learning_rate = mtf.import_fully_replicated(params.mesh, tf.cast(learning_rate, dtype), [], "learning_rate")
     beta1 = _import_constant("beta1", 0.9)
     beta2 = _import_constant("beta2", 0.95)
-    mtf.scalar_summary("learning_rate", learning_rate)
-    adam = Adam(params, learning_rate, params.weight_decay, beta1, beta2)
+    adam = Adam(params, _learning_rate, params.weight_decay, beta1, beta2)
     if params.optimizer not in OPTIMIZERS:
         raise ValueError(f'Unknown optimizer "{params.optimizer}". Supported optimizers: {list(OPTIMIZERS.keys())}')
-    optimizer = OPTIMIZERS[params.optimizer](params, learning_rate, params.weight_decay, beta1, beta2)
+    optimizer = OPTIMIZERS[params.optimizer](params, _learning_rate, params.weight_decay, beta1, beta2)
     clip_value = mtf.constant(params.mesh, params.gradient_clip, dtype=dtype)
     update_ops = []
     operations = loss.graph.operations
@@ -107,7 +107,8 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter
                             weight_update += mtf.reduce_mean(var.value)
                         update_ops.extend(buffer)
                         update_ops.append(mtf.assign_sub(var, weight_update))
-    return params.mesh.graph.trainable_variables[0].graph.combine_assignments(update_ops)
+
+    return params.mesh.graph.trainable_variables[0].graph.combine_assignments(update_ops), learning_rate
 
 
 def get_variable(params: ModelParameter, var, name, shape):

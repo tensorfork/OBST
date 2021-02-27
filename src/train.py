@@ -74,7 +74,8 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         frame_input = None
         token_x_input = None
         token_y_input = None
-        frame_mask = None
+        frame_mask_src = None
+        frame_mask_tag = None
         token_mask = None
 
         if params.use_video:
@@ -83,8 +84,9 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             if params.use_language:
                 token_x_input = _import_tensor(params, args[1], params.token_dim_shape, "tkn_src")
                 token_y_input = _import_tensor(params, args[2], params.token_dim_shape, "tkn_tgt")
-                frame_mask = _import_tensor(params, args[3], params.frame_mask_shape, "vid_msk")
-                token_mask = _import_tensor(params, args[4], params.token_dim_shape, "txt_msk")
+                frame_mask_src = _import_tensor(params, args[3], params.frame_mask_shape, "vid_msk_src")
+                frame_mask_tag = _import_tensor(params, args[4], params.frame_mask_shape, "vid_msk_tag")
+                token_mask = _import_tensor(params, args[5], params.token_dim_shape, "txt_msk")
 
         else:  # params.use_language
             token_x_input = _import_tensor(params, args[0], params.token_dim_shape, "tkn_src")
@@ -95,7 +97,8 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                                        frame_input,
                                                                        token_x_input,
                                                                        token_y_input,
-                                                                       frame_mask,
+                                                                       frame_mask_src,
+                                                                       frame_mask_tag,
                                                                        token_mask)
         else:
             if params.use_video:
@@ -104,14 +107,16 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 shape = [params.batch_dim, params.sequence_dim, tkn_per_frame, params.vocab_dim]
                 steps = params.time_patch_size
 
-                def body_fn(position, video_loss, token_x_input, token_y_input, frame_input, frame_mask, token_mask,
-                            *states):
-                    _, video_loss, _, frame_out, token_out = build(params,
-                                                                   frame_input,
-                                                                   token_x_input,
-                                                                   token_y_input,
-                                                                   frame_mask,
-                                                                   token_mask)
+                def body_fn(position, token_x_input, token_y_input, frame_input,
+                            frame_mask_src, frame_mask_tag, token_mask, *states):
+
+                    _, _, _, frame_out, token_out = build(params,
+                                                          frame_input,
+                                                          token_x_input,
+                                                          token_y_input,
+                                                          frame_mask_src,
+                                                          frame_mask_tag,
+                                                          token_mask)
 
                     frame_input = weighted_add(pad(frame_out, params.sequence_dim, (0, 1)), frame_input,
                                                mtf.one_hot(position, params.frame_input_sequence, dtype=tf.float32))
@@ -132,37 +137,40 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                         token_mask = weighted_add(mtf.reshape(to_float(token_pad), new_shape=params.token_dim_shape),
                                                   to_float(token_mask), one_hot_sequence)
 
-                        frame_pad = to_float(mtf.equal(mtf.reduce_sum(padding_token, reduced_dim=tkn_per_frame), 0))
-                        frame_mask = weighted_add(frame_pad, to_float(frame_mask), one_hot_sequence)
+                        frame_pad = to_float(mtf.greater(mtf.reduce_sum(padding_token, reduced_dim=tkn_per_frame), 0))
+                        token_x_input = weighted_add(frame_pad, to_float(token_x_input), one_hot_sequence)
 
-                    return position + 1, video_loss, token_x_input, token_y_input, frame_input, frame_mask, token_mask
+                    return position + 1, token_x_input, token_y_input,\
+                           frame_input, frame_mask_src, frame_mask_tag, token_mask
 
                 if token_mask is not None:
                     token_mask = to_float(token_mask)
-                if frame_mask is not None:
-                    frame_mask = to_float(frame_mask)
+                if frame_mask_src is not None:
+                    frame_mask_src = to_float(frame_mask_src)
+                if frame_mask_tag is not None:
+                    frame_mask_tag = to_float(frame_mask_tag)
 
                 while_loop_inputs = [mtf.zeros(params.mesh, [], tf.int32) + params.initial_autoregressive_position,
-                                     mtf.zeros(params.mesh, [], params.variable_dtype.activation_dtype),
-                                     token_x_input, token_y_input, frame_input, frame_mask, token_mask]
+                                     token_x_input, token_y_input, frame_input,
+                                     frame_mask_src, frame_mask_tag, token_mask]
+
             else:  # -> params.use_language
                 steps = params.sequence_dim.size
 
-                def body_fn(position, token_loss, token_x, token_y, *states):
-                    _, _, token_loss, _, token_out = build(params,
-                                                           mtf.ones(params.mesh, [], tf.float32),
-                                                           token_x,
-                                                           token_y,
-                                                           mtf.ones(params.mesh, [], tf.float32),
-                                                           mtf.ones(params.mesh, [], tf.float32))
+                def body_fn(position, token_x, token_y, *states):
+                    _, _, _, _, token_out = build(params,
+                                                  mtf.ones(params.mesh, [], tf.float32),
+                                                  token_x,
+                                                  token_y,
+                                                  mtf.ones(params.mesh, [], tf.float32),
+                                                  mtf.ones(params.mesh, [], tf.float32),
+                                                  mtf.ones(params.mesh, [], tf.float32))
                     return (position + 1,
-                            token_loss,
                             weighted_add(mtf.argmax(token_out, reduced_dim=params.vocab_dim), token_x,
                                          mtf.one_hot(position, output_dim=params.sequence_dim, dtype=tf.int32)),
                             token_y)
 
                 while_loop_inputs = [mtf.zeros(params.mesh, [], tf.int32) + params.initial_autoregressive_position,
-                                     mtf.zeros(params.mesh, [], params.variable_dtype.activation_dtype),
                                      token_x_input, token_y_input]
 
             def cond_fn(position, *states):
@@ -181,7 +189,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 frame_out = loop_out[4]
 
         if params.train:
-            update_ops = get_optimizer(loss, params)
+            update_ops, learning_rate = get_optimizer(loss, params)
         else:
             if params.use_language:
                 token_out = mtf.anonymize(token_out)
@@ -217,17 +225,19 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         lowering = mtf.Lowering(graph, {params.mesh: params.mesh_impl}, autostack=True)
 
         if params.train:
-            log_dict = {}
+            log_dict = {'learning_rate': tf.cast(learning_rate, tf.float32)}
             if params.use_video:
                 log_dict['video_loss'] = tf.cast(lowering.export_to_tf_tensor(video_loss), tf.float32)
 
             if params.use_language:
                 log_dict['token_loss'] = tf.cast(lowering.export_to_tf_tensor(token_loss), tf.float32)
+
             write_summary = [add_summary(tf_loss=tf.cast(lowering.export_to_tf_tensor(loss), tf.float32),
                                          value=log_dict,
                                          global_step=tf.train.get_or_create_global_step()),
                              tf.assign_add(tf.train.get_or_create_global_step(), 1)
                              ] + [lowering.lowered_operation(op) for op in update_ops]
+
             hooks.append(mtf.MtfRestoreHook(lowering))
             with mtf.utils.outside_all_rewrites():
                 if params.use_checkpointing:

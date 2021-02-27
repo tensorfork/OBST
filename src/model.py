@@ -154,7 +154,8 @@ def build(params: ModelParameter,
           vid: typing.Optional[mtf.Tensor],
           txt_src: typing.Optional[mtf.Tensor],
           txt_tgt: typing.Optional[mtf.Tensor],
-          vid_msk: typing.Optional[mtf.Tensor],
+          vid_msk_src: typing.Optional[mtf.Tensor],
+          vid_msk_tag: typing.Optional[mtf.Tensor],
           txt_msk: typing.Optional[mtf.Tensor],
           ) -> typing.Tuple[mtf.Tensor, mtf.Tensor, mtf.Tensor, mtf.Tensor, mtf.Tensor]:
     """
@@ -165,7 +166,8 @@ def build(params: ModelParameter,
     :param vid: Optional Video to attend over, length=(context+1)
     :param txt_src: Optional tokenized text source, will be embedded
     :param txt_tgt: Optional tokenized text target, required when source is given
-    :param vid_msk: Optional mask to remove loss for certain video frames
+    :param vid_msk_src: Optional mask for zero frames
+    :param vid_msk_tag: Optional mask to remove loss for certain video frames
     :param txt_msk: Optional mask to remove loss for certain token positions
     :return: (Generated Video, Total Loss, Video Loss, Token Loss)
     """
@@ -174,12 +176,20 @@ def build(params: ModelParameter,
             txt_msk = mtf.ones(params.mesh, [], params.variable_dtype.activation_dtype)
         else:
             txt_msk = mtf.cast(txt_msk, params.variable_dtype.activation_dtype)
-        if vid_msk is None:
-            vid_msk = mtf.ones(params.mesh, [], params.variable_dtype.activation_dtype)
+
+        if vid_msk_src is None:
+            vid_msk_src = mtf.ones(params.mesh, [], params.variable_dtype.activation_dtype)
         else:
-            vid_msk = mtf.cast(vid_msk, params.variable_dtype.activation_dtype)
+            vid_msk_src = mtf.cast(vid_msk_src, params.variable_dtype.activation_dtype)
+
+        if vid_msk_tag is None:
+            vid_msk_tag = mtf.ones(params.mesh, [], params.variable_dtype.activation_dtype)
+        else:
+            vid_msk_tag = mtf.cast(vid_msk_tag, params.variable_dtype.activation_dtype)
+
         if vid is not None:
             vid = mtf.cast(vid, params.variable_dtype.activation_dtype)
+
         video_loss: typing.Union[int, mtf.Tensor] = 0
         token_loss: typing.Union[int, mtf.Tensor] = 0
         frame_out: typing.Union[int, mtf.Tensor] = 0
@@ -193,7 +203,7 @@ def build(params: ModelParameter,
             input_features = vid.shape[-1:]
             tgt = slice(vid, 1, context_dimension.size, context_dimension)
             src = slice(vid, 0, context_dimension.size - 1, context_dimension)
-            src = src * vid_msk + _embed(params, shape=vid.shape[2:]) * (1 - vid_msk)
+            src = src * vid_msk_src + _embed(params, shape=vid.shape[2:]) * (1 - vid_msk_src)
             src = _linear_to_features(params, src, input_features)
 
         # Language embedding and initial feed forward.
@@ -246,12 +256,12 @@ def build(params: ModelParameter,
         if params.use_video:
             out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)
             frame_out = mtf.sigmoid(_linear_from_features(params, out, input_features))
-            video_loss: mtf.Tensor = mtf.reduce_mean(mtf.abs(frame_out - tgt) * vid_msk)
+            video_loss: mtf.Tensor = mtf.reduce_mean(mtf.abs(frame_out - tgt) * vid_msk_tag)
 
         params.layer_idx = 0
 
         loss = video_loss + token_loss
-        video_loss = video_loss * vid_msk.size / mtf.reduce_sum(vid_msk)
+        video_loss = video_loss * vid_msk_tag.size / mtf.reduce_sum(vid_msk_tag)
         token_loss = token_loss * txt_msk.size / mtf.reduce_sum(txt_msk)
 
         return loss, video_loss, token_loss, frame_out, token_out
