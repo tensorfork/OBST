@@ -94,9 +94,9 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.optimizer = 'adam'
         self.use_revnet = True
         self.use_initial_position_embedding = False
-        self.block_config = [{'layer': ["group_instance_norm", "group_feed_forward", "rezero"]},
-                             {'layer': ["group_instance_norm", "group_feed_forward", "rezero"]},
-                             {'layer': ["group_instance_norm", "embedded_attention", "rezero"]}]
+        self.block_config = [{'layer': ["norm-group-instance", "feed_forward-group", "rezero"]},
+                             {'layer': ["norm-group-instance", "feed_forward-group", "rezero"]},
+                             {'layer': ["instance_norm-group", "attention-embedded", "rezero"]}]
 
         self.mesh: typing.Optional[mtf.Mesh] = None
         self.d_assignment: typing.Optional[DeviceAssignment] = None
