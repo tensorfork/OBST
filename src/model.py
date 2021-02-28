@@ -5,13 +5,13 @@ TODO(Lucas): Write docstrings for all functions
 
 import typing
 
-import numpy as np
 import mesh_tensorflow as mtf
+import numpy as np
 import tensorflow.compat.v1 as tf
 
 from .dataclass import BlockConfig, ModelParameter
 from .utils_core import default
-from .utils_mtf import activate, anonymize, anonymize_dim, anonymize_shape, concat, deduplicate, random_name, slice
+from .utils_mtf import activate, anonymize, anonymize_dim, concat, deduplicate, random_name, slice
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -40,15 +40,6 @@ def _normal_var(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dime
     return _get_variable(params, shape, tf.random_normal_initializer(stddev=stddev, mean=mean))
 
 
-def _constant_var(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
-                  value: float) -> mtf.Tensor:
-    return _get_variable(params, shape, tf.constant_initializer(value))
-
-
-def _scalar(params: ModelParameter, value: float) -> mtf.Tensor:
-    return _constant_var(params, [], value)
-
-
 def _linear(params: ModelParameter, block_input: mtf.Tensor, old: typing.List[mtf.Dimension],
             new: typing.List[mtf.Dimension]) -> mtf.Tensor:
     with tf.variable_scope(random_name()):
@@ -71,119 +62,89 @@ def _communicating_linear(params: ModelParameter, block_input: mtf.Tensor):
                       for i in range(params.n_head)])
 
 
-def _attention(params: ModelParameter, base: mtf.Tensor, key: mtf.Tensor):
-    idx, dim = _get_attention_dim(params, base)
-    params.attention_idx += 1
+def _embed(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
+           name_extras: typing.Tuple[str]) -> mtf.Tensor:
+    params.embedding_param_count = params.embedding_param_count + np.prod([s.size for s in shape])
+    return _normal_var(params, shape, params.embedding_stddev)
+
+
+def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple[str]):
+    idx, dim = _get_attention_dim(params, block_input)
     tmp = anonymize_dim(dim)
+    base = activate(_linear_from_features(params, block_input))
+
+    key = bias = 0
+    if 'embedded' in name_extras or 'context' in name_extras:
+        key = _linear_to_features(params, base) * dim.size ** -0.5
+    if 'embedded' in name_extras or 'positional' in name_extras:
+        bias = _embed(params, [dim] + params.feature_dims, tuple())
+    key = anonymize(key + bias, dim)
+    val = _communicating_linear(params, base)
     qry = _communicating_linear(params, base)
-    val = anonymize(_communicating_linear(params, base), dim)
+
+    if 'linear' in name_extras:
+        return mtf.einsum([mtf.softplus(qry),
+                           anonymize(key, [params.key_dim] + [dim] * (idx in params.masked_attention_dimensions)),
+                           anonymize(mtf.softplus(val), params.key_dim)]
+                          + ([mtf.cast(mtf.less(mtf.range(params.mesh, dim, dtype=tf.int32),
+                                                mtf.range(params.mesh, tmp, dtype=tf.int32)),
+                                       params.variable_dtype.activation_dtype)
+                              ] if idx in params.masked_attention_dimensions else []),
+                          output_shape=qry.shape)
 
     lgt = mtf.einsum([qry, key], reduced_dims=[params.key_dim])
 
     if idx in params.masked_attention_dimensions:  # it's auto-regressive
-        lgt += mtf.cast(mtf.less(mtf.broadcast(mtf.range(params.mesh, dim, tf.int32), [dim, tmp]),
-                                 mtf.broadcast(mtf.range(params.mesh, tmp, tf.int32), [dim, tmp])),
+        lgt += mtf.cast(mtf.less(mtf.range(params.mesh, dim, tf.int32),
+                                 mtf.range(params.mesh, tmp, tf.int32)),
                         params.variable_dtype.activation_dtype) * -1e12
 
     lgt = mtf.exp(lgt - mtf.reduce_max(mtf.stop_gradient(lgt), reduced_dim=tmp))
-    out = mtf.einsum([lgt, val], qry.shape) / mtf.reduce_sum(lgt, reduced_dim=tmp)
-    return out
+    return mtf.einsum([lgt, anonymize(val, dim)], qry.shape) / mtf.reduce_sum(lgt, reduced_dim=tmp)
 
 
-def _embed(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape]) -> mtf.Tensor:
-    params.embedding_param_count = params.embedding_param_count + np.prod([s.size for s in shape])
-
-    return _normal_var(params, shape, params.embedding_stddev)
-
-
-def _attention_embed(params: ModelParameter, block_input: typing.Union[mtf.Tensor, mtf.Shape]) -> mtf.Tensor:
-    idx, dim = _get_attention_dim(params, block_input)
-    return _embed(params, [dim] + params.feature_dims)
-
-
-def _rezero(params, block_input: mtf.Tensor, init: float = 0.) -> mtf.Tensor:
+def _rezero(params, block_input: mtf.Tensor, name_extras: typing.Tuple[str]) -> mtf.Tensor:
     with tf.variable_scope(random_name()):
-        return block_input * _scalar(params, init)
+        return block_input * _get_variable(params, [], tf.constant_initializer(0))
 
 
-def _feed_forward(params: ModelParameter, block_input: mtf.Tensor) -> mtf.Tensor:
-    return _communicating_linear(params, activate(_linear_from_features(params, block_input)))
+def _feed_forward(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple[str]) -> mtf.Tensor:
+    intermediate = ([params.head_dim,
+                     anonymize_dim(params.key_dim, params.key_dim.size * params.group_linear_factor)]
+                    if 'group' in name_extras else None)
+    mid = activate(_linear_from_features(params, block_input, intermediate))
+    if 'group' in name_extras:
+        return _linear_to_features(params, mid, intermediate)
+    return _communicating_linear(params, mid)
 
 
-def _group_feed_forward(params: ModelParameter, block_input: mtf.Tensor) -> mtf.Tensor:
-    intermediate = [params.head_dim, anonymize_dim(params.key_dim, params.key_dim.size * params.group_linear_factor)]
-    return _linear_to_features(params, activate(_linear_from_features(params, block_input, intermediate)), intermediate)
+def _norm(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple[str]) -> mtf.Tensor:
+    normalized_shape = block_input.shape - [params.key_dim]
+    if 'instance' not in name_extras:
+        normalized_shape = normalized_shape - [_get_attention_dim(params, block_input).dim]
+    if 'group' not in name_extras:
+        normalized_shape = normalized_shape - [params.head_dim]
 
-
-def _context_attention(params: ModelParameter, block_input: mtf.Tensor) -> mtf.Tensor:
-    dim = _get_attention_dim(params, block_input).dim
-    base = activate(_linear_from_features(params, block_input))
-
-    return _attention(params, base, anonymize(_linear_to_features(params, base) * dim.size ** -0.5, dim))
-
-
-def _positional_attention(params: ModelParameter, block_input: mtf.Tensor) -> mtf.Tensor:
-    dim = _get_attention_dim(params, block_input).dim
-    base = activate(_linear_from_features(params, block_input))
-
-    return _attention(params, base, _attention_embed(params, anonymize_shape(base.shape, dim)))
-
-
-def _embedded_attention(params: ModelParameter, block_input: mtf.Tensor) -> mtf.Tensor:
-    dim = _get_attention_dim(params, block_input).dim
-    base = activate(_linear_from_features(params, block_input))
-
-    return _attention(params, base,
-                      anonymize(_linear_to_features(params, base) * dim.size ** -0.5 + \
-                                _attention_embed(params, base.shape), dim))
-
-
-def _base_normalization(params: ModelParameter, block_input: mtf.Tensor, normalized_shape: typing.List[mtf.Dimension],
-                        parameter_shape: typing.List[mtf.Dimension]):
-    normalized_shape = block_input.shape - normalized_shape
     block_input -= mtf.reduce_mean(block_input, output_shape=normalized_shape)
     block_input *= mtf.rsqrt(1e-6 + mtf.reduce_mean(mtf.square(block_input), output_shape=normalized_shape))
-    block_input *= _normal_var(params, parameter_shape, mean=1)
-    block_input += _normal_var(params, parameter_shape, mean=0)
+    block_input *= _normal_var(params, params.feature_dims, mean=1)
+    block_input += _normal_var(params, params.feature_dims, mean=0)
     return block_input
 
 
-def _group_instance_norm(params: ModelParameter, block_input: mtf.Tensor) -> mtf.Tensor:
-    return _base_normalization(params, block_input, [params.key_dim], [params.key_dim])
-
-
-def _group_norm(params: ModelParameter, block_input: mtf.Tensor) -> mtf.Tensor:
-    return _base_normalization(params, block_input, [_get_attention_dim(params, block_input).dim, params.key_dim],
-                               [params.key_dim])
-
-
-def _layer_norm(params: ModelParameter, block_input: mtf.Tensor) -> mtf.Tensor:
-    return _base_normalization(params, block_input, [_get_attention_dim(params, block_input).dim] + params.feature_dims,
-                               params.feature_dims)
-
-
-def _instance_norm(params: ModelParameter, block_input: mtf.Tensor) -> mtf.Tensor:
-    return _base_normalization(params, block_input, params.feature_dims, params.feature_dims)
-
-
-LAYER_FUNCTIONS = {'feed_forward':         _feed_forward,
-                   'group_feed_forward':   _group_feed_forward,
-                   'context_attention':    _context_attention,
-                   'positional_attention': _positional_attention,
-                   'embedded_attention':   _embedded_attention,
-                   'group_instance_norm':  _group_instance_norm,
-                   'group_norm':           _group_norm,
-                   'layer_norm':           _layer_norm,
-                   'instance_norm':        _instance_norm,
-                   'rezero':               _rezero,
-                   'embed':                _embed
+LAYER_FUNCTIONS = {'feed_forward': _feed_forward,
+                   'attention':    _attention,
+                   'norm':         _norm,
+                   'rezero':       _rezero,
+                   'embed':        _embed
                    }
 
 
 def _block_part_fn(params: ModelParameter, block_part_config: BlockConfig, block_input: mtf.Tensor) -> mtf.Tensor:
     out = block_input
     for layer in block_part_config.layer:
-        out = LAYER_FUNCTIONS[layer](params, out)
+        name, *extras = layer.split('-')
+        out = LAYER_FUNCTIONS[name](params, out, extras)
     if not params.use_revnet and block_part_config.skip:
         out += block_input
     return out
