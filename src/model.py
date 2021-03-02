@@ -90,7 +90,7 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
                                                 mtf.range(params.mesh, tmp, dtype=tf.int32)),
                                        params.variable_dtype.activation_dtype)
                               ] if idx in params.masked_attention_dimensions else []),
-                          output_shape=qry.shape)
+                          output_shape=block_input.shape)
 
     lgt = mtf.einsum([qry, key], reduced_dims=[params.key_dim])
 
@@ -100,7 +100,7 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
                         params.variable_dtype.activation_dtype) * -1e12
 
     lgt = mtf.exp(lgt - mtf.reduce_max(mtf.stop_gradient(lgt), reduced_dim=tmp))
-    return mtf.einsum([lgt, anonymize(val, dim)], qry.shape) / mtf.reduce_sum(lgt, reduced_dim=tmp)
+    return mtf.einsum([lgt, anonymize(val, dim)], block_input.shape) / mtf.reduce_sum(lgt, reduced_dim=tmp)
 
 
 def _rezero(params, block_input: mtf.Tensor, name_extras: typing.Tuple[str]) -> mtf.Tensor:
