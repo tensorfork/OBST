@@ -95,11 +95,16 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter
                         grad = grad_list[2]
                         var: mtf.Variable = tensor_to_var[inp]
                         optim = adam if var.shape.ndims == 0 else optimizer
-                        #grd_norm = mtf.sqrt(mtf.reduce_sum(mtf.square(grad)) + 1e-5)
-                        #wgt_norm = mtf.sqrt(mtf.reduce_sum(mtf.square(var.value)) + 1e-3)
-                        #clipped = weighted_add(grd_norm / wgt_norm * params.gradient_clip * grad, grad,
+                        # grd_norm = mtf.sqrt(mtf.reduce_sum(mtf.square(grad)) + 1e-5)
+                        # wgt_norm = mtf.sqrt(mtf.reduce_sum(mtf.square(var.value)) + 1e-3)
+                        # grad = weighted_add(grd_norm / wgt_norm * params.gradient_clip * grad, grad,
                         #                       mtf.cast(mtf.greater(wgt_norm / grd_norm, params.gradient_clip), dtype))
-                        #weight_update, buffer = optim.apply_grad(clipped, var)
+                        if params.grad_accumulation > 1:
+                            grad_buffer = get_variable(params, var, "grad_accumulation", var.shape)
+                            step = mtf.cast(mtf.not_equal(mtf.mod(adam.global_step, params.grad_accumulation), 0),
+                                            var.dtype)
+                            update_ops.append(mtf.assign(grad_buffer, grad + grad_buffer.value * (1 - step)))
+                            grad = grad_buffer.value * step
                         weight_update, buffer = optim.apply_grad(grad, var)
                         if params.weight_decay > 0:
                             weight_update += params.weight_decay * var.value
@@ -111,7 +116,7 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter
     return params.mesh.graph.trainable_variables[0].graph.combine_assignments(update_ops), learning_rate
 
 
-def get_variable(params: ModelParameter, var, name, shape):
+def get_variable(params: ModelParameter, var, name, shape) -> mtf.Variable:
     return mtf.get_variable(var.mesh, name, shape,
                             initializer=tf.zeros_initializer(), trainable=False, dtype=params.variable_dtype)
 
@@ -199,8 +204,8 @@ class SM3(Optimizer):
                  for buf_ptr, dim in zip(buffer, update.shape.dims)])
 
 
-OPTIMIZERS = {'adam':            Adam,
-              'novograd':        NovoGrad,
-              'sm3':             SM3,
-              'sgd':             SGD
+OPTIMIZERS = {'adam':     Adam,
+              'novograd': NovoGrad,
+              'sm3':      SM3,
+              'sgd':      SGD
               }

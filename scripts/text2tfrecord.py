@@ -26,7 +26,7 @@ parser.add_argument("--int64", type=bool, default=True, help="Whether to encode 
 parser.add_argument("--service_account_json_path", type=str, default="a.json", help="Service account json from gcp")
 parser.add_argument("--buffer_size", type=int, default=2 ** 25, help="This is a minimum size, not a maximum size. "
                                                                      "tfrecords will have this minimum size as well.")
-parser.add_argument("--separator", nargs="+", type=int, default=50256,
+parser.add_argument("--separator", type=str, default="\04",
                     help="separator to place between files in chunk mode."
                          "Default is 0 (Null) in case of byte encodings, "
                          "50256 for tokenized texts")
