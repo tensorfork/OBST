@@ -15,7 +15,6 @@ from tensorflow.python.ops import summary_ops_v2 as summary
 from tensorflow.python.tpu.device_assignment import device_assignment
 from tensorflow.python.tpu.topology import Topology
 from tensorflow_estimator.python.estimator import estimator as estimator_lib
-import cloudstorage
 
 from .dataclass import ModelParameter
 from .eval import gen_sample_fn
@@ -41,7 +40,7 @@ def main(args: argparse.Namespace) -> None:
     params.train = args.run_mode == 'train'
     # Read params of model
 
-    json.dump(_params, cloudstorage.open(f"{params.model_path}/run_config.json"))
+    json.dump(_params, tf.io.gfile.GFile(f"{params.model_path}/run_config.json", 'w'))
 
     params.current_step = int(estimator_lib._load_global_step_from_checkpoint_dir(params.model_path))
 

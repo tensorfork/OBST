@@ -92,10 +92,10 @@ if __name__ == '__main__':
 
             copy_base_config['model_path'] = args.run_name_prefix + run_name
 
-            with open(f"buffer_configs/{tpu_id}.json", 'w+') as w:
+            with open(f"buffer_configs/{tpu_id}_{run_name}.json", 'w+') as w:
                 w.write(json.dumps(copy_base_config))
 
-            experiment_command = f"python3 main.py --model buffer_configs/{tpu_id}.json --tpu {tpu_name}"
+            experiment_command = f"python3 main.py --model buffer_configs/{tpu_id}_{run_name}.json --tpu {tpu_name}"
             delete_command = f"pu delete {tpu_name} --yes"
             tpu_creat_command = f"gcloud compute tpus create {tpu_name} --zone europe-west4-a " \
                                 f"--range {tpu_range} --network tpu-euw4a --version 1.15.5 " \

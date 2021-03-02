@@ -23,7 +23,6 @@ opencv-python
 Pillow
 git+https://github.com/ytdl-org/youtube-dl.git
 google-cloud-storage
-cloudstorage
 oauth2client
 utils
 scipy
