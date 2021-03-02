@@ -22,6 +22,22 @@ def str2bool(v: str) -> bool:
     raise argparse.ArgumentTypeError('Boolean value expected.')
 
 
+class GFile:
+
+    def __init__(self, name, mode):
+        self.file = tf.io.gfile.GFile(name, mode)
+
+    def fileno(self):
+        return 9
+
+    def write(self, data):
+        self.file.write(data)
+        return 3
+
+    def close(self):
+        self.file.flush()
+        self.file.close()
+
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
@@ -40,27 +56,55 @@ if __name__ == '__main__':
     model_path = args.model_path
     preemptible = str2bool(args.preemptible)
 
+    cors = int(str(tpu_type).split('-')[-1])
+    tpu_id = int(str(tpu_name).split('-')[-1])
+
+    if cors == 8:
+        tpu_range = f"10.48.{tpu_id}.0/29"
+    else:
+        cidr = int(32 + 2 - math.log2(cors))
+        _tpu_id = tpu_id + 2
+
+        tpu_range = f"10.{_tpu_id}.0.0/{cidr}"
+
     tpu_client = TPUServiceAPI(project='mlops-engine')
 
-    out_io = tf.io.gfile.GFile(f"{model_path}/run_config.log", 'w')
+    #out_io = tf.io.gfile.GFile(f"{model_path}/run_config.log", 'w')
+    out_io = GFile(f"{model_path}/run_config.log", 'w')
+
+
+    def wait_for_tpu():
+        ready = False
+        ready_count = 0
+
+        while not ready:
+            time.sleep(15)
+            ready = tpu_client.is_tpu_ready(tpu_name)['healthy']
+            ready_count = ready_count + 1
+
+            if ready_count > 15:
+                ready_count = 0
+                tpu_log = tpu_client.recreate(tpu_name, mesh=tpu_type, tf_version='1.15.5',
+                                              zone='europe-west4-a', cidrblock=tpu_range,
+                                              preemptible=preemptible, wait=True, network='tpu-euw4a')
+
+                out_io.write(f"\n\n\n{tpu_log}\n\n\n")
 
     try:
         tpu_log = tpu_client.create(tpu_name, mesh=tpu_type, tf_version='1.15.5', zone='europe-west4-a',
-                                    cidrblock=None, preemptible=preemptible, wait=True)
+                                    cidrblock=tpu_range, preemptible=preemptible, wait=True, network='tpu-euw4a')
 
         out_io.write(f"{tpu_log}\n\n\n")
 
-        ready = False
-        while not ready:
-            time.sleep(15)
-            ready = tpu_client.is_tpu_ready(tpu_name)
+        wait_for_tpu()
 
-        pro = subprocess.Popen(run_command, stdout=out_io, shell=True, preexec_fn=os.setsid)
+        #pro = subprocess.Popen(run_command, stdout=out_io, stderr=out_io, shell=True, preexec_fn=os.setsid)
+        pro = subprocess.Popen(run_command, shell=True, preexec_fn=os.setsid)
 
         done = False
 
         while not done:
-            time.sleep(600 + random.randint(0, 300))
+            time.sleep(300 + random.randint(0, 300))
 
             health = tpu_client.is_tpu_ready(tpu_name)
             if pro.poll() is not None:
@@ -70,19 +114,17 @@ if __name__ == '__main__':
             if not done and not health['healthy']:
                 os.killpg(os.getpgid(pro.pid), signal.SIGTERM)
 
-                tpu_log = tpu_client.recreate(tpu_name, mesh=tpu_type, tf_version='1.15.5', zone='europe-west4-a',
-                                              cidrblock=None, preemptible=preemptible, wait=True)
+                tpu_log = tpu_client.recreate(tpu_name, mesh=tpu_type, tf_version='1.15.5',
+                                              zone='europe-west4-a', cidrblock=tpu_range,
+                                              preemptible=preemptible, wait=True, network='tpu-euw4a')
 
                 out_io.write(f"\n\n\n{tpu_log}\n\n\n")
 
-                ready = False
-                while not ready:
-                    time.sleep(15)
-                    ready = tpu_client.is_tpu_ready(tpu_name)
+                wait_for_tpu()
 
                 pro = subprocess.Popen(run_command, stdout=out_io, shell=True, preexec_fn=os.setsid)
-    except:
-        out_io.write(f"\n\n\nrun_manager has crashed\n\n\n")
+    except Exception as e:
+        out_io.write(f"\n\n\nrun_manager has crashed\n{e}\n\n\n")
 
     try:
         tpu_log = tpu_client.delete(tpu_name)
@@ -90,5 +132,4 @@ if __name__ == '__main__':
     except:
         out_io.write(f"\n\n\nFailed to Delete the TPU")
 
-    out_io.flush()
     out_io.close()

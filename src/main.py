@@ -123,7 +123,6 @@ def main(args: argparse.Namespace) -> None:
 
             params.d_assignment = device_assignment(topology, num_replicas=params.num_cores,
                                                     computation_shape=[1, ] * mtf.utils.topology_rank(topology))
-
             params.mesh_impl = mtf.simd_mesh_impl.SimdMeshImpl(mtf_mesh_shape, params.layout_rules,
                                                                None, params.d_assignment)
 

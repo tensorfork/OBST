@@ -97,7 +97,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.use_initial_position_embedding = False
         self.block_config = [{'layer': ["norm-group-instance", "feed_forward-group", "rezero"]},
                              {'layer': ["norm-group-instance", "feed_forward-group", "rezero"]},
-                             {'layer': ["instance_norm-group", "attention-embedded", "rezero"]}]
+                             {'layer': ["norm-group-instance", "attention-embedded", "rezero"]}]
 
         self.mesh: typing.Optional[mtf.Mesh] = None
         self.d_assignment: typing.Optional[DeviceAssignment] = None
