@@ -222,7 +222,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             print(dim_name)
         print('\n')
 
-        lowering = mtf.Lowering(graph, {params.mesh: params.mesh_impl}, autostack=True)
+        lowering = mtf.Lowering(graph, {params.mesh: params.mesh_impl}, autostack=(params.grad_accumulation <= 1))
 
         if params.train:
             log_dict = {'learning_rate': tf.cast(learning_rate, tf.float32)}
