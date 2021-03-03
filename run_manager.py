@@ -69,7 +69,6 @@ if __name__ == '__main__':
 
     tpu_client = TPUServiceAPI(project='mlops-engine')
 
-    #out_io = tf.io.gfile.GFile(f"{model_path}/run_config.log", 'w')
     out_io = GFile(f"{model_path}/run_config.log", 'w')
 
 
@@ -98,8 +97,7 @@ if __name__ == '__main__':
 
         wait_for_tpu()
 
-        #pro = subprocess.Popen(run_command, stdout=out_io, stderr=out_io, shell=True, preexec_fn=os.setsid)
-        pro = subprocess.Popen(run_command, shell=True, preexec_fn=os.setsid)
+        pro = subprocess.Popen(run_command, stdout=out_io, stderr=out_io, shell=True, preexec_fn=os.setsid)
 
         done = False
 
@@ -122,7 +120,7 @@ if __name__ == '__main__':
 
                 wait_for_tpu()
 
-                pro = subprocess.Popen(run_command, stdout=out_io, shell=True, preexec_fn=os.setsid)
+                pro = subprocess.Popen(run_command, stdout=out_io, stderr=out_io, shell=True, preexec_fn=os.setsid)
     except Exception as e:
         out_io.write(f"\n\n\nrun_manager has crashed\n{e}\n\n\n")
 
