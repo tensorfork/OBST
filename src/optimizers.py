@@ -49,14 +49,18 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter
                                            mtf.Shape([]),
                                            name=name)
 
-    _learning_rate = mtf.import_fully_replicated(params.mesh, tf.cast(learning_rate, dtype), [], "learning_rate")
-    beta1 = _import_constant("beta1", 0.9)
-    beta2 = _import_constant("beta2", 0.95)
-    adam = Adam(params, _learning_rate, params.weight_decay, beta1, beta2)
+    mtf_learning_rate = mtf.import_fully_replicated(params.mesh, tf.cast(learning_rate, dtype), [], "learning_rate")
+    global_step = mtf.import_fully_replicated(params.mesh, tf.cast(tf.train.get_or_create_global_step(),
+                                                                   params.variable_dtype.activation_dtype),
+                                              [], "global_steps_float")
+    step = mtf.cast(mtf.equal(mtf.mod(global_step, params.grad_accumulation), 0), dtype)
+    mstep = 1 - step
+    beta1 = 1 - step * _import_constant("beta1", 0.1)
+    beta2 = 1 - step * _import_constant("beta2", 0.05)
+    adam = Adam(params, global_step, mtf_learning_rate, beta1, beta2)
     if params.optimizer not in OPTIMIZERS:
         raise ValueError(f'Unknown optimizer "{params.optimizer}". Supported optimizers: {list(OPTIMIZERS.keys())}')
-    optimizer = OPTIMIZERS[params.optimizer](params, _learning_rate, params.weight_decay, beta1, beta2)
-    clip_value = mtf.constant(params.mesh, params.gradient_clip, dtype=dtype)
+    optimizer = OPTIMIZERS[params.optimizer](params, global_step, mtf_learning_rate, beta1, beta2)
     update_ops = []
     operations = loss.graph.operations
     xs = [x.outputs[0] for x in params.mesh.graph.trainable_variables]
@@ -101,9 +105,7 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter
                         #                       mtf.cast(mtf.greater(wgt_norm / grd_norm, params.gradient_clip), dtype))
                         if params.grad_accumulation > 1:
                             grad_buffer = get_variable(params, var, "grad_accumulation", var.shape)
-                            step = mtf.cast(mtf.not_equal(mtf.mod(adam.global_step, params.grad_accumulation), 0),
-                                            grad.dtype)
-                            update_ops.append(mtf.assign(grad_buffer, grad + grad_buffer * (1 - step)))
+                            update_ops.append(mtf.assign(grad_buffer, grad + grad_buffer * mstep))
                             grad = grad_buffer * step
                         weight_update, buffer = optim.apply_grad(grad, var)
                         if params.weight_decay > 0:
@@ -124,8 +126,8 @@ def get_variable(params: ModelParameter, var, name, shape) -> mtf.Tensor:
 class Optimizer(mtf.optimize.Optimizer):
     def __init__(self,
                  params: ModelParameter,
-                 learning_rate,
-                 weight_decay_rate=0.0,
+                 global_step: mtf.Tensor,
+                 learning_rate: mtf.Tensor,
                  beta_1=0.9,
                  beta_2=0.999,
                  epsilon=1e-5):
@@ -134,10 +136,7 @@ class Optimizer(mtf.optimize.Optimizer):
         self.beta1 = beta_1
         self.beta2 = beta_2
         self.epsilon = epsilon
-        self.global_step = mtf.import_fully_replicated(params.mesh,
-                                                       tf.cast(tf.train.get_or_create_global_step(),
-                                                               params.calculation_dtype),
-                                                       [], "global_steps_float")
+        self.global_step = global_step
         self.variable = lambda x, y, z: get_variable(params, x, f"{x.name}/{params.optimizer}/{y}", z)
 
 
