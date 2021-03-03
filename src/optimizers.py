@@ -104,7 +104,7 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter
                         # grad = weighted_add(grd_norm / wgt_norm * params.gradient_clip * grad, grad,
                         #                       mtf.cast(mtf.greater(wgt_norm / grd_norm, params.gradient_clip), dtype))
                         if params.grad_accumulation > 1:
-                            grad_buffer = get_variable(params, var, "grad_accumulation", var.shape)
+                            grad_buffer = optim.variable(var, "grad_accumulation", var.shape)
                             update_ops.append(mtf.assign(grad_buffer, grad + grad_buffer * mstep))
                             grad = grad_buffer * step
                         weight_update, buffer = optim.apply_grad(grad, var)
