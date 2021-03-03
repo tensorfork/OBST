@@ -103,8 +103,8 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter
                             grad_buffer = get_variable(params, var, "grad_accumulation", var.shape)
                             step = mtf.cast(mtf.not_equal(mtf.mod(adam.global_step, params.grad_accumulation), 0),
                                             grad.dtype)
-                            update_ops.append(mtf.assign(grad_buffer, grad + grad_buffer.value * (1 - step)))
-                            grad = grad_buffer.value * step
+                            update_ops.append(mtf.assign(grad_buffer, grad + grad_buffer * (1 - step)))
+                            grad = grad_buffer * step
                         weight_update, buffer = optim.apply_grad(grad, var)
                         if params.weight_decay > 0:
                             weight_update += params.weight_decay * var.value
@@ -116,7 +116,7 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter
     return params.mesh.graph.trainable_variables[0].graph.combine_assignments(update_ops), learning_rate
 
 
-def get_variable(params: ModelParameter, var, name, shape) -> mtf.Variable:
+def get_variable(params: ModelParameter, var, name, shape) -> mtf.Tensor:
     return mtf.get_variable(var.mesh, name, shape,
                             initializer=tf.zeros_initializer(), trainable=False, dtype=params.variable_dtype)
 
