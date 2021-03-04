@@ -26,25 +26,18 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter
     tf_learning_rate = tf.constant(value=params.learning_rate, shape=[], dtype=tf.float32)
     global_steps_float = tf.cast(global_step, tf.float32)
 
-    # Warmup the learning rate.
     if params.warmup_steps > 0:
         warmup_steps_float = tf.constant(params.warmup_steps, dtype=tf.float32)
         is_warmup = tf.cast(global_steps_float < warmup_steps_float, tf.float32)
-        tf_learning_rate = (tf_learning_rate * (is_warmup * global_steps_float / warmup_steps_float + (1 - is_warmup)))
+        tf_learning_rate = (tf_learning_rate * (is_warmup * global_steps_float / warmup_steps_float + 1 - is_warmup))
 
-    # Decay the learning rate.
     if params.learning_rate_decay_multi != 0 and params.learning_rate_decay_multi != 1:
-        learning_rate_decay_multi = tf.constant(params.learning_rate_decay_multi, tf.float32)
-        learning_rate_decay_start_step = tf.constant(params.learning_rate_decay_start_step, tf.float32)
-        learning_rate_decay_min = tf.constant(params.learning_rate_decay_min, tf.float32)
-
-        is_decay = tf.cast(global_steps_float > learning_rate_decay_start_step, tf.float32) * \
-                   tf.cast(tf_learning_rate > learning_rate_decay_min, tf.float32)
-
-        tf_learning_rate = (tf_learning_rate * (is_decay * learning_rate_decay_multi + (1 - is_decay)))
-
-    def _import_constant(name, x):
-        return
+        is_decay = tf.cast(tf.math.logical_and(global_steps_float > tf.constant(params.learning_rate_decay_start_step,
+                                                                                tf.float32),
+                                               tf_learning_rate > tf.constant(params.learning_rate_decay_min,
+                                                                              tf.float32)), tf.float32)
+        tf_learning_rate = tf_learning_rate * (is_decay * tf.constant(params.learning_rate_decay_multi, tf.float32)
+                                               + 1 - is_decay)
 
     learning_rate = mtf.import_fully_replicated(params.mesh, tf.cast(tf_learning_rate, dtype), [], "learning_rate")
     global_step = mtf.import_fully_replicated(params.mesh, tf.cast(tf.train.get_or_create_global_step(),
@@ -114,22 +107,20 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter
                             exp_avg_p1 = weighted_add(exp_avg_p1_ptr, grad, beta1)
                             exp_avg_p2 = weighted_add(exp_avg_p2_ptr, mtf.square(grad), beta2)
 
-                            weight_update = learning_rate * exp_avg_p1 * mtf.rsqrt(exp_avg_p2 + epsilon)
-                            buffer = [mtf.assign(exp_avg_p1_ptr, exp_avg_p1),
-                                      mtf.assign(exp_avg_p2_ptr, exp_avg_p2)]
+                            weight_update = exp_avg_p1 * mtf.rsqrt(exp_avg_p2 + epsilon)
+                            update_ops.extend([mtf.assign(exp_avg_p1_ptr, exp_avg_p1),
+                                               mtf.assign(exp_avg_p2_ptr, exp_avg_p2)])
                         elif params.optimizer == 'sgd':
-                            weight_update = grad * learning_rate
-                            buffer = []
+                            weight_update = grad
                         elif params.optimizer == 'novograd':
                             exp_avg_p1 = exp_avg_p1_ptr = variable(var, "exp_avg_p1", var.shape)
-                            exp_avg_p2 = exp_avg_p2_ptr = variable(var, "exp_avg_p1", [])
+                            exp_avg_p2 = exp_avg_p2_ptr = variable(var, "exp_avg_p2", [])
 
                             exp_avg_p2 = weighted_add(exp_avg_p2, mtf.reduce_sum(mtf.square(grad)), beta2)
-                            update = beta1 * exp_avg_p1 + grad * mtf.rsqrt(exp_avg_p2 + epsilon)
-                            weight_update = update * learning_rate,
-                            buffer = [mtf.assign(exp_avg_p1_ptr, beta1 * exp_avg_p1_ptr +
-                                                 grad * mtf.rsqrt(exp_avg_p2 + epsilon)),
-                                      mtf.assign(exp_avg_p2_ptr, exp_avg_p2)]
+                            weight_update = beta1 * exp_avg_p1 + grad * mtf.rsqrt(exp_avg_p2 + epsilon)
+                            update_ops.extend([mtf.assign(exp_avg_p1_ptr, beta1 * exp_avg_p1_ptr +
+                                                          grad * mtf.rsqrt(exp_avg_p2 + epsilon)),
+                                               mtf.assign(exp_avg_p2_ptr, exp_avg_p2)])
                         elif params.optimizer == 'sm3':
                             update = variable(var, "dim0", [var.shape.dims[0]])
                             buffer = [update]
@@ -140,17 +131,16 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter
 
                             update += mtf.square(grad)
 
-                            weight_update = grad * mtf.rsqrt(update + epsilon) * learning_rate
-                            buffer = [mtf.assign(buf_ptr, mtf.reduce_max(update, output_shape=[dim]))
-                                      for buf_ptr, dim in zip(buffer, update.shape.dims)]
-
+                            weight_update = grad * mtf.rsqrt(update + epsilon)
+                            update_ops.extend([mtf.assign(buf_ptr, mtf.reduce_max(update, output_shape=[dim]))
+                                               for buf_ptr, dim in zip(buffer, update.shape.dims)])
+                        weight_update *= learning_rate
                         if params.weight_decay > 0:
                             weight_update += params.weight_decay * var.value
                         if var.shape.size > 1:
                             weight_update += mtf.reduce_mean(var.value)
                         if params.grad_accumulation > 1:
                             weight_update *= step
-                        update_ops.extend(buffer)
                         update_ops.append(mtf.assign_sub(var, weight_update))
 
     return params.mesh.graph.trainable_variables[0].graph.combine_assignments(update_ops), tf_learning_rate
