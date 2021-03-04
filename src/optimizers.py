@@ -28,7 +28,7 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter
 
     # Warmup the learning rate.
     if params.warmup_steps > 0:
-        warmup_steps_float = tf.constant(params.warmup_steps, dtype=tf.float32)
+        warmup_steps_float = tf.constant((params.warmup_steps * params.grad_accumulation), dtype=tf.float32)
         is_warmup = tf.cast(global_steps_float < warmup_steps_float, tf.float32)
         learning_rate = (learning_rate * (is_warmup * global_steps_float / warmup_steps_float + (1 - is_warmup)))
 
@@ -87,14 +87,17 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter
                 continue
             with tf.variable_scope(op.name + "/gradients"):
                 for inp, grad in zip(op.inputs, op.gradient(grad_outputs)):
+
                     valid_grad = inp in downstream and grad is not None
                     if valid_grad and inp in tensor_to_gradient:
                         grad_list = tensor_to_gradient[inp]
                         grad_list[1] += 1
                         grad_list[2] += grad
+
                     elif valid_grad:
                         grad_list = [0, 1, grad]
                         tensor_to_gradient[inp] = grad_list
+
                     if valid_grad and len(inp.operation.outputs) == grad_list[1] and inp in tensor_to_var:
                         grad = grad_list[2]
                         var: mtf.Variable = tensor_to_var[inp]
@@ -103,17 +106,23 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter
                         # wgt_norm = mtf.sqrt(mtf.reduce_sum(mtf.square(var.value)) + 1e-3)
                         # grad = weighted_add(grd_norm / wgt_norm * params.gradient_clip * grad, grad,
                         #                       mtf.cast(mtf.greater(wgt_norm / grd_norm, params.gradient_clip), dtype))
+
                         if params.grad_accumulation > 1:
                             grad_buffer = optim.variable(var, "grad_accumulation", var.shape)
                             update_ops.append(mtf.assign(grad_buffer, grad + grad_buffer * mstep))
                             grad = grad_buffer * step
+
                         weight_update, buffer = optim.apply_grad(grad, var)
+
                         if params.weight_decay > 0:
                             weight_update += params.weight_decay * var.value
+
                         if var.shape.size > 1:
                             weight_update += mtf.reduce_mean(var.value)
+
                         if params.grad_accumulation > 1:
                             weight_update *= step
+
                         update_ops.extend(buffer)
                         update_ops.append(mtf.assign_sub(var, weight_update))
 
