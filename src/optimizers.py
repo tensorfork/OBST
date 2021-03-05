@@ -141,10 +141,8 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter
                         weight_update *= learning_rate
                         if params.weight_decay > 0:
                             weight_update += params.weight_decay * var.value
-
                         if var.shape.size > 1:
                             weight_update += mtf.reduce_mean(var.value)
-
                         if params.grad_accumulation > 1:
                             weight_update *= step
                         update_ops.append(mtf.assign_sub(var, weight_update))
