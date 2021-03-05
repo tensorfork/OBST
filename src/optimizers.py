@@ -39,7 +39,9 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter
         tf_learning_rate = tf_learning_rate * (is_decay * tf.constant(params.learning_rate_decay_multi, tf.float32)
                                                + 1 - is_decay)
 
-    learning_rate = mtf.import_fully_replicated(params.mesh, tf.cast(tf_learning_rate, dtype), [], "learning_rate")
+    learning_rate = mtf.import_fully_replicated(params.mesh, tf.cast(tf_learning_rate / params.grad_accumulation,
+                                                                     dtype),
+                                                [], "learning_rate")
     global_step = mtf.import_fully_replicated(params.mesh, tf.cast(tf.train.get_or_create_global_step(),
                                                                    params.variable_dtype.activation_dtype),
                                               [], "global_steps_float")
@@ -139,8 +141,6 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter
                             update_ops.extend([mtf.assign(buf_ptr, mtf.reduce_max(update, output_shape=[dim]))
                                                for buf_ptr, dim in zip(buffer, update.shape.dims)])
                         weight_update *= learning_rate
-                        if params.grad_accumulation > 1:
-                            weight_update /= params.grad_accumulation
                         if params.weight_decay > 0:
                             weight_update += params.weight_decay * var.value
                         if var.shape.size > 1:
