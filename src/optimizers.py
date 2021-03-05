@@ -39,7 +39,7 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter
         tf_learning_rate = tf_learning_rate * (is_decay * tf.constant(params.learning_rate_decay_multi, tf.float32)
                                                + 1 - is_decay)
 
-    learning_rate = mtf.import_fully_replicated(params.mesh, tf.cast(tf_learning_rate / params.grad_accumulation,
+    learning_rate = mtf.import_fully_replicated(params.mesh, tf.cast(tf_learning_rate,
                                                                      dtype),
                                                 [], "learning_rate")
     global_step = mtf.import_fully_replicated(params.mesh, tf.cast(tf.train.get_or_create_global_step(),
@@ -97,15 +97,15 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter
                     if valid_grad and len(inp.operation.outputs) == grad_list[1] and inp in tensor_to_var:
                         grad = grad_list[2]
                         var: mtf.Variable = tensor_to_var[inp]
-                        # grd_norm = mtf.sqrt(mtf.reduce_sum(mtf.square(grad)) + 1e-5)
-                        # wgt_norm = mtf.sqrt(mtf.reduce_sum(mtf.square(var.value)) + 1e-3)
-                        # grad = weighted_add(grd_norm / wgt_norm * params.gradient_clip * grad, grad,
-                        #                       mtf.cast(mtf.greater(wgt_norm / grd_norm, params.gradient_clip), dtype))
-
                         if params.grad_accumulation > 1:
                             grad_buffer = variable(var, "grad_accumulation", var.shape)
                             update_ops.append(mtf.assign(grad_buffer, grad + grad_buffer * mstep))
-                            grad = grad_buffer * step
+                            grad = grad_buffer * step / params.grad_accumulation
+                        if params.gradient_clip > 0:
+                            grd_norm = mtf.sqrt(mtf.reduce_sum(mtf.square(grad)) + 1e-5)
+                            wgt_norm = mtf.sqrt(mtf.reduce_sum(mtf.square(var.value)) + 1e-3)
+                            grad = weighted_add(grd_norm / wgt_norm * params.gradient_clip * grad, grad,
+                                                mtf.cast(mtf.greater(wgt_norm / grd_norm, params.gradient_clip), dtype))
                         if var.shape.ndims <= 1 or params.optimizer == 'adam':
                             exp_avg_p1_ptr = variable(var, 'exp_avg_p1', var.shape)
                             exp_avg_p2_ptr = variable(var, 'exp_avg_p2', var.shape)
