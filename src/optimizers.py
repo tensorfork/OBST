@@ -139,6 +139,8 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter
                             update_ops.extend([mtf.assign(buf_ptr, mtf.reduce_max(update, output_shape=[dim]))
                                                for buf_ptr, dim in zip(buffer, update.shape.dims)])
                         weight_update *= learning_rate
+                        if params.grad_accumulation > 1:
+                            weight_update /= params.grad_accumulation
                         if params.weight_decay > 0:
                             weight_update += params.weight_decay * var.value
                         if var.shape.size > 1:
