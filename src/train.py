@@ -232,11 +232,14 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             if params.use_language:
                 log_dict['token_loss'] = tf.cast(lowering.export_to_tf_tensor(token_loss), tf.float32)
 
+            w_global_step = tf.cast(tf.train.get_or_create_global_step(), tf.float32)
+            w_global_step = w_global_step / tf.constant(params.grad_accumulation, tf.float32)
+
             write_summary = [add_summary(tf_loss=tf.cast(lowering.export_to_tf_tensor(loss), tf.float32),
                                          value=log_dict,
-                                         global_step=tf.train.get_or_create_global_step()),
-                             tf.assign_add(tf.train.get_or_create_global_step(), 1)
-                             ] + [lowering.lowered_operation(op) for op in update_ops]
+                                         global_step=w_global_step),
+                             tf.assign_add(tf.train.get_or_create_global_step(), 1)]\
+                            + [lowering.lowered_operation(op) for op in update_ops]
 
             hooks.append(mtf.MtfRestoreHook(lowering))
             with mtf.utils.outside_all_rewrites():
@@ -254,14 +257,18 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                               listeners=[mtf.MtfCheckpointSaverListener(lowering)]))
 
                 return tf.group(write_summary)
+
         else:  # train == 'sample'
             predictions = {}
+
             if params.use_video:
                 predictions['frame_out'] = lowering.export_to_tf_tensor(frame_out)
                 predictions['frame_tgt'] = args[0]
+
             if params.use_language:
                 predictions['token_out'] = lowering.export_to_tf_tensor(token_out)
                 predictions['token_tgt'] = args[1 + int(params.use_video)]
+
             predictions = [val if val.dtype == tf.float32 else tf.cast(val, tf.float32) for val in predictions.values()]
             output_shapes.extend([pred.shape for pred in predictions])
             hooks.append(mtf.MtfRestoreHook(lowering))
@@ -450,9 +457,13 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             summary.initialize(session=sess)
 
             for i in range(params.current_step, params.train_steps):
-                sess.run(computation)
+
+                for accum_step in range(params.grad_accumulation):
+                    sess.run(computation)
+
                 if (i + 1) % params.summary_flush_interval == 0:
                     sess.run(flush_summary)
+
                 for fn in callback_fns:
                     fn(i)
 
