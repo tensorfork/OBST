@@ -36,8 +36,8 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter
                                                                                 tf.float32),
                                                tf_learning_rate > tf.constant(params.learning_rate_decay_min,
                                                                               tf.float32)), tf.float32)
-        tf_learning_rate = tf_learning_rate * (is_decay * tf.constant(params.learning_rate_decay_multi, tf.float32)
-                                               + 1 - is_decay)
+        tf_learning_rate = tf_learning_rate * weighted_add(tf.constant(params.learning_rate_decay_multi,
+                                                                       tf.float32) ** global_steps_float, 1, is_decay)
 
     learning_rate = mtf.import_fully_replicated(params.mesh, tf.cast(tf_learning_rate,
                                                                      dtype),
