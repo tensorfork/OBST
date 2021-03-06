@@ -32,12 +32,13 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter
         tf_learning_rate = (tf_learning_rate * (is_warmup * global_steps_float / warmup_steps_float + 1 - is_warmup))
 
     if params.learning_rate_decay_multi != 0 and params.learning_rate_decay_multi != 1:
-        is_decay = tf.cast(tf.math.logical_and(global_steps_float > tf.constant(params.learning_rate_decay_start_step,
-                                                                                tf.float32),
-                                               tf_learning_rate > tf.constant(params.learning_rate_decay_min,
-                                                                              tf.float32)), tf.float32)
-        tf_learning_rate = tf_learning_rate * weighted_add(tf.constant(params.learning_rate_decay_multi,
-                                                                       tf.float32) ** global_steps_float, 1, is_decay)
+        start_step = tf.constant(params.learning_rate_decay_start_step, tf.float32)
+        decay_factor = tf.constant(params.learning_rate_decay_multi, tf.float32) ** (global_steps_float - start_step)
+        is_decay = tf.cast(tf.math.logical_and(global_steps_float > start_step,
+                                               decay_factor > tf.constant(params.learning_rate_decay_min /
+                                                                          params.learning_rate, tf.float32)),
+                           tf.float32)
+        tf_learning_rate = tf_learning_rate * weighted_add(decay_factor, 1, is_decay)
 
     learning_rate = mtf.import_fully_replicated(params.mesh, tf.cast(tf_learning_rate,
                                                                      dtype),
