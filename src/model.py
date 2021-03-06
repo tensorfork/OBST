@@ -203,7 +203,7 @@ def build(params: ModelParameter,
             input_features = vid.shape[-1:]
             tgt = slice(vid, 1, context_dimension.size, context_dimension)
             src = slice(vid, 0, context_dimension.size - 1, context_dimension)
-            src = src * vid_msk_src + _embed(params, shape=vid.shape[2:]) * (1 - vid_msk_src)
+            src = src * vid_msk_src + _embed(params, shape=vid.shape[2:], name_extras=tuple()) * (1 - vid_msk_src)
             src = _linear_to_features(params, src, input_features)
 
         # Language embedding and initial feed forward.
@@ -223,7 +223,7 @@ def build(params: ModelParameter,
             src: mtf.Tensor = txt_src
 
         if params.use_initial_position_embedding:
-            src = src + _embed(params, src.shape[1:-1])
+            src = src + _embed(params, src.shape[1:-1], name_extras=tuple())
 
         if params.use_revnet:
             out = (src, None, src, None)

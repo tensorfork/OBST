@@ -69,7 +69,7 @@ if __name__ == '__main__':
 
     tpu_client = TPUServiceAPI(project='mlops-engine')
 
-    out_io = GFile(f"{model_path}/run_config.log", 'w')
+    out_io = GFile(f"{model_path}/run.log", 'w')
 
 
     def wait_for_tpu():

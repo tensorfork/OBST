@@ -33,12 +33,11 @@ if __name__ == '__main__':
     parser.add_argument('--number_of_repetitions', type=int, default=1, help="The number of times the same "
                                                                              "parameters will get tested.")
     parser.add_argument('--repetition_start_idx', type=int, default=0)
-    parser.add_argument('--tpu_name_subfix', type=str, default='', help="A string that will be added "
-                                                                        "at the and of all TPU names.")
     parser.add_argument('--use_preemptible', type=str, default='true')
     parser.add_argument('--tpu_type', type=str, default='v3-8')
     parser.add_argument('--start_up_sleep', type=int, default=0)
     parser.add_argument('--project', type=str, default='mlops-engine')
+    parser.add_argument('--use_manager', type=str, default='False')
 
     args = parser.parse_args()
 
@@ -74,7 +73,7 @@ if __name__ == '__main__':
             copy_base_config[key] = run_config[key][pos[idx]]
 
         for repetition_idx in range(args.repetition_start_idx, args.number_of_repetitions):
-            tpu_name = f"tpu-{tpu_type}-euw4a-{tpu_id}" + args.tpu_name_subfix
+            tpu_name = f"tpu-{tpu_type}-euw4a-{tpu_id}"
 
             cors = int(str(tpu_type).split('-')[-1])
             if cors == 8:
@@ -109,8 +108,13 @@ if __name__ == '__main__':
 
             prosses_name = f"tpu_id:{tpu_id}--{run_name}"
 
-            subprocess.run(['screen', '-dmS', prosses_name, 'bash', '-c',
-                            f"({tpu_creat_command} && {experiment_command}) ; {delete_command}"])
+            if str2bool(args.use_manager):
+                comm = f"python3 run_manager.py '{experiment_command}' {tpu_name} {tpu_type} " \
+                       f"{args.run_name_prefix + run_name} {str2bool(args.use_preemptible)}"
+            else:
+                comm = f"({tpu_creat_command} && {experiment_command}) ; {delete_command}"
+
+            subprocess.run(['screen', '-dmS', prosses_name, 'bash', '-c', comm])
 
             tpu_id = tpu_id + 1
 
