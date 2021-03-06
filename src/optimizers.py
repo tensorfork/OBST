@@ -27,9 +27,9 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter
     global_steps_float = tf.cast(global_step, tf.float32)
 
     if params.warmup_steps > 0:
-        warmup_steps_float = tf.constant((params.warmup_steps * params.grad_accumulation), dtype=tf.float32)
+        warmup_steps_float = tf.constant(params.warmup_steps * params.grad_accumulation, dtype=tf.float32)
         is_warmup = tf.cast(global_steps_float < warmup_steps_float, tf.float32)
-        tf_learning_rate = (tf_learning_rate * (is_warmup * global_steps_float / warmup_steps_float + 1 - is_warmup))
+        tf_learning_rate = tf_learning_rate * weighted_add(global_steps_float / warmup_steps_float, 1, is_warmup)
 
     if params.learning_rate_decay_multi != 0 and params.learning_rate_decay_multi != 1:
         start_step = tf.constant(params.learning_rate_decay_start_step, tf.float32)
