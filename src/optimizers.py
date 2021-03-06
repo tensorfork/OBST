@@ -37,12 +37,11 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter
 
     if params.learning_rate_decay_multi != 0 and params.learning_rate_decay_multi != 1:
         start_step = import_float(params.learning_rate_decay_start_step * params.grad_accumulation)
-        tf_learning_rate = tf.maximum((tf_learning_rate *
-                                       weighted_add(import_float(params.learning_rate_decay_multi) **
-                                                    ((global_steps_float - start_step) /
-                                                     import_float(params.grad_accumulation)),
-                                                    1,
-                                                    tf.cast(global_steps_float > start_step, tf.float32))),
+        tf_learning_rate = tf.maximum(tf_learning_rate *
+                                      import_float(params.learning_rate_decay_multi) **
+                                      (tf.maximum((global_steps_float - start_step) /
+                                                  import_float(params.grad_accumulation),
+                                                  import_float(0))),
                                       import_float(params.learning_rate_decay_min))
 
     learning_rate = mtf.import_fully_replicated(params.mesh, tf.cast(tf_learning_rate, dtype), [], "learning_rate")
