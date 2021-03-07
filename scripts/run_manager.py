@@ -45,6 +45,8 @@ if __name__ == '__main__':
     parser.add_argument('run_command', type=str)
     parser.add_argument('tpu_name', type=str)
     parser.add_argument('tpu_type', type=str)
+    parser.add_argument('zone', type=str)
+    parser.add_argument('network', type=str)
     parser.add_argument('model_path', type=str)
     parser.add_argument('preemptible', type=str)
 
@@ -84,14 +86,14 @@ if __name__ == '__main__':
             if ready_count > 15:
                 ready_count = 0
                 tpu_log = tpu_client.recreate(tpu_name, mesh=tpu_type, tf_version='1.15.5',
-                                              zone='europe-west4-a', cidrblock=tpu_range,
-                                              preemptible=preemptible, wait=True, network='tpu-euw4a')
+                                              zone=args.zone, cidrblock=tpu_range,
+                                              preemptible=preemptible, wait=True, network=args.network)
 
                 out_io.write(f"\n\n\n{tpu_log}\n\n\n")
 
     try:
-        tpu_log = tpu_client.create(tpu_name, mesh=tpu_type, tf_version='1.15.5', zone='europe-west4-a',
-                                    cidrblock=tpu_range, preemptible=preemptible, wait=True, network='tpu-euw4a')
+        tpu_log = tpu_client.create(tpu_name, mesh=tpu_type, tf_version='1.15.5', zone=args.zone,
+                                    cidrblock=tpu_range, preemptible=preemptible, wait=True, network=args.network)
 
         out_io.write(f"{tpu_log}\n\n\n")
 
@@ -113,8 +115,8 @@ if __name__ == '__main__':
                 os.killpg(os.getpgid(pro.pid), signal.SIGTERM)
 
                 tpu_log = tpu_client.recreate(tpu_name, mesh=tpu_type, tf_version='1.15.5',
-                                              zone='europe-west4-a', cidrblock=tpu_range,
-                                              preemptible=preemptible, wait=True, network='tpu-euw4a')
+                                              zone=args.zone, cidrblock=tpu_range,
+                                              preemptible=preemptible, wait=True, network=args.network)
 
                 out_io.write(f"\n\n\n{tpu_log}\n\n\n")
 

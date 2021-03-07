@@ -35,6 +35,8 @@ if __name__ == '__main__':
     parser.add_argument('--repetition_start_idx', type=int, default=0)
     parser.add_argument('--use_preemptible', type=str, default='true')
     parser.add_argument('--tpu_type', type=str, default='v3-8')
+    parser.add_argument('--zone', type=str, default='europe-west4-a')
+    parser.add_argument('--network', type=str, default='tpu-euw4a')
     parser.add_argument('--start_up_sleep', type=int, default=0)
     parser.add_argument('--project', type=str, default='mlops-engine')
     parser.add_argument('--use_manager', type=str, default='False')
@@ -73,7 +75,7 @@ if __name__ == '__main__':
             copy_base_config[key] = run_config[key][pos[idx]]
 
         for repetition_idx in range(args.repetition_start_idx, args.number_of_repetitions):
-            tpu_name = f"tpu-{tpu_type}-euw4a-{tpu_id}"
+            tpu_name = f"tpu-{tpu_type}-{args.network}-{tpu_id}"
 
             cors = int(str(tpu_type).split('-')[-1])
             if cors == 8:
@@ -94,10 +96,10 @@ if __name__ == '__main__':
             with open(f"buffer_configs/{tpu_id}_{run_name}.json", 'w+') as w:
                 w.write(json.dumps(copy_base_config))
 
-            experiment_command = f"python3 main.py --model buffer_configs/{tpu_id}_{run_name}.json --tpu {tpu_name}"
+            experiment_command = f"../python3 main.py --model buffer_configs/{tpu_id}_{run_name}.json --tpu {tpu_name}"
             delete_command = f"pu delete {tpu_name} --yes"
-            tpu_creat_command = f"gcloud compute tpus create {tpu_name} --zone europe-west4-a " \
-                                f"--range {tpu_range} --network tpu-euw4a --version 1.15.5 " \
+            tpu_creat_command = f"gcloud compute tpus create {tpu_name} --zone {args.zone} " \
+                                f"--range {tpu_range} --network {args.network} --version 1.15.5 " \
                                 f"--accelerator-type {tpu_type_str} --project {args.project}"
 
             if str2bool(args.use_preemptible):
@@ -109,8 +111,8 @@ if __name__ == '__main__':
             prosses_name = f"tpu_id:{tpu_id}--{run_name}"
 
             if str2bool(args.use_manager):
-                comm = f"python3 run_manager.py '{experiment_command}' {tpu_name} {tpu_type} " \
-                       f"{args.run_name_prefix + run_name} {str2bool(args.use_preemptible)}"
+                comm = f"python3 run_manager.py '{experiment_command}' {tpu_name} {tpu_type} {args.zone} " \
+                       f"{args.network} {args.run_name_prefix + run_name} {str2bool(args.use_preemptible)}"
             else:
                 comm = f"({tpu_creat_command} && {experiment_command}) ; {delete_command}"
 
