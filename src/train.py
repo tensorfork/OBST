@@ -59,6 +59,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
     hooks = []
     output_shapes = []
     tf.config.optimizer.set_experimental_options(params.tensorflow_optimization_settings)
+    manual_global_step = tf.get_variable("manual_global_step")
 
     def _model_fn(*args):
         # Construct mtf graph + mesh from params
@@ -189,7 +190,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 frame_out = loop_out[4]
 
         if params.train:
-            update_ops, learning_rate = get_optimizer(loss, params)
+            update_ops, learning_rate = get_optimizer(loss, params, manual_global_step)
         else:
             if params.use_language:
                 token_out = mtf.anonymize(token_out)
@@ -222,7 +223,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             print(dim_name)
         print('\n')
 
-        lowering = mtf.Lowering(graph, {params.mesh: params.mesh_impl}, autostack=(params.grad_accumulation <= 1))
+        lowering = mtf.Lowering(graph, {params.mesh: params.mesh_impl})
 
         if params.train:
             log_dict = {'learning_rate': tf.cast(learning_rate, tf.float32)}
@@ -233,12 +234,12 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 log_dict['token_loss'] = tf.cast(lowering.export_to_tf_tensor(token_loss), tf.float32)
 
             w_global_step = tf.cast(tf.train.get_or_create_global_step(), tf.float32)
-            w_global_step = w_global_step / tf.constant(params.grad_accumulation, tf.float32)
 
             write_summary = [add_summary(tf_loss=tf.cast(lowering.export_to_tf_tensor(loss), tf.float32),
-                                         value=log_dict,
-                                         global_step=w_global_step),
-                             tf.assign_add(tf.train.get_or_create_global_step(), 1)]\
+                                         value=log_dict, global_step=w_global_step),
+                             tf.assign_add(manual_global_step, 1),
+                             tf.assign_add(tf.train.get_or_create_global_step(),
+                                           manual_global_step % params.grad_accumulation)]\
                             + [lowering.lowered_operation(op) for op in update_ops]
 
             hooks.append(mtf.MtfRestoreHook(lowering))

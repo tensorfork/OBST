@@ -16,7 +16,7 @@ def import_float(imported):
     return tf.constant(imported, dtype=tf.float32, shape=[])
 
 
-def get_optimizer(loss: mtf.Tensor, params: ModelParameter
+def get_optimizer(loss: mtf.Tensor, params: ModelParameter, manual_step
                   ) -> typing.Tuple[typing.Tuple[mtf.Tensor, typing.List[mtf.Assign],
                                                  typing.List[mtf.Tensor]], tf.Tensor]:
     """
@@ -31,23 +31,20 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter
     global_steps_float = tf.cast(global_step, tf.float32)
 
     if params.warmup_steps > 0:
-        warmup_steps_float = import_float(params.warmup_steps * params.grad_accumulation)
+        warmup_steps_float = import_float(params.warmup_steps)
         is_warmup = tf.cast(global_steps_float < warmup_steps_float, tf.float32)
         tf_learning_rate = tf_learning_rate * weighted_add(global_steps_float / warmup_steps_float, 1, is_warmup)
 
     if params.learning_rate_decay_multi != 0 and params.learning_rate_decay_multi != 1:
-        start_step = import_float(params.learning_rate_decay_start_step * params.grad_accumulation)
+        start_step = import_float(params.learning_rate_decay_start_step)
         tf_learning_rate = tf.maximum(tf_learning_rate *
                                       import_float(params.learning_rate_decay_multi) **
-                                      (tf.maximum((global_steps_float - start_step) /
-                                                  import_float(params.grad_accumulation),
+                                      (tf.maximum(global_steps_float - start_step,
                                                   import_float(0))),
                                       import_float(params.learning_rate_decay_min))
 
     learning_rate = mtf.import_fully_replicated(params.mesh, tf.cast(tf_learning_rate, dtype), [], "learning_rate")
-    global_step = mtf.import_fully_replicated(params.mesh, tf.cast(tf.train.get_or_create_global_step(), dtype), [],
-                                              "global_steps_float")
-    step = mtf.cast(mtf.equal(mtf.mod(global_step, params.grad_accumulation), 0), dtype)
+    step = mtf.cast(mtf.equal(mtf.mod(manual_step, params.grad_accumulation), 0), dtype)
     mstep = 1 - step
     beta1 = 1 - step * mtf.import_fully_replicated(params.mesh, tf.constant(1 - 0.9, dtype, []), mtf.Shape([]),
                                                    name="beta1")
