@@ -34,6 +34,14 @@ class GFile:
         self.file.write(data)
         return 3
 
+    def write_flush(self, data):
+        self.file.write(data)
+        self.file.flush()
+        return 3
+
+    def flush(self):
+        self.file.flush()
+
     def close(self):
         self.file.flush()
         self.file.close()
@@ -89,13 +97,13 @@ if __name__ == '__main__':
                                               zone=args.zone, cidrblock=tpu_range,
                                               preemptible=preemptible, wait=True, network=args.network)
 
-                out_io.write(f"\n\n\n{tpu_log}\n\n\n")
+                out_io.write_flush(f"\n\n\n{tpu_log}\n\n\n")
 
     try:
         tpu_log = tpu_client.create(tpu_name, mesh=tpu_type, tf_version='1.15.5', zone=args.zone,
                                     cidrblock=tpu_range, preemptible=preemptible, wait=True, network=args.network)
 
-        out_io.write(f"{tpu_log}\n\n\n")
+        out_io.write_flush(f"{tpu_log}\n\n\n")
 
         wait_for_tpu()
 
@@ -114,22 +122,28 @@ if __name__ == '__main__':
             if not done and not health['healthy']:
                 os.killpg(os.getpgid(pro.pid), signal.SIGTERM)
 
+                time.sleep(60)
+
+                out_io.flush()
+
                 tpu_log = tpu_client.recreate(tpu_name, mesh=tpu_type, tf_version='1.15.5',
                                               zone=args.zone, cidrblock=tpu_range,
                                               preemptible=preemptible, wait=True, network=args.network)
 
-                out_io.write(f"\n\n\n{tpu_log}\n\n\n")
+                out_io.write_flush(f"\n\n\n{tpu_log}\n\n\n")
 
                 wait_for_tpu()
 
                 pro = subprocess.Popen(run_command, stdout=out_io, stderr=out_io, shell=True, preexec_fn=os.setsid)
     except Exception as e:
-        out_io.write(f"\n\n\nrun_manager has crashed\n{e}\n\n\n")
+        out_io.write_flush(f"\n\n\nrun_manager has crashed\n{e}\n\n\n")
+
+    out_io.write_flush(f"\n\n\nIt seams like that the run is done.")
 
     try:
         tpu_log = tpu_client.delete(tpu_name)
-        out_io.write(f"\n\n\n{tpu_log}")
+        out_io.write_flush(f"\n{tpu_log}")
     except:
-        out_io.write(f"\n\n\nFailed to Delete the TPU")
+        out_io.write_flush(f"\nFailed to Delete the TPU")
 
     out_io.close()

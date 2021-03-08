@@ -105,16 +105,17 @@ if __name__ == '__main__':
             if str2bool(args.use_preemptible):
                 tpu_creat_command = tpu_creat_command + " --preemptible"
 
-            if len(run_name) > 66:
-                run_name = hashlib.sha256(run_name.encode('utf-8')).hexdigest()
-
-            prosses_name = f"tpu_id:{tpu_id}--{run_name}"
-
             if str2bool(args.use_manager):
                 comm = f"python3 run_manager.py '{experiment_command}' {tpu_name} {tpu_type} {args.zone} " \
                        f"{args.network} {args.run_name_prefix + run_name} {str2bool(args.use_preemptible)}"
             else:
                 comm = f"({tpu_creat_command} && {experiment_command}) ; {delete_command}"
+
+            if len(run_name) > 66:
+                run_name = hashlib.sha256(run_name.encode('utf-8')).hexdigest()
+
+            prosses_name = f"tpu_id:{tpu_id}--{run_name}"
+
 
             subprocess.run(['screen', '-dmS', prosses_name, 'bash', '-c', comm])
 
