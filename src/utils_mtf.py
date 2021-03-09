@@ -98,6 +98,22 @@ def concat(tensor_list: typing.List[mtf.Tensor], dim: typing.Union[mtf.Dimension
     return unanonymize(mtf.concat([anonymize(t, dim) for t in tensor_list], anonymize_dim(dim)), dim)
 
 
+def pad(tensor: mtf.Tensor, dim: typing.Union[mtf.Dimension, str], padding: typing.Tuple[int, int]
+        ) -> mtf.Tensor:
+    """
+    Pad across a given (potentially non-anonymous) dimension in mtf.Tensor. This first anonymizes the dimension
+    to concat in the first place, next it concats across the dimension and only then it replicates it on all devices
+    again.
+    Non-Anonymous shapes are not necessary, as the anonymization can skip itself if it isn't necessary.
+    :param tensor: mtf.Tensor's to pad
+    :param dim: dimension or name to pad in
+    :param padding: padding of dimension
+    :return: concated tensorlist
+    """
+    dim = dim_name(dim)
+    return mtf.pad(anonymize(tensor, dim), padding, anonymize_dim(dim))
+
+
 def random_name() -> str:
     """
     Generates a random name based on the globally set seed using python's random module.
@@ -107,6 +123,15 @@ def random_name() -> str:
     """
     _NAME_INDEX[0] += 1
     return str(_NAME_INDEX[0])
+
+
+def to_float(tensor: mtf.Tensor) -> mtf.Tensor:
+    """
+    Cast a tensor to float
+    :param tensor: tensor to be casted
+    :return: casted tensor
+    """
+    return mtf.cast(tensor, tf.float32)
 
 
 def dim_name(dim: typing.Union[mtf.Dimension, str]) -> str:
@@ -200,6 +225,10 @@ def activate(block_input: mtf.Tensor) -> mtf.Tensor:
     :return: activated mtf.Tensor
     """
     return mtf.relu(block_input)
+
+
+def weighted_add(left, right, alpha):
+    return left * alpha + right * (1 - alpha)
 
 
 def slice(tensor: mtf.Tensor, start: int, end: int, dim: typing.Union[mtf.Dimension, str]):

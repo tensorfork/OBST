@@ -2,23 +2,24 @@
 "Sub Main" that contains one function to start the training loop.
 """
 
-from functools import partial
 import argparse
 import json
 import re
+from functools import partial
 
-import numpy as np
 import mesh_tensorflow as mtf
+import numpy as np
 import tensorflow.compat.v1 as tf
 from tensorflow.compat.v1 import tpu
-from tensorflow.python.tpu.topology import Topology
 from tensorflow.python.ops import summary_ops_v2 as summary
 from tensorflow.python.tpu.device_assignment import device_assignment
+from tensorflow.python.tpu.topology import Topology
+from tensorflow_estimator.python.estimator import estimator as estimator_lib
 
 from .dataclass import ModelParameter
+from .eval import gen_sample_fn
 from .inputs import dataset, gpt_neo_input
 from .train import computation_func
-from .eval import gen_sample
 
 
 def main(args: argparse.Namespace) -> None:
@@ -34,20 +35,30 @@ def main(args: argparse.Namespace) -> None:
     # Setup logging
     model_path = args.model if args.model.endswith(".json") else f"session_configs/{args.model}.json"
     with open(model_path) as f:
-        params = json.load(f)
-    params = ModelParameter(params)
+        _params = json.load(f)
+    params = ModelParameter(_params)
+    params.train = args.run_mode == 'train'
     # Read params of model
 
-    # Fetch appropriate input functions
+    json.dump(_params, tf.io.gfile.GFile(f"{params.model_path}/run_config.json", 'w'))
 
+    params.current_step = int(estimator_lib._load_global_step_from_checkpoint_dir(params.model_path))
+
+    # If run mode == sample, set the batch size to one
+    if not params.train:
+        params.train_batch_size = 1
+        params = ModelParameter(params)
+
+    # Fetch appropriate input functions
     if params.model_mode == 'jannet':
-        input_fn = partial(dataset, params=params, step=0, train=args.run_mode == 'train')
+        input_fn = dataset
     elif params.model_mode == 'gpt':
-        input_fn = partial(gpt_neo_input, params=params, step=0, eval=False)
+        input_fn = gpt_neo_input
 
         # Set params for text only GPT mode.
         params.use_language = True
         params.use_video = False
+        params = ModelParameter(params)
 
     else:
         raise ValueError(f"model_mode need to be 'jannet' or 'gpt' {params.model_mode}, "
@@ -64,7 +75,7 @@ def main(args: argparse.Namespace) -> None:
     '''
     if args.dry:
         inp = {'token_x': tf.zeros([1]), 'token_y': tf.zeros([1]), 'frame': tf.zeros([1]), 'vid_msk': tf.zeros([1]),
-               'tkn_msk': tf.zeros([1])
+               'txt_msk': tf.zeros([1])
                }
         get_model_fn(params)(inp)
         return
@@ -107,38 +118,29 @@ def main(args: argparse.Namespace) -> None:
             params.num_cores = int(np.prod(topo_object.mesh_shape))
             params.num_hosts = int(topo_object.num_tasks)
             params.num_cores_per_host = int(params.num_cores // params.num_hosts)
-            assert params.num_cores_per_host == int(topo_object.num_tpus_per_task)
+            if params.num_cores_per_host != int(topo_object.num_tpus_per_task):
+                raise ValueError
 
             params.d_assignment = device_assignment(topology, num_replicas=params.num_cores,
                                                     computation_shape=[1, ] * mtf.utils.topology_rank(topology))
-
             params.mesh_impl = mtf.simd_mesh_impl.SimdMeshImpl(mtf_mesh_shape, params.layout_rules,
                                                                None, params.d_assignment)
 
-        if args.run_mode == 'train':
+        if params.train:
             summary_writer = summary.create_file_writer(params.model_path)
             with summary_writer.as_default(), (summary.always_record_summaries()):
-
-                computation = computation_func(params,
-                                               input_fn,
-                                               session_config,
-                                               tpu_cluster_resolver,
-                                               run_mode=args.run_mode)
-
-                for current_step in computation:
-                    print('current_step:', current_step)
-
-                tf.logging.info('finished.')
-
-        else:  # run_mode == 'sample'
-
-            computation = computation_func(params,
-                                           input_fn,
-                                           session_config,
-                                           tpu_cluster_resolver,
-                                           run_mode=args.run_mode)
-
-            gen_sample(computation, params)
+                computation_func(params,
+                                 input_fn,
+                                 session_config,
+                                 tpu_cluster_resolver,
+                                 [lambda x: print(f"Current step: {x}")] * params.debug_train_step)
+        else:  # train == 'sample'
+            computation_func(params,
+                             input_fn,
+                             session_config,
+                             tpu_cluster_resolver,
+                             [gen_sample_fn(params)])
+    tf.logging.info('finished.')
 
     with tf.Session(target=tpu_cluster_resolver.get_master(), config=session_config) as sess:
         sess.run(tpu.shutdown_system())

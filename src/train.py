@@ -4,411 +4,426 @@ Contains functions to create a training loop and log its outputs to tensorboard
 import collections
 import threading
 import time
+import typing
 
 import mesh_tensorflow as mtf
 import numpy as np
 import tensorflow.compat.v1 as tf
-from tensorflow.compat.v1 import tpu
 from tensorflow.python.framework import ops
 from tensorflow.python.ops import summary_ops_v2 as summary
-from tensorflow.python.tpu import tpu_feed
+from tensorflow.python.tpu import tpu, tpu_feed
 from tensorflow.python.tpu.ops import tpu_ops
-from tensorflow_estimator.python.estimator import estimator as estimator_lib
+from tensorflow.python.ops import variables
 
 from .dataclass import ModelParameter
 from .model import build
 from .optimizers import get_optimizer
-
-tf.config.optimizer.set_experimental_options({"layout_optimizer":              True,
-                                              "constant_folding":              True,
-                                              "shape_optimization":            True,
-                                              "remapping":                     True,
-                                              "arithmetic_optimization":       True,
-                                              "dependency_optimization":       True,
-                                              "loop_optimization":             True,
-                                              "function_optimization":         True,
-                                              "debug_stripper":                True,
-                                              "disable_model_pruning":         False,
-                                              "scoped_allocator_optimization": True,
-                                              "pin_to_host_optimization":      False,
-                                              "implementation_selector":       True,
-                                              "auto_mixed_precision":          True,
-                                              "disable_meta_optimizer":        False,
-                                              "min_graph_nodes":               0
-                                              })
+from .utils_mtf import pad, to_float, weighted_add
 
 
-class CapturedObject(object):
-    """A placeholder to capture an object.
-    This is useful when we need to capture a Python object in the Tensorflow
-    control flow body function and use it outside the control flow.
-    """
+class CheckpointLoaderHook(tf.estimator.SessionRunHook):
+    """Load checkpoint right after the session started."""
 
-    def __init__(self):
-        self._object = None
-        self._captured = False
+    def __init__(self, checkpoint_dir):
+        self.checkpoint_dir = checkpoint_dir
 
-    def capture(self, o):
-        if self._captured:
-            raise RuntimeError(
-                    'InternalError: Object can capture only once. Please file bug.')
-
-        self._captured = True
-        self._object = o
-
-    def get(self):
-        if not self._captured:
-            raise RuntimeError(
-                    'InternalError: Object is not captured properly before `get`. '
-                    'Please file bug.')
-        return self._object
+    def after_create_session(self, session, coord):
+        saver_collection = tf.get_collection(tf.GraphKeys.SAVERS)
+        if saver_collection:
+            check_point = tf.train.latest_checkpoint(self.checkpoint_dir)
+            if check_point:
+                saver_collection[0].restore(session, check_point)
 
 
-_NONE_PNUM = None
-_NO_DATA = None
+def add_summary(tf_loss, value, global_step):
+    """Add all summaries."""
+
+    def _host_loss_summary(local_tf_loss, local_value, local_global_step):
+        """Add summary.scalar in host side."""
+        gs = tf.cast(local_global_step, tf.int64)
+        with tf.control_dependencies([summary.scalar(key, local_value[key], step=gs) for key in local_value.keys()]):
+            return tf.identity(local_tf_loss)
+
+    # Cast the global step to tf.int32, since
+    # outside_compilation does not support tf.int64.
+    return tpu.outside_compilation(_host_loss_summary, tf_loss, value, tf.cast(global_step, tf.int32))
 
 
-def _host_id_to_tf_device(host_id, external_worker):
-    if not isinstance(host_id, int):
-        raise ValueError
-    return f"{'/job:worker' * external_worker}/task:{host_id}/device:CPU:0"
+def _import_tensor(params, tensor, shape, name):
+    return mtf.import_laid_out_tensor(params.mesh, params.mesh_impl.LaidOutTensor([tensor]), shape, name)
 
 
-class SubBatchSlicer(object):
-    """Reads and distributes a sub-batch on a host."""
+def computation_func(params: ModelParameter, input_fn: typing.Callable,
+                     session_config, cluster_resolver, callback_fns):
+    # TODO(Lucas): move tf dataset to iterator/queue
+    # TODO(Lucas): clean up code + optimize
+    host_id_to_tf_device = "/job:worker/task:{:d}/device:CPU:0"
+    hooks = []
+    output_shapes = []
+    tf.config.optimizer.set_experimental_options(params.tensorflow_optimization_settings)
 
-    def __init__(self, sub_batch_ds_creator, host_id, all_sub_batch_pnums,
-                 simd_mesh_impl, mtf_input_shapes, external_worker, global_batch):
-        self._host_id = host_id
-        self._all_sub_batch_pnums = all_sub_batch_pnums
-        self._simd_mesh_impl = simd_mesh_impl
-        self._mtf_input_shapes = mtf_input_shapes
-        self._external_worker = external_worker
-        self._global_batch = global_batch
+    def _model_fn(*args):
+        manual_global_step = tf.get_variable("manual_global_step", [], tf.int64, initializer=tf.zeros_initializer(),
+                                             trainable=False,
+                                             aggregation=variables.VariableAggregation.ONLY_FIRST_REPLICA)
+        # Construct mtf graph + mesh from params
+        graph = mtf.Graph()
 
-        self._validate_args()
+        # Build mtf mesh object
+        params.mesh = mtf.Mesh(graph, "mesh", mtf.utils.BalancedVariablePlacer(params.cpu_devices))
 
-        with ops.device(_host_id_to_tf_device(self._host_id, self._external_worker)):
-            self._ds_iterator = sub_batch_ds_creator().make_initializable_iterator()
+        # Build mtf_features & seq length dict for getting number of microbatches
+        # We need to pack inputs into a dict to pass into serialize_training_step
+        # params.mode = mode
 
-    @property
-    def initializer(self):
-        return self._ds_iterator.initializer
+        frame_input = None
+        token_x_input = None
+        token_y_input = None
+        frame_mask_src = None
+        frame_mask_tag = None
+        token_mask = None
 
-    def get_slices(self):
-        """Yields sliced tensors and which remote pnums they should go to.
-        Yields:
-          tf_tensor: The sliced tensor.
-          pnum: Which process number the tf_tensor should to go.
-          input_i: The input ordinal of the tf_tensor.
-        """
-        with ops.device(_host_id_to_tf_device(self._host_id, self._external_worker)):
+        if params.use_video:
+            frame_input = _import_tensor(params, args[0], params.frame_input_shape, "frame_input")
 
-            all_input_tensors = self._ds_iterator.get_next()
-            if isinstance(all_input_tensors, tf.Tensor):
-                all_input_tensors = [all_input_tensors]
-            assert len(all_input_tensors) == len(self._all_sub_batch_pnums)
+            if params.use_language:
+                token_x_input = _import_tensor(params, args[1], params.token_dim_shape, "tkn_src")
+                token_y_input = _import_tensor(params, args[2], params.token_dim_shape, "tkn_tgt")
+                frame_mask_src = _import_tensor(params, args[3], params.frame_mask_shape, "vid_msk_src")
+                frame_mask_tag = _import_tensor(params, args[4], params.frame_mask_shape, "vid_msk_tag")
+                token_mask = _import_tensor(params, args[5], params.token_dim_shape, "txt_msk")
 
-            for input_i in range(len(all_input_tensors)):
-                input_tensor = all_input_tensors[input_i]
-                sub_batch_pnums = self._all_sub_batch_pnums[input_i]
-                mtf_input_shape = self._mtf_input_shapes[input_i]
+        else:  # params.use_language
+            token_x_input = _import_tensor(params, args[0], params.token_dim_shape, "tkn_src")
+            token_y_input = _import_tensor(params, args[1], params.token_dim_shape, "tkn_tgt")
 
-                # Initialize the cache for each input_i
-                self._init_slice_cache()
-
-                for pnum in sub_batch_pnums:
-                    input_slice = self._slice_tensor(input_tensor, mtf_input_shape, pnum)
-                    yield input_slice, pnum, input_i
-
-    def _validate_args(self):
-        if not isinstance(self._all_sub_batch_pnums, list):
-            raise ValueError
-        if not isinstance(self._mtf_input_shapes, list):
-            raise ValueError
-        if not self._all_sub_batch_pnums:
-            raise ValueError
-        if not self._mtf_input_shapes:
-            raise ValueError
-        if len(self._all_sub_batch_pnums) != len(self._mtf_input_shapes):
-            raise ValueError
-
-    def _init_slice_cache(self):
-        # Cache for tensor slices
-        self._slice_dict = collections.defaultdict(list)
-
-    def _slice_tensor(self, input_tensor, mtf_input_shape, pnum):
-        """Slice input_tensor according to mtf_input_shape and pnum."""
-        s_begin = self._simd_mesh_impl.slice_begin(mtf_input_shape, pnum)
-        if not self._global_batch:
-            # Always slice from 0 in the first dimension (batch dimension), since
-            # input_tensor a sub-batch tensor.
-            s_begin[0] = 0
-        if tuple(s_begin) in self._slice_dict:
-            return self._slice_dict[tuple(s_begin)]
-
-        s_shape = self._simd_mesh_impl.slice_shape(mtf_input_shape)
-        input_slice = tf.slice(input_tensor, s_begin, s_shape)
-
-        self._slice_dict[tuple(s_begin)] = input_slice
-        return input_slice
-
-
-class SimdMeshImplInputReader(object):
-    """Handles input pipeline for SimdMeshImpl."""
-
-    def __init__(self,
-                 simd_mesh_impl,
-                 ds_creator,
-                 mtf_input_shapes,
-                 ds_prefetch_size=tf.data.experimental.AUTOTUNE,
-                 external_worker=True,
-                 is_eval_mode=False):
-        """Input pipeline for the SIMD implementation of MeshTensorflow.
-        Args:
-          simd_mesh_impl: A mtf.simd_mesh_impl.SimdMeshImpl object.
-          ds_creator: A function that creates a dataset.
-          mtf_input_shapes: A list of mtf.Shape. Then length of it must be equal
-            to the number of elements generated by the ds_creator. NOTE, we assume:
-              1. The 0-th dimension is the batch dimension.
-              2. The batch dimension is consistent across all input shapes in
-                 mtf_input_shapes.
-          ds_prefetch_size: The buffer size for prefetching
-            (default tf.data.experimental.AUTOTUNE).
-          external_worker: Whether you have an external tpu_worker or not. Set it to
-            False if you run the program locally, for example, during local unit
-            test.
-          is_eval_mode: In evaluation mode, only one dataset object will be created,
-            as opposed to one dataset for each sub-batch. Default is False. Set it
-            to True during evaluation, to ensure that one evaluation instance will
-            be used once and only once.
-        Note:
-          1. The efficiency is optimized according to the shape of the 0-th tensor:
-             mtf_input_shapes[0]. We recommand you to put the largest tensor as the
-             0-th input.
-          2. You need to call start_infeed_thread() before your train ops.
-        Example:
-            simd_mesh_impl = mtf.simd_mesh_impl.SimdMeshImpl(...)
-            # ds_creator is function that creates a tf.data.Dataset.
-            # This Dataset must return single examples (no batch dimension).
-            def ds_creator():
-              return tf.data.Dataset.from_tensors(x)
-            # mtf_input_shapes is a list of Shapes of all input tensors given by the
-            # dataset. All shapes must begin with the same batch dimension.
-            simd_input_reader = SimdMeshImplInputReader(simd_mesh_impl,
-                                                        ds_creator,
-                                                        mtf_input_shapes)
-            batch_dim = mtf.Dimension('batch', FLAGS.batch_size)
-            io_dim = mtf.Dimension('io', FLAGS.io_size)
-            mtf_input_shapes = [mtf.Shape([batch_dim, io_dim])]
-            infeed_queue = simd_input_reader.infeed_queue
-            tpu_train_computation = tpu.replicate(
-                computation=model_fn,
-                inputs=[[]] * num_cores,
-                infeed_queue=infeed_queue, ...)
-            with tf.Session() as sess:
-              simd_input_reader.start_infeed_thread(sess,
-                                                    number_steps=num_training_steps)
-              for _ in range(num_training_steps):
-                sess.run(tpu_train_computation)
-        """
-        super().__init__()
-        assert mtf_input_shapes
-        assert isinstance(mtf_input_shapes, list)
-
-        # TODO(lehou): Support nested structures for ds_creator, mtf_input_shapes.
-        self._simd_mesh_impl = simd_mesh_impl
-        self.num_cores = simd_mesh_impl.device_assignment.num_replicas
-
-        self.ordered_ordinals = []
-        self.ordered_hosts = []
-        self.ordered_host_ids = []
-        d_assignment = simd_mesh_impl.device_assignment
-
-        for pnum in range(self.num_cores):
-            physical_pnum = simd_mesh_impl.l2p(pnum)
-            # For MTF, there's always 1 core per replica. So logical_core=0.
-            self.ordered_ordinals.append(d_assignment.tpu_ordinal(replica=physical_pnum, logical_core=0))
-            host_device = d_assignment.host_device(replica=physical_pnum)
-            host_id = int(host_device.lower().split("/task:")[1].split("/device:")[0])
-            self.ordered_hosts.append(host_device)
-            self.ordered_host_ids.append(host_id)
-
-        self.num_hosts = len(set(self.ordered_hosts))
-        self.num_cores_per_host = self.num_cores // self.num_hosts
-        if self.num_cores != self.num_hosts * self.num_cores_per_host:
-            raise ValueError
-        self._ds_creator = ds_creator
-        self._mtf_input_shapes = mtf_input_shapes
-        self._ds_prefetch_size = ds_prefetch_size
-        self._external_worker = external_worker
-        self._is_eval_mode = is_eval_mode
-
-        self._gen_infeed_queue()
-
-    @property
-    def infeed_queue(self):
-        return self._infeed_queue
-
-    def start_infeed_thread(self, sess, number_steps=-1, initial_wait_sec=0.5):
-        """Start running enqueue ops in a thread.
-        Args:
-          sess: A tf.Session.
-          number_steps: Number of times to call sess.run(enqueue_ops).
-            default is -1 (forever).
-          initial_wait_sec: Number of seconds to wait before starting the enqueue
-            loop. Default is 0.5.
-        """
-
-        def _thread_fn():
-            time.sleep(initial_wait_sec)
-            if number_steps > 0:
-                for _ in range(number_steps):
-                    sess.run(self._enqueue_ops)
-            else:
-                while True:
-                    sess.run(self._enqueue_ops)
-
-        sess.run(self._input_initializers)
-        self._infeed_thread = threading.Thread(target=_thread_fn)
-        self._infeed_thread.start()
-
-    def _gen_infeed_queue(self):
-        """Generates _infeed_queue, _enqueue_ops, _input_initializers."""
-        pnum_maps = []
-        batch_size = self._mtf_input_shapes[0].to_integer_list[0]
-        for mtf_shape in self._mtf_input_shapes:
-            # Make sure that the batch size is the same across all input tensors.
-            assert batch_size == mtf_shape.to_integer_list[0]
-            pnum_maps.append(self._get_pnum_map(mtf_shape))
-
-        # For each sub-batch, we need to know which host should read it.
-        if self._is_eval_mode:
-            # There should be just one dataset-holding host. Make the last host do it.
-            hosts_to_hold_ds = [self.num_hosts - 1]
+        if params.train or not params.use_autoregressive_sampling:
+            loss, video_loss, token_loss, frame_out, token_out = build(params,
+                                                                       frame_input,
+                                                                       token_x_input,
+                                                                       token_y_input,
+                                                                       frame_mask_src,
+                                                                       frame_mask_tag,
+                                                                       token_mask)
         else:
-            hosts_to_hold_ds = self._get_hosts_to_hold_ds(pnum_maps[0])
-        sub_batch_size = batch_size // len(hosts_to_hold_ds)
-        tf.logging.info("MTF sub_batch_size: {}".format(sub_batch_size))
-        assert sub_batch_size * len(hosts_to_hold_ds) == batch_size
+            if params.use_video:
+                tkn_per_frame = mtf.Dimension("language_token_per_frame",
+                                              params.language_token_per_frame)
+                shape = [params.batch_dim, params.sequence_dim, tkn_per_frame, params.vocab_dim]
+                steps = params.time_patch_size
 
-        def sub_batch_ds_creator():
-            return self._ds_creator().batch(
-                    sub_batch_size, drop_remainder=True).prefetch(
-                    self._ds_prefetch_size)
+                def body_fn(position, token_x_input, token_y_input, frame_input,
+                            frame_mask_src, frame_mask_tag, token_mask, *states):
 
-        # For each sub-batch, create a SubBatchSlicer object.
-        # Get the list of pnums for each input.
-        sub_batch_slicer_list = [SubBatchSlicer(sub_batch_ds_creator,
-                                                host_id,
-                                                [pnum_map.flatten().tolist() if self._is_eval_mode else
-                                                 pnum_map[sub_batch_i, ...].flatten().tolist()
-                                                 for pnum_map in pnum_maps],
-                                                self._simd_mesh_impl,
-                                                self._mtf_input_shapes,
-                                                self._external_worker,
-                                                global_batch=not self._is_eval_mode)
-                                 for sub_batch_i, host_id in enumerate(hosts_to_hold_ds)]
+                    _, _, _, frame_out, token_out = build(params,
+                                                          frame_input,
+                                                          token_x_input,
+                                                          token_y_input,
+                                                          frame_mask_src,
+                                                          frame_mask_tag,
+                                                          token_mask)
 
-        # Slots for all laidout tensors.
-        all_laidout_tensors = [[_NO_DATA] * len(self._mtf_input_shapes) for _ in range(self.num_cores)]
+                    frame_input = weighted_add(pad(frame_out, params.sequence_dim, (0, 1)), frame_input,
+                                               mtf.one_hot(position, params.frame_input_sequence, dtype=tf.float32))
 
-        # Read tf_tensors, put them in slots.
-        for sub_batch_slicer in sub_batch_slicer_list:
-            for tf_tensor, pnum, input_i in sub_batch_slicer.get_slices():
-                all_laidout_tensors[pnum][input_i] = tf_tensor
+                    if params.use_language:
+                        one_hot_sequence = mtf.one_hot(position, params.sequence_dim, dtype=tf.float32)
+                        token_out = mtf.argmax(mtf.reshape(token_out, new_shape=shape), reduced_dim=params.vocab_dim)
+                        padding_token = to_float(mtf.equal(token_out, params.padding_token))
 
-        # Make sure that there are no Nones in all_laidout_tensors.
-        for laidout_tensors in all_laidout_tensors:
-            assert _NO_DATA not in laidout_tensors
+                        token_x_input = weighted_add(mtf.reshape(token_out, new_shape=params.token_dim_shape),
+                                                     token_x_input,
+                                                     mtf.one_hot(position, params.sequence_dim, dtype=tf.int32))
 
-        with ops.device(_host_id_to_tf_device(hosts_to_hold_ds[0],
-                                              self._external_worker)):
-            self._infeed_queue, self._enqueue_ops = self._enqueue_laidout_tensors(
-                    all_laidout_tensors)
+                        token_pad = mtf.less_equal(mtf.range(params.mesh, tkn_per_frame, dtype=tf.float32),
+                                                   to_float(mtf.argmax(padding_token, reduced_dim=tkn_per_frame)),
+                                                   output_shape=token_out.shape)
 
-        self._input_initializers = [s.initializer for s in sub_batch_slicer_list]
+                        token_mask = weighted_add(mtf.reshape(to_float(token_pad), new_shape=params.token_dim_shape),
+                                                  to_float(token_mask), one_hot_sequence)
 
-    def _get_pnum_map(self, mtf_shape):
-        """Returns the pnum_map according to mtf_shape.
-        Args:
-          mtf_shape: A mtf.Shape object.
-        Returns:
-          A numpy array pnum_map. For the i-th sub-batch, pnum_map[i] is a numpy
-          array containing all pnums that tensor slices of the i-th sub-batch
-          will be send to.
-        """
-        s_shape = self._simd_mesh_impl.slice_shape(mtf_shape)
-        shape_list = [dim_size // s_dim_size for dim_size, s_dim_size in zip(
-                mtf_shape.to_integer_list, s_shape)]
+                        frame_pad = to_float(mtf.greater(mtf.reduce_sum(padding_token, reduced_dim=tkn_per_frame), 0))
+                        token_x_input = weighted_add(frame_pad, to_float(token_x_input), one_hot_sequence)
 
-        pnum_map_shape = shape_list + [
-                self.num_cores // np.prod(shape_list)]
-        assert np.prod(pnum_map_shape) == self.num_cores
+                    return position + 1, token_x_input, token_y_input, \
+                           frame_input, frame_mask_src, frame_mask_tag, token_mask
 
-        # Initialize the pnum_map to _NONE_PNUM.
+                if token_mask is not None:
+                    token_mask = to_float(token_mask)
+                if frame_mask_src is not None:
+                    frame_mask_src = to_float(frame_mask_src)
+                if frame_mask_tag is not None:
+                    frame_mask_tag = to_float(frame_mask_tag)
+
+                while_loop_inputs = [mtf.zeros(params.mesh, [], tf.int32) + params.initial_autoregressive_position,
+                                     token_x_input, token_y_input, frame_input,
+                                     frame_mask_src, frame_mask_tag, token_mask]
+
+            else:  # -> params.use_language
+                steps = params.sequence_dim.size
+
+                def body_fn(position, token_x, token_y, *states):
+                    _, _, _, _, token_out = build(params,
+                                                  mtf.ones(params.mesh, [], tf.float32),
+                                                  token_x,
+                                                  token_y,
+                                                  mtf.ones(params.mesh, [], tf.float32),
+                                                  mtf.ones(params.mesh, [], tf.float32),
+                                                  mtf.ones(params.mesh, [], tf.float32))
+                    return (position + 1,
+                            weighted_add(mtf.argmax(token_out, reduced_dim=params.vocab_dim), token_x,
+                                         mtf.one_hot(position, output_dim=params.sequence_dim, dtype=tf.int32)),
+                            token_y)
+
+                while_loop_inputs = [mtf.zeros(params.mesh, [], tf.int32) + params.initial_autoregressive_position,
+                                     token_x_input, token_y_input]
+
+            def cond_fn(position, *states):
+                is_done = mtf.greater_equal(position, steps)
+                is_done = mtf.logical_or(is_done,
+                                         mtf.greater_equal(position - params.initial_autoregressive_position, steps))
+                is_done = mtf.reduce_sum(is_done)
+
+                return mtf.logical_not(is_done)
+
+            loop_out = mtf.while_loop(cond_fn=cond_fn, body_fn=body_fn, inputs=while_loop_inputs)
+
+            if params.use_language:
+                token_out = loop_out[2]
+            if params.use_video:
+                frame_out = loop_out[4]
+
+        if params.train:
+            update_ops, learning_rate = get_optimizer(loss, params, manual_global_step)
+        else:
+            if params.use_language:
+                token_out = mtf.anonymize(token_out)
+            if params.use_video:
+                frame_out = mtf.anonymize(frame_out)
+
+        print('\n')
+        param_count = int(sum(np.prod([d.size for d in variable.shape.dims]) for variable in graph.trainable_variables))
+        var_count = int(sum(np.prod([d.size for d in variable.shape.dims]) for variable in graph.all_variables))
+
+        constant = '  variables: '
+        variable_mapping = [('Model', param_count - params.embedding_param_count),
+                            ('Embedding', params.embedding_param_count),
+                            ('Untrainable', var_count - param_count),
+                            ('', 0),
+                            ('Total trainable', param_count),
+                            ('Total', var_count)]
+        variable_mapping = [(name, f'{int(count):,}') for name, count in variable_mapping]
+        max_str = max(len(name) for name, _ in variable_mapping)
+        max_int = max(len(count) for _, count in variable_mapping)
+        for name, count in variable_mapping:
+            if not name:
+                print('-' * (max_str + max_int + len(constant)))
+                continue
+            print(f'{name:<{max_str}s}{constant}{count:>{max_int}s}')
+
+        print("\nDimensions:")
+        for dim_name in sorted(list(set([item for variable in graph.all_variables
+                                         for item in variable.shape.dimension_names]))):
+            print(dim_name)
+        print('\n')
+
+        lowering = mtf.Lowering(graph, {params.mesh: params.mesh_impl})
+
+        if params.train:
+            log_dict = {'learning_rate': tf.cast(learning_rate, tf.float32)}
+            if params.use_video:
+                log_dict['video_loss'] = tf.cast(lowering.export_to_tf_tensor(video_loss), tf.float32)
+
+            if params.use_language:
+                log_dict['token_loss'] = tf.cast(lowering.export_to_tf_tensor(token_loss), tf.float32)
+
+            global_step = tf.train.get_or_create_global_step()
+
+            step = tf.mod(manual_global_step, tf.constant(params.grad_accumulation, dtype=tf.int64))
+            step = tf.equal(step, tf.constant(0, dtype=tf.int64))
+            step = tf.cast(step, tf.int64)
+
+            comput_ops = [add_summary(tf_loss=tf.cast(lowering.export_to_tf_tensor(loss), tf.float32),
+                                      value=log_dict, global_step=global_step),
+                          tf.assign_add(global_step, step),
+                          tf.assign_add(manual_global_step, tf.constant(1, dtype=tf.int64, shape=[]))]
+
+            comput_ops = comput_ops + [lowering.lowered_operation(op) for op in update_ops]
+
+            hooks.append(mtf.MtfRestoreHook(lowering))
+            with mtf.utils.outside_all_rewrites():
+                if params.use_checkpointing:
+                    saver = tf.train.Saver(tf.global_variables(),
+                                           sharded=True,
+                                           max_to_keep=1,
+                                           defer_build=False,
+                                           save_relative_paths=True)
+                    tf.add_to_collection(tf.GraphKeys.SAVERS, saver)
+                    hooks.append(tf.train.CheckpointSaverHook(params.model_path,
+                                                              save_steps=params.steps_per_checkpoint,
+                                                              saver=saver,
+                                                              listeners=[mtf.MtfCheckpointSaverListener(lowering)]))
+
+                return tf.group(comput_ops)
+
+        else:  # train == 'sample'
+            predictions = {}
+
+            if params.use_video:
+                predictions['frame_out'] = lowering.export_to_tf_tensor(frame_out)
+                predictions['frame_tgt'] = args[0]
+
+            if params.use_language:
+                predictions['token_out'] = lowering.export_to_tf_tensor(token_out)
+                predictions['token_tgt'] = args[1 + int(params.use_video)]
+
+            predictions = [val if val.dtype == tf.float32 else tf.cast(val, tf.float32) for val in predictions.values()]
+            output_shapes.extend([pred.shape for pred in predictions])
+            hooks.append(mtf.MtfRestoreHook(lowering))
+            return tpu_ops.outfeed_enqueue_tuple(predictions)
+
+    num_cores = params.mesh_impl.device_assignment.num_replicas
+
+    ordered_ordinals = []
+    ordered_hosts = []
+    ordered_host_ids = []
+    host_id_to_its_pnums = collections.defaultdict(list)
+    d_assignment = params.mesh_impl.device_assignment
+
+    for pnum in range(num_cores):
+        physical_pnum = params.mesh_impl.l2p(pnum)
+
+        # For MTF, there's always 1 core per replica. So logical_core=0.
+        ordered_ordinals.append(d_assignment.tpu_ordinal(replica=physical_pnum, logical_core=0))
+        host_device = d_assignment.host_device(replica=physical_pnum)
+        host_id = int(host_device.lower().split("/task:")[1].split("/device:")[0])
+        ordered_hosts.append(host_device)
+        ordered_host_ids.append(host_id)
+        host_id_to_its_pnums[host_id].append(pnum)
+
+    num_hosts = len(set(ordered_hosts))
+
+    pnum_maps = []
+    batch_size = params.input_pipeline_shape[0].to_integer_list[0]
+    for mtf_shape in params.input_pipeline_shape:
+        # Make sure that the batch size is the same across all input tensors.
+        assert batch_size == mtf_shape.to_integer_list[0]
+
+        s_shape = params.mesh_impl.slice_shape(mtf_shape)
+        shape_list = [dim_size // s_dim_size for dim_size, s_dim_size in zip(mtf_shape.to_integer_list, s_shape)]
+
+        pnum_map_shape = shape_list + [num_cores // np.prod(shape_list)]
+        assert np.prod(pnum_map_shape) == num_cores
+
+        # Initialize the pnum_map to None.
         pnum_map = np.empty(pnum_map_shape, dtype=object)
-        pnum_map[:] = _NONE_PNUM
+        pnum_map[:] = None
 
-        for pnum in range(self.num_cores):
-            s_begin = self._simd_mesh_impl.slice_begin(mtf_shape, pnum)
-            coord = [dim_size // s_dim_size for dim_size, s_dim_size in zip(
-                    s_begin, s_shape)]
+        for pnum in range(num_cores):
+            s_begin = params.mesh_impl.slice_begin(mtf_shape, pnum)
+            coord = [dim_size // s_dim_size for dim_size, s_dim_size in zip(s_begin, s_shape)]
             # put pnum in pnum_map[coord]
             pnum_array_ref = pnum_map[tuple(coord)]
             for idx, value in enumerate(pnum_array_ref):
-                if value is _NONE_PNUM:
+                if value is None:
                     pnum_array_ref[idx] = pnum
                     break
 
-        tf.logging.info("MTF pnum_map: {}".format(pnum_map))
-        assert _NONE_PNUM not in pnum_map
-        return pnum_map
+        pnum_maps.append(pnum_map)
 
-    def _get_hosts_to_hold_ds(self, pnum_map):
-        """Finds which host should read which sub-batch."""
-        assert _NONE_PNUM not in pnum_map
+    # For each sub-batch, we need to know which host should read it.
+    if params.train:
 
         # This records how many datasets (ds) are already stored on each host.
-        num_dss_per_host = [0] * self.num_hosts
+        num_dss_per_host = [0] * num_hosts
 
         # A list of host_ids that holds datasets (ds).
         hosts_to_hold_ds = []
 
-        def _get_num_pnums_per_host(sub_batch_pnum_map):
-            num_pnums_per_host = [0] * self.num_hosts
+        for sub_batch_pnum_map in pnum_maps[0]:
+
+            num_pnums_per_host = [0] * num_hosts
             for pnum in sub_batch_pnum_map.flatten():
-                num_pnums_per_host[self.ordered_host_ids[pnum]] += 1
-            return num_pnums_per_host
+                num_pnums_per_host[ordered_host_ids[pnum]] += 1
 
-        def _find_host_id_with_most_pnums_and_least_ds(num_pnums_per_host,
-                                                       num_dss_per_host):
-            host_metics = [(
-                    host_id, num_pnums_per_host[host_id],
-                    num_dss_per_host[host_id]) \
-                    for host_id in range(self.num_hosts)]
-            # Major max key: num_pnums
-            # Minor max key: -num_dss. We need to find a relatively spare host.
-            host_id, _, _ = max(host_metics, key=lambda keys: (keys[1], -keys[2]))
-            return host_id
+            host_metrics = [(host_id, num_pnums_per_host[host_id], num_dss_per_host[host_id]) for host_id in
+                            range(num_hosts)]
+            host_id, _, _ = max(host_metrics, key=lambda keys: (keys[1], -keys[2]))
 
-        for sub_batch_pnum_map in pnum_map:
-            num_pnums_per_host = _get_num_pnums_per_host(sub_batch_pnum_map)
-            host_id = _find_host_id_with_most_pnums_and_least_ds(num_pnums_per_host,
-                                                                 num_dss_per_host)
             num_dss_per_host[host_id] += 1
             hosts_to_hold_ds.append(host_id)
 
-        return hosts_to_hold_ds
+    else:
+        # There should be just one dataset-holding host. Make the last host do it.
+        hosts_to_hold_ds = [num_hosts - 1]
 
-    def _enqueue_laidout_tensors(self, all_laidout_tensors):
-        """Generate enqueue ops to enqueue all_laidout_tensors."""
+    sub_batch_size = batch_size // len(hosts_to_hold_ds)
+    tf.logging.info("MTF sub_batch_size: {}".format(sub_batch_size))
+    assert sub_batch_size * len(hosts_to_hold_ds) == batch_size
+
+    # Slots for all laidout tensors.
+    all_laidout_tensors = [[None] * len(params.input_pipeline_shape) for _ in range(num_cores)]
+
+    ds_iterator = []
+    # For each sub-batch, create a SubBatchSlicer object.
+    for sub_batch_i, host_id in enumerate(hosts_to_hold_ds):
+        # Get the list of pnums for each input.
+        if params.train:
+
+            all_sub_batch_pnums = []
+            for pnum_map in pnum_maps:
+                sub_batch_pnums = pnum_map[sub_batch_i, ...].flatten().tolist()
+                all_sub_batch_pnums.append(sub_batch_pnums)
+
+        else:
+
+            all_sub_batch_pnums = [pnum_map.flatten().tolist() for pnum_map in pnum_maps]
+
+        with ops.device(f"/job:worker/task:{host_id}/device:CPU:0"):
+
+            _ds_iterator = input_fn(params, sub_batch_size, sub_batch_i,
+                                    len(hosts_to_hold_ds)).make_initializable_iterator()
+            ds_iterator.append(_ds_iterator)
+            all_input_tensors = _ds_iterator.get_next()
+
+            if isinstance(all_input_tensors, tf.Tensor):
+                all_input_tensors = [all_input_tensors]
+            assert len(all_input_tensors) == len(all_sub_batch_pnums)
+
+            for input_i in range(len(all_input_tensors)):
+                input_tensor = all_input_tensors[input_i]
+                sub_batch_pnums = all_sub_batch_pnums[input_i]
+                mtf_input_shape = params.input_pipeline_shape[input_i]
+
+                # Initialize the cache for each input_i
+                _slice_dict = collections.defaultdict(list)
+
+                for idx, pnum in enumerate(sub_batch_pnums):
+
+                    s_begin = params.mesh_impl.slice_begin(mtf_input_shape, pnum)
+                    if not not params.train:
+                        # Always slice from 0 in the first dimension (batch dimension), since
+                        # input_tensor a sub-batch tensor.
+                        s_begin[0] = 0
+                    if tuple(s_begin) in _slice_dict:
+                        input_slice = _slice_dict[tuple(s_begin)]
+                    else:
+                        s_shape = params.mesh_impl.slice_shape(mtf_input_shape)
+                        input_slice = tf.slice(input_tensor, s_begin, s_shape)
+
+                    all_laidout_tensors[pnum][input_i] = input_slice
+
+    # Make sure that there are no Nones in all_laidout_tensors.
+    for laidout_tensors in all_laidout_tensors:
+        assert None not in laidout_tensors
+
+    with ops.device(f"/job:worker/task:{hosts_to_hold_ds[0]}/device:CPU:0"):
 
         def _tpu_ordinal_function_impl(pnum):
-            return self.ordered_ordinals[pnum]
+            return ordered_ordinals[pnum]
 
         def _placement_function_impl(pnum):
-            return self.ordered_hosts[pnum]
+            return ordered_hosts[pnum]
 
         laidout_tensors0 = all_laidout_tensors[0]
         infeed_queue = tpu_feed.InfeedQueue(
@@ -420,386 +435,67 @@ class SimdMeshImplInputReader(object):
                 tpu_ordinal_function=_tpu_ordinal_function_impl,
                 placement_function=_placement_function_impl)
 
-        return infeed_queue, enqueue_ops
-
-
-class CheckpointLoaderHook(tf.estimator.SessionRunHook):
-    """Load checkpoint right after the session started."""
-
-    def __init__(self, checkpoint_dir):
-        self.checkpoint_dir = checkpoint_dir
-
-    def after_create_session(self, session, coord):
-        # pylint: disable=protected-access
-        saver_collection = tf.get_collection(tf.GraphKeys.SAVERS)
-        if saver_collection:
-            saver = saver_collection[0]
-            check_point = tf.train.latest_checkpoint(self.checkpoint_dir)
-            if check_point:
-                saver.restore(session, check_point)
-
-
-def computation_func(params: ModelParameter, input_fn, session_config, tpu_cluster_resolver, run_mode: str):
-    captured_hooks = CapturedObject()
-    captured_output_dtypes_shapes = CapturedObject()
-
-    def model_fn(*args):
-        """
-        Create model partitioned graph given example input tensor
-        :param features: inputs and targets in dict
-        :param mode: training mode
-        :param params: serialized dict of ModelParameters instance
-        :return: tpu estimator spec
-        """
-
-        def _add_summary(tf_loss, value, global_step):
-            """Add all summaries."""
-
-            def _host_loss_summary(tf_loss, value, global_step):
-                """Add summary.scalar in host side."""
-                gs = tf.cast(global_step, tf.int64)
-
-                sum_ops = []
-
-                for key in value.keys():
-                    sum_ops.append(summary.scalar(key, value[key], step=gs))
-                with tf.control_dependencies(sum_ops):
-                    return tf.identity(tf_loss)
-
-            # Cast the global step to tf.int32, since
-            # outside_compilation does not support tf.int64.
-            tf_loss = tpu.outside_compilation(_host_loss_summary, tf_loss, value, tf.cast(global_step, tf.int32))
-
-            return tf_loss
-
-        # Get global step
-        global_step = tf.train.get_or_create_global_step()
-
-        # Construct mtf graph + mesh from params
-        graph = mtf.Graph()
-        mesh_shape = mtf.convert_to_shape(params.mesh_shape)
-        layout_rules = mtf.convert_to_layout_rules(params.layout)
-
-        # Mesh setup
-        replica_cache_size = 300 * 1024 * 1024  # 300M per replica.
-        worker0_mem = replica_cache_size * 8 * params.num_hosts
-        devices_memory_usage = [worker0_mem] + [0] * (params.num_hosts - 1)
-        var_placer = mtf.utils.BalancedVariablePlacer(params.cpu_devices, devices_memory_usage)
-        mesh_devices = [""] * mesh_shape.size
-        # mesh_impl = mtf.simd_mesh_impl.SimdMeshImpl(
-        #        mesh_shape, layout_rules, mesh_devices, params.context.device_assignment)
-
-        # Build mtf mesh object
-        mesh = mtf.Mesh(graph, "mesh", var_placer)
-        params.mesh = mesh
-
-        # Build mtf_features & seq length dict for getting number of microbatches
-        # We need to pack inputs into a dict to pass into serialize_training_step
-        # params.mode = mode
-
-        frame_input = None
-        token_x_input = None
-        token_y_input = None
-        frame_mask = None
-        token_mask = None
-
-        if params.use_video:
-            frame_input = mtf.import_laid_out_tensor(mesh, params.mesh_impl.LaidOutTensor([args[0]]),
-                                                     params.frame_input_shape, "frame_input")
-
-            if params.use_language:
-                token_x_input = mtf.import_laid_out_tensor(mesh, params.mesh_impl.LaidOutTensor([args[1]]),
-                                                           params.token_dim_shape, "tkn_src")
-                token_y_input = mtf.import_laid_out_tensor(mesh, params.mesh_impl.LaidOutTensor([args[2]]),
-                                                           params.token_dim_shape, "tkn_tgt")
-
-                frame_mask = mtf.import_laid_out_tensor(mesh, params.mesh_impl.LaidOutTensor([args[3]]),
-                                                        params.frame_mask_shape, "vid_msk")
-                token_mask = mtf.import_laid_out_tensor(mesh, params.mesh_impl.LaidOutTensor([args[4]]),
-                                                        params.token_dim_shape, "tkn_msk")
-
-        elif params.use_language:
-
-            token_x_input = mtf.import_laid_out_tensor(mesh, params.mesh_impl.LaidOutTensor([args[0]]),
-                                                       params.token_dim_shape, "tkn_src")
-            token_y_input = mtf.import_laid_out_tensor(mesh, params.mesh_impl.LaidOutTensor([args[1]]),
-                                                       params.token_dim_shape, "tkn_tgt")
-
-
-        if run_mode == 'sample' and params.use_autoregressive_sampling:
-            sequence_dim = mtf.Dimension("sequence", params.time_patch_size)
-
-            def cond_fn(position):
-                is_done = mtf.greater_equal(position, sequence_dim.size)
-                is_done = mtf.logical_or(is_done, mtf.greater_equal(position - params.initial_autoregressive_position,
-                                                                    sequence_dim))
-                is_done = mtf.reduce_sum(is_done)
-
-                return mtf.logical_not(is_done)
-
-            def body_fn(position, frame_input, token_x_input, token_y_input, frame_mask, token_mask, *states):
-                with tf.variable_scope('jannet'):
-                    if token_mask is None:
-                        token_mask = mtf.ones(params.mesh, [], params.dtype)
-                    else:
-                        token_mask = mtf.cast(token_mask, params.dtype)
-                    if frame_mask is None:
-                        frame_mask = mtf.ones(params.mesh, [], params.dtype)
-                    else:
-                        frame_mask = mtf.cast(frame_mask, params.dtype)
-                    video_loss, _, frame_out, token_out = build(params,
-                                                                frame_input,
-                                                                token_x_input,
-                                                                token_y_input,
-                                                                frame_mask,
-                                                                token_mask)
-
-                language_token_per_frame_dim = mtf.Dimension("language_token_per_frame",
-                                                             params.language_token_per_frame)
-
-                # (batch, sequence_dim, language_token_patch, token_patch_size, vocab_size) ->
-                # (batch, sequence_dim, language_token_per_frame, vocab_size)
-                token_out = mtf.reshape(token_out, new_shape=mtf.Shape([params.batch_dim,
-                                                                        sequence_dim,
-                                                                        language_token_per_frame_dim,
-                                                                        params.vocab_dim]))
-
-                # (batch, sequence_dim, language_token_per_frame, vocab_size) ->
-                # (batch, sequence_dim, language_token_per_frame)
-                token_out: mtf.Tensor = mtf.argmax(token_out, reduced_dim=params.vocab_dim)
-
-                # (language_token_per_frame_dim)
-                token_mask_out_range = mtf.range(mesh, language_token_per_frame_dim, dtype=tf.int32)
-                # (language_token_per_frame_dim) -> (batch, sequence_dim, language_token_per_frame, vocab_size)
-                token_mask_out_range = mtf.broadcast(token_mask_out_range, new_shape=token_out.shape)
-
-                # (batch, sequence_dim, language_token_per_frame) -> (batch, sequence_dim)
-                token_mask_out_argmin = mtf.argmax(mtf.negative(token_out), reduced_dim=language_token_per_frame_dim)
-
-                # (batch, sequence_dim) -> (batch, sequence_dim, language_token_per_frame, vocab_size)
-                token_mask_out_argmin = mtf.broadcast(token_mask_out_argmin, new_shape=token_out.shape)
-
-                token_mask_out = mtf.less_equal(token_mask_out_range, token_mask_out_argmin)
-
-                # (batch, sequence_dim, language_token_per_frame, vocab_size) ->
-                # (batch_dim, sequence_dim, language_token_patch, token_patch_size)
-                token_out = mtf.reshape(token_out, new_shape=params.token_dim_shape)
-                token_mask_out = mtf.reshape(token_mask_out, new_shape=params.token_dim_shape)
-
-                # (sequence_dim)
-                one_hot_sequence = mtf.one_hot(position, sequence_dim, dtype=tf.int32)
-                neg_one_hot_sequence = (1 - one_hot_sequence)
-
-                # frame_input = mtf.pad(anonymize(frame_out, sequence_dim),[1, 0], anonymize_dim(sequence_dim)).name * mtf.cast(one_hot_sequence, tf.float32) + frame_input * mtf.cast(neg_one_hot_sequence, tf.float32)
-                token_x_input = token_out * one_hot_sequence + token_x_input * neg_one_hot_sequence
-                token_mask = token_mask_out * one_hot_sequence + token_mask * neg_one_hot_sequence
-
-                position_out = position + 1
-
-                return [position_out, frame_input, token_x_input, token_y_input, frame_mask, token_mask, video_loss]
-
-            while_loop_inputs = [params.initial_autoregressive_position, frame_input,
-                                 token_x_input, token_y_input, frame_mask, token_mask]
-
-            _, frame_out, token_out, _, _, _, loss = mtf.while_loop(cond_fn=cond_fn,
-                                                                    body_fn=body_fn,
-                                                                    inputs=while_loop_inputs)
-        else:
-            with mtf.utils.outside_all_rewrites(), tf.variable_scope('jannet'):
-                if token_mask is None:
-                    token_mask = mtf.ones(params.mesh, [], tf.float32)
-                else:
-                    token_mask = mtf.cast(token_mask, tf.float32)
-                if frame_mask is None:
-                    frame_mask = mtf.ones(params.mesh, [], tf.float32)
-                else:
-                    frame_mask = mtf.cast(frame_mask, tf.float32)
-                if frame_input is not None:
-                    frame_input = mtf.cast(frame_input, tf.float32)
-                video_loss, token_loss, frame_out, token_out = build(params,
-                                                                     frame_input,
-                                                                     token_x_input,
-                                                                     token_y_input,
-                                                                     frame_mask,
-                                                                     token_mask)
-                loss = video_loss + token_loss
-                video_loss = video_loss * frame_mask.size / mtf.reduce_sum(frame_mask)
-                token_loss = token_loss * token_mask.size / mtf.reduce_sum(token_mask)
-
-        if run_mode == 'train':
-            update_ops = get_optimizer(mesh, loss, params)
-        else:  # run_mode == 'sample'
-
-            if params.use_video:
-                frame_out = mtf.anonymize(frame_out)
-
-            if params.use_language:
-                token_out = mtf.anonymize(token_out)
-
-        total_parameters = 0
-        for variable in graph.trainable_variables:
-            shape = variable.shape.dims
-            variable_parameters = 1
-
-            for dim in shape:
-                variable_parameters *= dim.size
-            total_parameters += variable_parameters
-
-        print(f"\n\nN TRAINABLE VARS:\n{total_parameters:,}\n\n")
-        all_dim_names = []
-
-        for variable in graph.all_variables:
-            names = variable.shape.dimension_names
-            all_dim_names.append(names)
-
-        # Print all dim names in graph & write to file
-        all_dim_names = [item for sublist in all_dim_names for item in sublist]  # Flatten all dims
-        unique_dims = list(set(all_dim_names))
-        print("ALL DIM NAMES:")
-        for dim_name in unique_dims:
-            print(dim_name)
-        print('\n')
-
-        lowering = mtf.Lowering(graph, {mesh: params.mesh_impl}, autostack=True)
-
-        tf_loss = lowering.export_to_tf_tensor(loss)
-        tf_loss = tf.cast(tf_loss, tf.float32)
-
-        log_dict = {}
-
-        if run_mode == 'train':
-            if params.use_video:
-                video_loss = lowering.export_to_tf_tensor(video_loss)
-                video_loss = tf.cast(video_loss, tf.float32)
-                log_dict.update({'video_loss': video_loss})
-
-            if params.use_language:
-                token_loss = lowering.export_to_tf_tensor(token_loss)
-                token_loss = tf.cast(token_loss, tf.float32)
-                log_dict.update({'token_loss': token_loss})
-
-            tf_loss = _add_summary(tf_loss=tf_loss, value=log_dict, global_step=global_step)
-
-        else:  # run_mode == 'sample'
-            predictions = {}
-            if params.use_video:
-                predictions.update({'frame_out': lowering.export_to_tf_tensor(frame_out)})
-                predictions.update({'frame_inp': args[0]})
-
-            if params.use_language:
-                predictions.update({'token_out': lowering.export_to_tf_tensor(token_out)})
-                predictions.update({'token_inp': args[2]})
-
-        if run_mode == 'train':
-
-            # Creates train_op
-            tf_update_ops = [lowering.lowered_operation(op) for op in update_ops]
-            tf_update_ops.append(tf.assign_add(global_step, 1))  # Need to manually increment global_step
-            tf.logging.info(f"tf_update_ops: {tf_update_ops}")
-
-            with mtf.utils.outside_all_rewrites():
-
-                hooks = [mtf.MtfRestoreHook(lowering)]
-                if params.use_checkpointing:
-                    saver = tf.train.Saver(
-                            tf.global_variables(),
-                            sharded=True,
-                            max_to_keep=10,
-                            keep_checkpoint_every_n_hours=2,
-                            defer_build=False,
-                            save_relative_paths=True)
-                    tf.add_to_collection(tf.GraphKeys.SAVERS, saver)
-
-                    hooks.append(tf.train.CheckpointSaverHook(
-                            params.model_path,
-                            save_steps=params.steps_per_checkpoint,
-                            saver=saver,
-                            listeners=[mtf.MtfCheckpointSaverListener(lowering)]))
-
-                captured_hooks.capture(hooks)
-
-                return tf.group([tf_loss] + tf_update_ops)
-
-        else:  # run_mode == 'sample'
-
-            predictions = [tf.cast(predictions[key], tf.float32) for key in predictions.keys()]
-            predictions_dtypes = [pred.dtype for pred in predictions]
-            predictions_shapes = [pred.shape for pred in predictions]
-            captured_hooks.capture([mtf.MtfRestoreHook(lowering), None])
-            captured_output_dtypes_shapes.capture([predictions_dtypes, predictions_shapes])
-
-            return tpu_ops.outfeed_enqueue_tuple(predictions)
-
-    simd_input_reader = SimdMeshImplInputReader(params.mesh_impl, input_fn,
-                                                params.input_pipeline_shape,
-                                                external_worker=True,
-                                                is_eval_mode=run_mode == 'sample')
-
-    computation = tpu.replicate(computation=model_fn,
-                                inputs=[[]] * params.num_cores,
-                                infeed_queue=simd_input_reader.infeed_queue,
-                                device_assignment=params.d_assignment)
-
-    if run_mode == 'sample':
-        output_dtypes, output_shapes = captured_output_dtypes_shapes.get()
-        outfeed_dequeue_ops = []
-
-        # Create outfeed_dequeue_ops.
-        for host_id in range(params.num_hosts):
-            # pylint: disable=protected-access
-            with ops.device(_host_id_to_tf_device(host_id, external_worker=True)):
-                for device_ordinal in range(params.num_cores_per_host):
-                    outfeed_dequeue_op = tpu_ops.outfeed_dequeue_tuple(
-                            dtypes=output_dtypes,
-                            shapes=output_shapes,
-                            device_ordinal=device_ordinal)
-
-                    # We don't need output other than from core 0.
-                    if outfeed_dequeue_ops:
-                        outfeed_dequeue_ops.append([tf.reduce_mean(x) for x in outfeed_dequeue_op])
-                    else:
-                        outfeed_dequeue_ops.append(outfeed_dequeue_op)
-
-    if run_mode == 'train':
-
-        slice_hook = [hook for hook in captured_hooks.get()]
-        ckpt_loader_hook = CheckpointLoaderHook(params.model_path)
-        step_counter_hook = tf.train.StepCounterHook(every_n_steps=10)
-        all_hooks = [ckpt_loader_hook, step_counter_hook] + slice_hook
-
+    input_initializers = [ds.initializer for ds in ds_iterator]
+
+    def _thread_fn(sess: tf.Session):
+        time.sleep(1)
+        while True:
+            sess.run(enqueue_ops)
+
+    compilation_state, computation = tpu.split_compile_and_replicate(_model_fn,
+                                                                     [[]] * params.num_cores,
+                                                                     infeed_queue,
+                                                                     params.d_assignment,
+                                                                     None,
+                                                                     maximum_shapes=None)
+    ckpt_loader_hook = CheckpointLoaderHook(params.model_path)
+
+    if params.train:
         # if params.write_summary:
         flush_summary = summary.flush()
 
-        with tf.train.MonitoredTrainingSession(master=tpu_cluster_resolver.master(),
-                                               hooks=all_hooks, config=session_config) as sess:
-            simd_input_reader.start_infeed_thread(sess)
+        with tf.train.MonitoredTrainingSession(master=cluster_resolver.master(),
+                                               hooks=[ckpt_loader_hook,
+                                                      tf.train.StepCounterHook(every_n_steps=10)] + hooks,
+                                               config=session_config) as sess:
+
+            sess.run(input_initializers)
+            infeed_thread = threading.Thread(target=_thread_fn, args=(sess,))
+            infeed_thread.start()
+
             summary.initialize(session=sess)
 
-            current_step = int(estimator_lib._load_global_step_from_checkpoint_dir(params.model_path))
-            while current_step < params.train_steps:
-                sess.run(computation)
-                sess.run(flush_summary)
+            for i in range(params.current_step, params.train_steps):
 
-                tf.logging.info('train steps: {}'.format(current_step))
+                for accum_step in range(params.grad_accumulation):
+                    sess.run(computation)
 
-                _current_step = current_step
-                current_step += 1
+                if (i + 1) % params.summary_flush_interval == 0:
+                    sess.run(flush_summary)
 
-                yield _current_step
+                for fn in callback_fns:
+                    fn(i)
 
-    else:  # run_mode == 'sample'
-
-        slice_hook = [hook for hook in captured_hooks.get()]
-        ckpt_loader_hook = CheckpointLoaderHook(params.model_path)
-        all_hooks = [ckpt_loader_hook, slice_hook[0]]
-
-        with tf.train.MonitoredSession(
-                session_creator=tf.train.ChiefSessionCreator(master=tpu_cluster_resolver.master(),
-                                                             config=session_config),
-                hooks=all_hooks) as sess:
-
-            simd_input_reader.start_infeed_thread(sess)
-
+    else:  # train == 'sample'
+        outfeed_dequeue_ops = []
+        for host_id in range(params.num_hosts):
+            with ops.device(host_id_to_tf_device.format(host_id)):
+                for device_ordinal in range(params.num_cores_per_host):
+                    outfeed_dequeue_op = tpu_ops.outfeed_dequeue_tuple(dtypes=[tf.float32] * len(output_shapes),
+                                                                       shapes=output_shapes,
+                                                                       device_ordinal=device_ordinal)
+                    # We don't need output other than from core 0.
+                    outfeed_dequeue_ops.append([tf.reduce_mean(x) for x in outfeed_dequeue_op]
+                                               if outfeed_dequeue_ops else outfeed_dequeue_op)
+        with tf.train.MonitoredSession(session_creator=tf.train.ChiefSessionCreator(master=cluster_resolver.master(),
+                                                                                    config=session_config),
+                                       hooks=[ckpt_loader_hook, hooks[0]]) as sess:
+            sess.run(input_initializers)
+            # error probably here -> it didnt run init
+            infeed_thread = threading.Thread(target=_thread_fn, args=(sess,))
+            infeed_thread.start()
             while True:
                 sess.run(computation)
-                yield sess.run(outfeed_dequeue_ops)[0]
+                out = sess.run(outfeed_dequeue_ops)[0]
+                for fn in callback_fns:
+                    fn(out)

@@ -1,10 +1,12 @@
-"""the_pile dataset"""
+"""tokenization to bpe or character embeddings of text datasets"""
 
 import argparse
 import io
 import os
 import shutil
 import time
+import random
+import multiprocessing
 
 import jsonlines
 import requests
@@ -17,23 +19,24 @@ from transformers import GPT2TokenizerFast
 parser = argparse.ArgumentParser()
 parser.add_argument("--name", type=str, default="text",
                     help="Name of output files will be name_i.tfrecords where i is the number of the file")
-parser.add_argument("--output_dir", type=str, default="gs://tfrecords/a/", help="Where to put tfrecords (in a bucket)")
-parser.add_argument("--int64", type=bool, default=False, help="Whether to encode as bytes or int64")
-parser.add_argument("--service_account_json_path", type=str, default="./tfrecords", help="Service account json from"
-                                                                                         " gcp")
-parser.add_argument("--buffer_size", type=int, default=2 ** 26, help="This is a minimum size, not a maximum size. "
+parser.add_argument("--procs", type=int, default=2, help="Number of processes in multiprocessing")
+parser.add_argument("--output_dir", type=str, default="gs://jannet/the-bpe-pile/",
+                    help="Where to put tfrecords (in a bucket)")
+parser.add_argument("--int64", type=bool, default=True, help="Whether to encode as bytes or int64")
+parser.add_argument("--service_account_json_path", type=str, default="a.json", help="Service account json from gcp")
+parser.add_argument("--buffer_size", type=int, default=2 ** 25, help="This is a minimum size, not a maximum size. "
                                                                      "tfrecords will have this minimum size as well.")
-parser.add_argument("--separator", nargs="+", type=int, default=4,
+parser.add_argument("--separator", type=str, default="\04",
                     help="separator to place between files in chunk mode."
                          "Default is 0 (Null) in case of byte encodings, "
                          "50256 for tokenized texts")
 
 
-def file_generator(args):
+def file_generator(args, pid, procs):
     base_url = 'http://eaidata.bmk.sh/data/pile/train/%s.jsonl.zst'
     splits = 30
     parse_fn = simdjson.Parser().parse
-    tmp_name = ".tmp.download"
+    tmp_name = f".tmp.download.{pid}"
 
     def _json_parser(x):
         try:
@@ -41,7 +44,7 @@ def file_generator(args):
         except ValueError:
             return x
 
-    for i in range(splits):
+    for i in range(pid, splits, procs):
         with requests.get(base_url.replace("%s", str(i).zfill(2)), stream=True) as r, open(tmp_name, 'wb') as f:
             shutil.copyfileobj(r.raw, f)
         with open(tmp_name, 'rb') as f:
@@ -55,7 +58,7 @@ def file_generator(args):
         os.remove(tmp_name)
 
 
-def create_tfrecords(args):
+def create_tfrecords(args, pid, procs):
     slash_idx = args.output_dir.find('/')
     bucket_name, output_dir = args.output_dir[:slash_idx], args.output_dir[slash_idx + 1:]
     bucket = storage.Client.from_service_account_json(args.service_account_json_path).get_bucket(bucket_name)
@@ -71,20 +74,20 @@ def create_tfrecords(args):
 
     last_write = start_time = time.time()
 
-    for f in file_generator(args):
+    for f in file_generator(args, pid, procs):
         buffer_size += len(f)
         tokenized_files.append(f)
         files_processed += 1
 
-        if buffer_size > chunk * args.buffer_size // 32:
-            print(f"\rBuffer: {buffer_size * 2 ** -20:.1f}MB | "
+        if buffer_size > chunk * args.buffer_size // 4:
+            print(f"Worker: {pid:{len(str(procs))}d} | Buffer: {buffer_size * 2 ** -20:.1f}MB | "
                   f"Files: {files_processed} - TFrecords: {tfrecord_count} | "
                   f"Wrote: {time.time() - last_write:.0f}s ago - Started: {time.time() - start_time:.0f}s ago",
                   end='')
             chunk += 1
 
         if buffer_size > args.buffer_size:
-            filename = f"{prefix}{tfrecord_count}_{files_processed}_{buffer_size}.tfrecord"
+            filename = f"{prefix}{tfrecord_count:_>6d}_{files_processed}_{buffer_size}.tfrecord"
 
             joined = encode(join(tokenized_files))
             tokenized_files.clear()
@@ -118,7 +121,11 @@ def main():
         print("Output dir isn't a cloud bucket. Exiting.")
         return
     args.output_dir = args.output_dir[len('gs://'):]
-    create_tfrecords(args)
+    processes = [multiprocessing.Process(target=create_tfrecords, args=(args, pid, args.procs)) for pid in range(args.procs)]
+    for p in processes:
+        p.start()
+    for p in processes:
+        p.join()
 
 
 if __name__ == "__main__":
