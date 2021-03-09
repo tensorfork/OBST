@@ -255,7 +255,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 if params.use_checkpointing:
                     saver = tf.train.Saver(tf.global_variables(),
                                            sharded=True,
-                                           max_to_keep=2,
+                                           max_to_keep=1,
                                            defer_build=False,
                                            save_relative_paths=True)
                     tf.add_to_collection(tf.GraphKeys.SAVERS, saver)
