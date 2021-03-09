@@ -13,6 +13,7 @@ from tensorflow.python.framework import ops
 from tensorflow.python.ops import summary_ops_v2 as summary
 from tensorflow.python.tpu import tpu, tpu_feed
 from tensorflow.python.tpu.ops import tpu_ops
+from tensorflow.python.ops import variables
 
 from .dataclass import ModelParameter
 from .model import build
@@ -62,8 +63,9 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
     tf.config.optimizer.set_experimental_options(params.tensorflow_optimization_settings)
 
     def _model_fn(*args):
-        manual_global_step = tf.get_variable("manual_global_step", [], tf.int32, initializer=tf.zeros_initializer(),
-                                             trainable=False)
+        manual_global_step = tf.get_variable("manual_global_step", [], tf.int64, initializer=tf.zeros_initializer(),
+                                             trainable=False,
+                                             aggregation=variables.VariableAggregation.ONLY_FIRST_REPLICA)
         # Construct mtf graph + mesh from params
         graph = mtf.Graph()
 
@@ -241,10 +243,10 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                          value=log_dict, global_step=w_global_step),
                              tf.assign_add(tf.train.get_or_create_global_step(),
                                            tf.cast(tf.mod(manual_global_step,
-                                                          tf.constant(params.grad_accumulation, dtype=tf.int32,
+                                                          tf.constant(params.grad_accumulation, dtype=tf.int64,
                                                                       shape=[])),
-                                                   tf.int32)),
-                             tf.assign_add(manual_global_step, tf.constant(1, dtype=tf.int32, shape=[]))] \
+                                                   tf.int64)),
+                             tf.assign_add(manual_global_step, tf.constant(1, dtype=tf.int64, shape=[]))] \
                             + [lowering.lowered_operation(op) for op in update_ops]
 
             hooks.append(mtf.MtfRestoreHook(lowering))
@@ -252,8 +254,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 if params.use_checkpointing:
                     saver = tf.train.Saver(tf.global_variables(),
                                            sharded=True,
-                                           max_to_keep=1,
-                                           keep_checkpoint_every_n_hours=2,
+                                           max_to_keep=2,
                                            defer_build=False,
                                            save_relative_paths=True)
                     tf.add_to_collection(tf.GraphKeys.SAVERS, saver)
