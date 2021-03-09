@@ -41,14 +41,14 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter, manual_step
     if params.learning_rate_decay_multi != 0 and params.learning_rate_decay_multi != 1:
         start_step = import_float(params.learning_rate_decay_start_step)
         tf_learning_rate = tf.maximum(tf_learning_rate *
-                                      import_float(params.learning_rate_decay_multi) **
+                                      import_float(params.learning_rate_decay_multi * 1.) **
                                       (tf.maximum(global_steps_float - start_step,
-                                                  import_float(0))),
-                                      import_float(params.learning_rate_decay_min))
+                                                  import_float(0.))),
+                                      import_float(params.learning_rate_decay_min * 1.))
 
     learning_rate = import_mtf(tf_learning_rate, "learning_rate")
-    step = mtf.cast(mtf.equal(mtf.mod(manual_step, import_mtf(params.grad_accumulation, "grad_accum")),
-                              import_mtf(0, "zero")), dtype)
+    step = mtf.cast(mtf.equal(mtf.mod(manual_step, import_mtf(params.grad_accumulation * 1., "grad_accum")),
+                              import_mtf(0., "zero")), dtype)
     mstep = 1 - step
     beta1 = 1 - step * import_mtf(1 - 0.9, "beta1")
     beta2 = 1 - step * import_mtf(1 - 0.95, "beta2")
