@@ -30,6 +30,9 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter, manual_step
     tf_learning_rate = tf.constant(value=params.learning_rate, shape=[], dtype=tf.float32)
     global_steps_float = tf.cast(global_step, tf.float32)
 
+    def import_mtf(imported, name):
+        return mtf.import_fully_replicated(params.mesh, tf.cast(imported, dtype), [], name)
+
     if params.warmup_steps > 0:
         warmup_steps_float = import_float(params.warmup_steps)
         is_warmup = tf.cast(global_steps_float < warmup_steps_float, tf.float32)
@@ -43,13 +46,12 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter, manual_step
                                                   import_float(0))),
                                       import_float(params.learning_rate_decay_min))
 
-    learning_rate = mtf.import_fully_replicated(params.mesh, tf.cast(tf_learning_rate, dtype), [], "learning_rate")
-    step = mtf.cast(mtf.equal(mtf.mod(manual_step, params.grad_accumulation), 0), dtype)
+    learning_rate = import_mtf(tf_learning_rate, "learning_rate")
+    step = mtf.cast(mtf.equal(mtf.mod(manual_step, import_mtf(params.grad_accumulation, "grad_accum")),
+                              import_mtf(0, "zero")), dtype)
     mstep = 1 - step
-    beta1 = 1 - step * mtf.import_fully_replicated(params.mesh, tf.constant(1 - 0.9, dtype, []), mtf.Shape([]),
-                                                   name="beta1")
-    beta2 = 1 - step * mtf.import_fully_replicated(params.mesh, tf.constant(1 - 0.95, dtype, []), mtf.Shape([]),
-                                                   name="beta1")
+    beta1 = 1 - step * import_mtf(1 - 0.9, "beta1")
+    beta2 = 1 - step * import_mtf(1 - 0.95, "beta2")
     epsilon = 1e-5
 
     def variable(var, name, shape):
