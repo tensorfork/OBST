@@ -119,7 +119,7 @@ if __name__ == '__main__':
                 if health['healthy']:
                     done = True
 
-            if not done and not health['healthy']:
+            if not health['healthy']:
                 os.killpg(os.getpgid(pro.pid), signal.SIGTERM)
 
                 time.sleep(60)
