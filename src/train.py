@@ -237,17 +237,18 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             if params.use_language:
                 log_dict['token_loss'] = tf.cast(lowering.export_to_tf_tensor(token_loss), tf.float32)
 
-            w_global_step = tf.cast(tf.train.get_or_create_global_step(), tf.float32)
+            global_step = tf.train.get_or_create_global_step()
 
-            write_summary = [add_summary(tf_loss=tf.cast(lowering.export_to_tf_tensor(loss), tf.float32),
-                                         value=log_dict, global_step=w_global_step),
-                             tf.assign_add(tf.train.get_or_create_global_step(),
-                                           tf.cast(tf.mod(manual_global_step,
-                                                          tf.constant(params.grad_accumulation, dtype=tf.int64,
-                                                                      shape=[])),
-                                                   tf.int64)),
-                             tf.assign_add(manual_global_step, tf.constant(1, dtype=tf.int64, shape=[]))] \
-                            + [lowering.lowered_operation(op) for op in update_ops]
+            step = tf.mod(manual_global_step, tf.constant(params.grad_accumulation, dtype=tf.int64))
+            step = tf.equal(step, tf.constant(0, dtype=tf.int64))
+            step = tf.cast(step, tf.int64)
+
+            comput_ops = [add_summary(tf_loss=tf.cast(lowering.export_to_tf_tensor(loss), tf.float32),
+                                      value=log_dict, global_step=global_step),
+                          tf.assign_add(global_step, step),
+                          tf.assign_add(manual_global_step, tf.constant(1, dtype=tf.int64, shape=[]))]
+
+            comput_ops = comput_ops + [lowering.lowered_operation(op) for op in update_ops]
 
             hooks.append(mtf.MtfRestoreHook(lowering))
             with mtf.utils.outside_all_rewrites():
@@ -263,7 +264,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                               saver=saver,
                                                               listeners=[mtf.MtfCheckpointSaverListener(lowering)]))
 
-                return tf.group(write_summary)
+                return tf.group(comput_ops)
 
         else:  # train == 'sample'
             predictions = {}
