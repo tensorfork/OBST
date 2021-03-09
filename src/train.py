@@ -1,9 +1,9 @@
 """
 Contains functions to create a training loop and log its outputs to tensorboard
 """
+import collections
 import threading
 import time
-import collections
 import typing
 
 import mesh_tensorflow as mtf
@@ -33,6 +33,7 @@ class CheckpointLoaderHook(tf.estimator.SessionRunHook):
             if check_point:
                 saver_collection[0].restore(session, check_point)
 
+
 def add_summary(tf_loss, value, global_step):
     """Add all summaries."""
 
@@ -59,10 +60,10 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
     hooks = []
     output_shapes = []
     tf.config.optimizer.set_experimental_options(params.tensorflow_optimization_settings)
-    manual_global_step = tf.get_variable("manual_global_step", [], tf.int32, initializer=tf.zeros_initializer(),
-                                         trainable=False)
 
     def _model_fn(*args):
+        manual_global_step = tf.get_variable("manual_global_step", [], tf.int32, initializer=tf.zeros_initializer(),
+                                             trainable=False)
         # Construct mtf graph + mesh from params
         graph = mtf.Graph()
 
@@ -142,7 +143,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                         frame_pad = to_float(mtf.greater(mtf.reduce_sum(padding_token, reduced_dim=tkn_per_frame), 0))
                         token_x_input = weighted_add(frame_pad, to_float(token_x_input), one_hot_sequence)
 
-                    return position + 1, token_x_input, token_y_input,\
+                    return position + 1, token_x_input, token_y_input, \
                            frame_input, frame_mask_src, frame_mask_tag, token_mask
 
                 if token_mask is not None:
@@ -238,9 +239,12 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
             write_summary = [add_summary(tf_loss=tf.cast(lowering.export_to_tf_tensor(loss), tf.float32),
                                          value=log_dict, global_step=w_global_step),
-                             tf.assign_add(manual_global_step, 1),
                              tf.assign_add(tf.train.get_or_create_global_step(),
-                                           manual_global_step % params.grad_accumulation)]\
+                                           tf.cast(tf.mod(manual_global_step,
+                                                          tf.constant(params.grad_accumulation, dtype=tf.int32,
+                                                                      shape=[])),
+                                                   tf.int32)),
+                             tf.assign_add(manual_global_step, tf.constant(1, dtype=tf.int32, shape=[]))] \
                             + [lowering.lowered_operation(op) for op in update_ops]
 
             hooks.append(mtf.MtfRestoreHook(lowering))
@@ -327,7 +331,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
     # For each sub-batch, we need to know which host should read it.
     if params.train:
-        
+
         # This records how many datasets (ds) are already stored on each host.
         num_dss_per_host = [0] * num_hosts
 
@@ -340,12 +344,13 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             for pnum in sub_batch_pnum_map.flatten():
                 num_pnums_per_host[ordered_host_ids[pnum]] += 1
 
-            host_metrics = [(host_id, num_pnums_per_host[host_id], num_dss_per_host[host_id]) for host_id in range(num_hosts)]
+            host_metrics = [(host_id, num_pnums_per_host[host_id], num_dss_per_host[host_id]) for host_id in
+                            range(num_hosts)]
             host_id, _, _ = max(host_metrics, key=lambda keys: (keys[1], -keys[2]))
 
             num_dss_per_host[host_id] += 1
             hosts_to_hold_ds.append(host_id)
-    
+
     else:
         # There should be just one dataset-holding host. Make the last host do it.
         hosts_to_hold_ds = [num_hosts - 1]
@@ -362,20 +367,20 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
     for sub_batch_i, host_id in enumerate(hosts_to_hold_ds):
         # Get the list of pnums for each input.
         if params.train:
-            
+
             all_sub_batch_pnums = []
             for pnum_map in pnum_maps:
                 sub_batch_pnums = pnum_map[sub_batch_i, ...].flatten().tolist()
                 all_sub_batch_pnums.append(sub_batch_pnums)
 
         else:
-            
+
             all_sub_batch_pnums = [pnum_map.flatten().tolist() for pnum_map in pnum_maps]
-    
+
         with ops.device(f"/job:worker/task:{host_id}/device:CPU:0"):
 
             _ds_iterator = input_fn(params, sub_batch_size, sub_batch_i,
-                                   len(hosts_to_hold_ds)).make_initializable_iterator()
+                                    len(hosts_to_hold_ds)).make_initializable_iterator()
             ds_iterator.append(_ds_iterator)
             all_input_tensors = _ds_iterator.get_next()
 
@@ -420,13 +425,13 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
         laidout_tensors0 = all_laidout_tensors[0]
         infeed_queue = tpu_feed.InfeedQueue(
-            number_of_tuple_elements=len(laidout_tensors0),
-            tuple_types=[x.dtype for x in laidout_tensors0],
-            tuple_shapes=[x.shape for x in laidout_tensors0])
+                number_of_tuple_elements=len(laidout_tensors0),
+                tuple_types=[x.dtype for x in laidout_tensors0],
+                tuple_shapes=[x.shape for x in laidout_tensors0])
         enqueue_ops = infeed_queue.generate_enqueue_ops(
-            all_laidout_tensors,
-            tpu_ordinal_function=_tpu_ordinal_function_impl,
-            placement_function=_placement_function_impl)
+                all_laidout_tensors,
+                tpu_ordinal_function=_tpu_ordinal_function_impl,
+                placement_function=_placement_function_impl)
 
     input_initializers = [ds.initializer for ds in ds_iterator]
 
