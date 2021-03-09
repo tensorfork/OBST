@@ -59,7 +59,8 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
     hooks = []
     output_shapes = []
     tf.config.optimizer.set_experimental_options(params.tensorflow_optimization_settings)
-    manual_global_step = tf.get_variable("manual_global_step")
+    manual_global_step = tf.get_variable("manual_global_step", [], tf.int32, initializer=tf.zeros_initializer(),
+                                         trainable=False)
 
     def _model_fn(*args):
         # Construct mtf graph + mesh from params
