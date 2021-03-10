@@ -10,8 +10,8 @@ import numpy as np
 import tensorflow.compat.v1 as tf
 
 from .dataclass import BlockConfig, ModelParameter
-from .utils_core import default
 from .optimizers import import_float
+from .utils_core import default
 from .utils_mtf import activate, anonymize, anonymize_dim, concat, deduplicate, random_name, slice
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
@@ -50,7 +50,7 @@ def _linear(params: ModelParameter, block_input: mtf.Tensor, old: typing.List[mt
 
 def _linear_to_features(params: ModelParameter, block_input: mtf.Tensor,
                         old: typing.Optional[typing.List[mtf.Dimension]] = None) -> mtf.Tensor:
-    return _linear(params, block_input, default(old, params.intermediate), params.feature_dims)
+    return _linear(params, block_input, default(old, params.feature_dims), params.feature_dims)
 
 
 def _linear_from_features(params: ModelParameter, block_input: mtf.Tensor,
@@ -59,8 +59,7 @@ def _linear_from_features(params: ModelParameter, block_input: mtf.Tensor,
 
 
 def _communicating_linear(params: ModelParameter, block_input: mtf.Tensor):
-    return mtf.add_n([_linear_to_features(params, mtf.shift(block_input, i, params.head_dim, True))
-                      for i in range(params.n_head)])
+    return _linear_to_features(params, block_input, params.intermediate)
 
 
 def _embed(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
@@ -85,7 +84,7 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
 
     key = bias = 0
     if 'embedded' in name_extras or 'context' in name_extras:
-        key = _linear_to_features(params, base) * dim.size ** -0.5
+        key = _communicating_linear(params, base) * dim.size ** -0.5
     if 'embedded' in name_extras or 'positional' in name_extras:
         bias = _embed(params, [dim] + params.feature_dims, tuple())
     key = anonymize(key + bias, dim)
@@ -119,13 +118,12 @@ def _rezero(params, block_input: mtf.Tensor, name_extras: typing.Tuple[str]) -> 
 
 
 def _feed_forward(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple[str]) -> mtf.Tensor:
-    intermediate = ([params.head_dim,
-                     anonymize_dim(params.key_dim, params.key_dim.size * params.group_linear_factor)]
-                    if 'group' in name_extras else None)
-    mid = activate(_linear_from_features(params, block_input, intermediate))
     if 'group' in name_extras:
-        return _linear_to_features(params, mid, intermediate)
-    return _communicating_linear(params, mid)
+        intermediate = [params.head_dim,
+                        anonymize_dim(params.key_dim, params.key_dim.size * params.group_linear_factor)]
+    else:
+        intermediate = params.intermediate
+    return _linear_to_features(params, activate(_linear_from_features(params, block_input, intermediate)), intermediate)
 
 
 def _norm(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple[str]) -> mtf.Tensor:

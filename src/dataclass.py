@@ -7,8 +7,6 @@ import mesh_tensorflow as mtf
 import tensorflow.compat.v1 as tf
 from tensorflow.python.tpu.device_assignment import DeviceAssignment
 
-from .utils_mtf import anonymize_dim
-
 
 class BlockConfig:
     def __init__(self, config):
@@ -133,9 +131,9 @@ class ModelParameter(typing.Dict[str, typing.Any]):
 
         self.feature_dims = self.head_dimensions + [self.key_dim]
 
-        self.intermediate = [self.head_dim,
-                             anonymize_dim(self.key_dim,
-                                           int(self.key_dim.size * self.intermediate_feed_forward_multiplier))]
+        self.intermediate = [mtf.Dimension("intermediate",
+                                           int(self.n_head * self.key_dim.size *
+                                               self.intermediate_feed_forward_multiplier))]
 
         self.vocab_dim = mtf.Dimension("vocab", self.vocab_size)
         self.batch_dim = mtf.Dimension("batch", self.train_batch_size)
