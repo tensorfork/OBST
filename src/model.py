@@ -140,12 +140,17 @@ def _norm(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.T
     return block_input
 
 
+def _activate(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple[str]):
+    return activate(block_input)
+
+
 LAYER_FUNCTIONS = {'feed_forward': _feed_forward,
                    'attention':    _attention,
                    'norm':         _norm,
                    'rezero':       _rezero,
                    'embed':        _embed,
-                   'all_mean': _all_mean
+                   'all_mean':     _all_mean,
+                   'activation':   _activate
                    }
 
 
