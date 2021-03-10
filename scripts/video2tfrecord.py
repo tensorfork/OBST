@@ -3,6 +3,7 @@ import subprocess
 import argparse
 import datetime
 import warnings
+import hashlib
 import typing
 import random
 import glob
@@ -59,7 +60,8 @@ def downloader(url: str, filename: str, max_try: int=3):
     while try_count < max_try:
         try:
             urlretrieve(url, filename)
-        except:
+        except Exception as e:
+            print('Download error', e)
             try_count += 1
         else:
             return True
@@ -306,7 +308,7 @@ def char_level_encoder(words: list):
     chars = []
 
     for word in words:
-        w = " " + word
+        w = word
         chars.append([ord(c) for c in w])
 
     return chars
@@ -381,11 +383,10 @@ def worker(work: list,
         youtube_getter.add_default_info_extractors()
 
     # Loop to list of work.
-    for wor_idx, wor in enumerate(work):
-
-        print('worker:', worker_id, 'work idx:', wor_idx)
+    for chunk_idx, wor in enumerate(work):
 
         _tfrecord_name = "|".join(wor)
+        _tfrecord_name = hashlib.sha3_256(_tfrecord_name.encode('utf-8')).hexdigest()
         _save_name = os.path.join(buffer_save_dir, _tfrecord_name + '.tfrecord')
 
         contains_video_already = False
@@ -393,7 +394,10 @@ def worker(work: list,
         # Create TF Record Writer
         with tf.io.TFRecordWriter(_save_name) as tf_writer:
 
-            for _wor in wor:
+            for wor_idx, _wor in enumerate(wor):
+
+                print(f"worker: {worker_id} chunk: {chunk_idx} video: {wor_idx}")
+
                 # Assume by default the download was successful.
                 download_success = True
 
@@ -480,8 +484,6 @@ def worker(work: list,
                             url = video_url['url']
                             ext = video_url['ext']
 
-                            print(video_url_idx, ext)
-
                             if url is not None and ext is not None:
                                 if url != "" and ext != "":
                                     video_buffer_path = os.path.join(download_buffer_dir, _wor) + '.' + ext
@@ -515,7 +517,8 @@ def worker(work: list,
                                             break
                                         else:
                                             warnings.warn("worker: " + str(worker_id) + " cv2 failed to open:" +
-                                                          video_buffer_path, [__ff['ext'] for __ff in video_urls])
+                                                          video_buffer_path + " " +
+                                                          str([__ff["ext"] for __ff in video_urls]))
 
                                             if os.path.exists(video_buffer_path):
                                                 os.remove(video_buffer_path)
@@ -559,6 +562,7 @@ def worker(work: list,
                         bpe_list = []
 
                 _wor = video_buffer_path
+                print(_wor, 'subtitles_available:', subtitles_available)
 
 
                 # Check if this video need to be skipt. This will happen if subtitles are required but are not available.
@@ -685,14 +689,14 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('load_path', type=str,
-                        help='The path to a json file containing video information, or a path to a folder containing '
-                             'json files with video information.')
-    parser.add_argument('save_path', type=str,
-                        help='The path where the final TFrecords get saved.')
-    parser.add_argument('download_buffer_path', type=str,
-                        help="A Folder that gets used to save downloads. IF 'keep_buffer_download' is False (default) "
-                             "the content in the folder will get automatically deleted when it is no longer needed.")
+    #parser.add_argument('load_path', type=str,
+    #                    help='The path to a json file containing video information, or a path to a folder containing '
+    #                         'json files with video information.')
+    #parser.add_argument('save_path', type=str,
+    #                    help='The path where the final TFrecords get saved.')
+    #parser.add_argument('download_buffer_path', type=str,
+    #                    help="A Folder that gets used to save downloads. IF 'keep_buffer_download' is False (default) "
+    #                         "the content in the folder will get automatically deleted when it is no longer needed.")
 
     parser.add_argument('-num_worker', type=int, default=1,
                         help='The number of parallel workers.')
@@ -735,15 +739,24 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    load_path = args.load_path
-    save_path = args.save_path
-    download_buffer_path = args.download_buffer_path
+    #load_path = args.load_path
+    #load_path = "../work_chunks.json"
+    load_path = "/buffer/HowToCakeIt.json"
+    #save_path = args.save_path
+    save_path = "/buffer/video_with_language/"
+    #download_buffer_path = args.download_buffer_path
+    download_buffer_path = "/buffer/buffer/"
 
-    num_worker = args.num_worker
-    download = str2bool(args.download)
-    use_subtitles = str2bool(args.use_subtitles)
-    skip_if_no_subtitles = str2bool(args.skip_if_no_subtitles)
-    keep_buffer_download = str2bool(args.keep_buffer_download)
+    #num_worker = args.num_worker
+    num_worker = 1
+    #download = str2bool(args.download)
+    download = True
+    #use_subtitles = str2bool(args.use_subtitles)
+    use_subtitles = True
+    #skip_if_no_subtitles = str2bool(args.skip_if_no_subtitles)
+    skip_if_no_subtitles = False
+    #keep_buffer_download = str2bool(args.keep_buffer_download)
+    keep_buffer_download = False
 
     target_fps = args.target_fps
     target_width = args.target_width
@@ -787,20 +800,25 @@ if __name__ == '__main__':
 
     ids, duration = split_equal(ids, duration, num_worker, duration_need_larger)
 
+    split_chunk_count = 0
     split_video_count = 0
     split_video_duration = 0
 
     for i in range(len(ids)):
-        buffer_video_count = len(ids[i])
+        buffer_chunk_count = len(ids[i])
+        buffer_video_count = sum([len(__ids) for __ids in ids[i]])
         buffer_video_duration = sum(duration[i])
 
-        print('split:', i, 'videos:', buffer_video_count, 'duration:', buffer_video_duration)
+        print('split:', i, 'chunks:', buffer_chunk_count, 'videos:',
+              buffer_video_count, 'duration:', buffer_video_duration)
 
+        split_chunk_count += buffer_chunk_count
         split_video_count += buffer_video_count
         split_video_duration += buffer_video_duration
 
     print('')
-    print('total num of videos:', split_video_count, 'total video duration:', split_video_duration)
+    print('total num of chunks:', split_chunk_count, 'total num of videos:',
+          split_video_count, 'total video duration:', split_video_duration)
     print('')
 
 

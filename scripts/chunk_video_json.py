@@ -46,12 +46,12 @@ if __name__ == '__main__':
     random.shuffle(videos)
     
     for i, d in videos:
-        
-        if _chunk_duration_sum < min_duration:
-            _chunk_ids.append(i)
-            _chunk_duration.append(d)
-            _chunk_duration_sum = _chunk_duration_sum + d
-        else:
+
+        _chunk_ids.append(i)
+        _chunk_duration.append(d)
+        _chunk_duration_sum = _chunk_duration_sum + d
+
+        if _chunk_duration_sum >= min_duration:
 
             chunks_ids.append(_chunk_ids)
             chunks_duration.append(_chunk_duration)
