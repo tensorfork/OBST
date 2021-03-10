@@ -145,7 +145,8 @@ LAYER_FUNCTIONS = {'feed_forward': _feed_forward,
                    'attention':    _attention,
                    'norm':         _norm,
                    'rezero':       _rezero,
-                   'embed':        _embed
+                   'embed':        _embed,
+                   'all_mean': _all_mean
                    }
 
 
