@@ -70,6 +70,7 @@ def _embed(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension
 
 
 def _all_mean(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple):
+    # maybe use einsum instead of mean
     return (mtf.one_hot(mtf.import_fully_replicated(params.mesh,
                                                     import_float(params.attention_idx), [], str(params.attention_idx)),
                         params.head_dim)
