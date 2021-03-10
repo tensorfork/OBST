@@ -11,6 +11,7 @@ import tensorflow.compat.v1 as tf
 
 from .dataclass import BlockConfig, ModelParameter
 from .utils_core import default
+from .optimizers import import_float
 from .utils_mtf import activate, anonymize, anonymize_dim, concat, deduplicate, random_name, slice
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
@@ -68,8 +69,16 @@ def _embed(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension
     return _normal_var(params, shape, params.embedding_stddev)
 
 
+def _all_mean(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple):
+    return (mtf.one_hot(mtf.import_fully_replicated(params.mesh,
+                                                    import_float(params.attention_idx), [], str(params.attention_idx)),
+                        params.head_dim)
+            * mtf.reduce_mean(block_input, reduced_dim=params.head_dim))
+
+
 def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple[str]):
     idx, dim = _get_attention_dim(params, block_input)
+    params.attention_idx += 1
     tmp = anonymize_dim(dim)
     base = activate(_linear_from_features(params, block_input))
 
