@@ -41,6 +41,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.n_embd = 256
         self.n_blocks = 16
         self.buffer_size = 4
+        self.shuffle_buffer = 256
         self.interleaved_datasets = 256
         self.token_patch_size = 4
         self.learning_rate = 5e-5

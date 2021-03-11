@@ -198,7 +198,7 @@ def dataset_text(path: str, params: ModelParameter, sub_batch_size: int, slice_i
                                                    patch_size=(language_token_per_frame - 1),
                                                    chunk_size=-1))
 
-    data = data.shuffle(256, seed=params.data_seed)
+    data = data.shuffle(params.shuffle_buffer, seed=params.data_seed)
     data = tf.data.Dataset.zip((data, padding_token, padding_frame, padding_frame_mask, padding_token_mask))
     data = data.batch(sub_batch_size)
     data = data.map(_memory_func, num_parallel_calls=tf.data.experimental.AUTOTUNE)
@@ -347,7 +347,6 @@ def dataset(params: ModelParameter, sub_batch_size, slice_index, slice_count):
     dset = dset.map(memory_op)
     dset = dset.map(align_tensor_op)
     dset = dset.skip(params.current_step)
-    dset = dset.prefetch(params.buffer_size)
 
     return dset
 
@@ -441,7 +440,7 @@ def gpt_neo_input(params, sub_batch_size, slice_index, slice_count):
     decoder = decode_intstring if 'int64' in filenames[0] else decode_bytestring
     dset = dset.interleave(lambda x: _text_decoder(decoder, x, params.n_ctx, params.token_patch_size, -1))
 
-    dset = dset.shuffle(512, seed=params.data_seed)
+    dset = dset.shuffle(params.shuffle_buffer, seed=params.data_seed)
     dset = dset.batch(sub_batch_size)
 
     dset = dset.map(_memory_func)
@@ -463,6 +462,6 @@ def gpt_neo_input(params, sub_batch_size, slice_index, slice_count):
     options.experimental_optimization.shuffle_and_repeat_fusion = True
     options.experimental_optimization.apply_default_optimizations = False
 
-    # dataset = dataset.with_options(options)
+    dset = dset.with_options(options)
 
     return dset

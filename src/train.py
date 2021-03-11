@@ -382,7 +382,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         with ops.device(f"/job:worker/task:{host_id}/device:CPU:0"):
 
             _ds_iterator = input_fn(params, sub_batch_size, sub_batch_i,
-                                    len(hosts_to_hold_ds)).make_initializable_iterator()
+                                    len(hosts_to_hold_ds)).prefetch(params.buffer_size).make_initializable_iterator()
             ds_iterator.append(_ds_iterator)
             all_input_tensors = _ds_iterator.get_next()
 
