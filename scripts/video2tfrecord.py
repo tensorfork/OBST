@@ -78,7 +78,7 @@ def frame_encoder(frame,
                   text_tokens: typing.List[int] = None,
                   skip_frame: typing.List[bool] = [False],
                   mask: typing.List[int] = None,
-                  concat: typing.List[bool] = False):
+                  concat: typing.List[bool] = [False]):
     '''
     :param frame: A byte String containing a jpg encoded image.
     :param text_tokens: A list containing int ped tokens.
