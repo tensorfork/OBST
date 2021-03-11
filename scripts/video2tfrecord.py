@@ -739,24 +739,16 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    #load_path = args.load_path
-    #load_path = "../work_chunks.json"
-    load_path = "/buffer/HowToCakeIt.json"
-    #save_path = args.save_path
-    save_path = "/buffer/video_with_language/"
-    #download_buffer_path = args.download_buffer_path
-    download_buffer_path = "/buffer/buffer/"
+    load_path = args.load_path
+    load_path = "../work_chunks.json"
+    save_path = args.save_path
+    download_buffer_path = args.download_buffer_path
 
-    #num_worker = args.num_worker
-    num_worker = 1
-    #download = str2bool(args.download)
-    download = True
-    #use_subtitles = str2bool(args.use_subtitles)
-    use_subtitles = True
-    #skip_if_no_subtitles = str2bool(args.skip_if_no_subtitles)
-    skip_if_no_subtitles = False
-    #keep_buffer_download = str2bool(args.keep_buffer_download)
-    keep_buffer_download = False
+    num_worker = args.num_worker
+    download = str2bool(args.download)
+    use_subtitles = str2bool(args.use_subtitles)
+    skip_if_no_subtitles = str2bool(args.skip_if_no_subtitles)
+    keep_buffer_download = str2bool(args.keep_buffer_download)
 
     target_fps = args.target_fps
     target_width = args.target_width
