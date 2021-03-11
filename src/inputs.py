@@ -300,9 +300,9 @@ def dataset_video(path: str, params: ModelParameter, sub_batch_size: int, slice_
                                                                    params.data_seed * params.shuffle_input_filenames))
 
     data = data.repeat()
-    data = data.apply(tf.data.experimental.parallel_interleave(lambda x: _decode_func(x),
-                                                               cycle_length=params.interleaved_datasets, block_length=1,
-                                                               sloppy=False))
+    data = data.interleave(lambda x: _decode_func(x),
+                           cycle_length=params.interleaved_datasets,
+                           num_parallel_calls=tf.data.experimental.AUTOTUNE)
     data = data.batch(sub_batch_size)
     data = data.map(_pre_func, num_parallel_calls=tf.data.experimental.AUTOTUNE)
 
@@ -438,7 +438,9 @@ def gpt_neo_input(params, sub_batch_size, slice_index, slice_count):
         return {'token_x': vals1, 'token_y': vals2}
 
     decoder = decode_intstring if 'int64' in filenames[0] else decode_bytestring
-    dset = dset.interleave(lambda x: _text_decoder(decoder, x, params.n_ctx, params.token_patch_size, -1))
+    dset = dset.interleave(lambda x: _text_decoder(decoder, x, params.n_ctx, params.token_patch_size, -1),
+                           cycle_length=params.interleaved_datasets,
+                           num_parallel_calls=tf.data.experimental.AUTOTUNE)
 
     dset = dset.shuffle(params.shuffle_buffer, seed=params.data_seed)
     dset = dset.batch(sub_batch_size)
