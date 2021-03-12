@@ -16,7 +16,7 @@ def import_float(imported):
     return tf.constant(imported, dtype=tf.float32, shape=[])
 
 
-def get_optimizer(loss: mtf.Tensor, params: ModelParameter, step
+def get_optimizer(loss: mtf.Tensor, params: ModelParameter, manual_step
                   ) -> typing.Tuple[typing.Tuple[mtf.Tensor, typing.List[mtf.Assign],
                                                  typing.List[mtf.Tensor]], tf.Tensor]:
     """
@@ -25,9 +25,10 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter, step
     :param params: ModelParameter instance
     :return: scalar learning rate, update operations, gradients
     """
+    global_step = tf.train.get_or_create_global_step()
     dtype = params.variable_dtype.activation_dtype
     tf_learning_rate = tf.constant(value=params.learning_rate, shape=[], dtype=tf.float32)
-    global_steps_float = tf.cast(tf.train.get_or_create_global_step(), tf.float32)
+    global_steps_float = tf.cast(global_step, tf.float32)
 
     def import_mtf(imported, name):
         return mtf.import_fully_replicated(params.mesh, tf.cast(imported, dtype), [], name)
@@ -46,7 +47,9 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter, step
                                       import_float(params.learning_rate_decay_min * 1.))
 
     learning_rate = import_mtf(tf_learning_rate, "learning_rate")
-    step = import_mtf(step, "step")
+    step = mtf.cast(mtf.equal(mtf.mod(tf.cast(manual_step, dtype),
+                                      import_mtf(params.grad_accumulation * 1., "grad_accum")),
+                              import_mtf(0., "zero")), dtype)
     mstep = 1 - step
     beta1 = 1 - step * import_mtf(1 - 0.9, "beta1")
     beta2 = 1 - step * import_mtf(1 - 0.95, "beta2")
