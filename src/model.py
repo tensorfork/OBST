@@ -154,6 +154,23 @@ LAYER_FUNCTIONS = {'feed_forward': _feed_forward,
                    }
 
 
+def _convolution(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple[str]):
+    convolution_size = 16
+    if len(name_extras) == 0:
+        convolution_size = int(name_extras[0])
+    idx, dim = _get_attention_dim(params, block_input)
+    anonymous_block_input = anonymize(block_input, dim)
+    indexed = mtf.Dimension("indexed", convolution_size)
+    one_hot = mtf.range(params.mesh, indexed, params.variable_dtype.activation_dtype)
+    one_hot -= params.convolution_size
+    one_hot += mtf.range(params.mesh, dim, params.variable_dtype.activation_dtype)
+    one_hot = mtf.one_hot(one_hot, dim)
+    output = mtf.einsum([one_hot, anonymous_block_input], block_input.shape + [indexed])
+    output = _linear(params, output, [indexed] + params.feature_dims, params.intermediate)
+    output = activate(output)
+    return _communicating_linear(params, output)
+
+
 def _block_part_fn(params: ModelParameter, block_part_config: BlockConfig, block_input: mtf.Tensor) -> mtf.Tensor:
     out = block_input
     for layer in block_part_config.layer:
