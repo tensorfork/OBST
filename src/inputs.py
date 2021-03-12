@@ -449,7 +449,6 @@ def gpt_neo_input(params, sub_batch_size, slice_index, slice_count):
 
     options = tf.data.Options()
     options.experimental_deterministic = not params.train
-    options.experimental_slack = True
     options.experimental_optimization.autotune = True
     options.experimental_optimization.autotune_buffers = True
     options.experimental_optimization.filter_fusion = True
