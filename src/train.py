@@ -11,6 +11,7 @@ import numpy as np
 import tensorflow.compat.v1 as tf
 from tensorflow.python.framework import ops
 from tensorflow.python.ops import summary_ops_v2 as summary
+from tensorflow.core.framework.summary_pb2 import Summary
 from tensorflow.python.tpu import tpu, tpu_feed
 from tensorflow.python.tpu.ops import tpu_ops
 from tensorflow.python.ops import variables
@@ -20,6 +21,38 @@ from .model import build
 from .optimizers import get_optimizer
 from .utils_mtf import pad, to_float, weighted_add
 
+
+class ExamplesPerSecondHook(tf.train.StepCounterHook):
+  """Calculate and report global_step/sec and examples/sec during runtime."""
+
+  def __init__(self,
+               batch_size,
+               every_n_steps=100,
+               every_n_secs=None,
+               output_dir=None,
+               summary_writer=None):
+    self._batch_size = batch_size
+    super(ExamplesPerSecondHook, self).__init__(
+        every_n_steps=every_n_steps,
+        every_n_secs=every_n_secs,
+        output_dir=output_dir,
+        summary_writer=summary_writer)
+
+  def _log_and_record(self, elapsed_steps, elapsed_time, global_step):
+    global_step_per_sec = elapsed_steps / elapsed_time
+    examples_per_sec = self._batch_size * global_step_per_sec
+    if self._summary_writer is not None:
+      global_step_summary = Summary(value=[
+          Summary.Value(
+              tag='global_step/sec', simple_value=global_step_per_sec)
+      ])
+      example_summary = Summary(value=[
+          Summary.Value(tag='examples/sec', simple_value=examples_per_sec)
+      ])
+      self._summary_writer.add_summary(global_step_summary, global_step)
+      self._summary_writer.add_summary(example_summary, global_step)
+    tf.logging.info('global_step/sec: %g', global_step_per_sec)
+    tf.logging.info('examples/sec: %g', examples_per_sec)
 
 class CheckpointLoaderHook(tf.estimator.SessionRunHook):
     """Load checkpoint right after the session started."""
@@ -382,7 +415,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         with ops.device(f"/job:worker/task:{host_id}/device:CPU:0"):
 
             _ds_iterator = input_fn(params, sub_batch_size, sub_batch_i,
-                                    len(hosts_to_hold_ds)).prefetch(params.buffer_size).make_initializable_iterator()
+                                    len(hosts_to_hold_ds)).make_initializable_iterator()
             ds_iterator.append(_ds_iterator)
             all_input_tensors = _ds_iterator.get_next()
 
@@ -456,6 +489,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
         with tf.train.MonitoredTrainingSession(master=cluster_resolver.master(),
                                                hooks=[ckpt_loader_hook,
+                                                      ExamplesPerSecondHook(every_n_steps=10, batch_size=params.train_batch_size),
                                                       tf.train.StepCounterHook(every_n_steps=10)] + hooks,
                                                config=session_config) as sess:
 
@@ -487,15 +521,23 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     # We don't need output other than from core 0.
                     outfeed_dequeue_ops.append([tf.reduce_mean(x) for x in outfeed_dequeue_op]
                                                if outfeed_dequeue_ops else outfeed_dequeue_op)
+        graph = tf.get_default_graph()
         with tf.train.MonitoredSession(session_creator=tf.train.ChiefSessionCreator(master=cluster_resolver.master(),
                                                                                     config=session_config),
                                        hooks=[ckpt_loader_hook, hooks[0]]) as sess:
+            graph._finalized = False
             sess.run(input_initializers)
             # error probably here -> it didnt run init
-            infeed_thread = threading.Thread(target=_thread_fn, args=(sess,))
-            infeed_thread.start()
+            # infeed_thread = threading.Thread(target=_thread_fn, args=(sess,))
+            # infeed_thread.start()
+            print('Compiling computation...')
+            sess.run(compilation_state)
             while True:
+                print('Running enqueue...')
+                sess.run(enqueue_ops)
+                print('Running computation...')
                 sess.run(computation)
+                print('Running outfeed...')
                 out = sess.run(outfeed_dequeue_ops)[0]
                 for fn in callback_fns:
                     fn(out)
