@@ -444,11 +444,12 @@ def gpt_neo_input(params, sub_batch_size, slice_index, slice_count):
 
     dset = dset.shuffle(params.shuffle_buffer, seed=params.data_seed)
     dset = dset.batch(sub_batch_size)
-
     dset = dset.map(_memory_func)
     dset = dset.map(align_tensor_op)
 
     options = tf.data.Options()
+    options.experimental_deterministic = not params.train
+    options.experimental_slack = True
     options.experimental_optimization.autotune = True
     options.experimental_optimization.autotune_buffers = True
     options.experimental_optimization.filter_fusion = True
@@ -465,7 +466,7 @@ def gpt_neo_input(params, sub_batch_size, slice_index, slice_count):
     options.experimental_optimization.apply_default_optimizations = False
     options.experimental_threading.max_intra_op_parallelism = 1
     options.experimental_threading.private_threadpool_size = 48
-    options.experimental_distribute.auto_shard_policy = 1  # -1=Off, 0=Auto, 1=File, 2=Data
+    options.experimental_distribute.auto_shard = True
     dset = dset.with_options(options)
 
     return dset
