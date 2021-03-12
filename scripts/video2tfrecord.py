@@ -689,14 +689,14 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
 
-    #parser.add_argument('load_path', type=str,
-    #                    help='The path to a json file containing video information, or a path to a folder containing '
-    #                         'json files with video information.')
-    #parser.add_argument('save_path', type=str,
-    #                    help='The path where the final TFrecords get saved.')
-    #parser.add_argument('download_buffer_path', type=str,
-    #                    help="A Folder that gets used to save downloads. IF 'keep_buffer_download' is False (default) "
-    #                         "the content in the folder will get automatically deleted when it is no longer needed.")
+    parser.add_argument('load_path', type=str,
+                        help='The path to a json file containing video information, or a path to a folder containing '
+                             'json files with video information.')
+    parser.add_argument('save_path', type=str,
+                        help='The path where the final TFrecords get saved.')
+    parser.add_argument('download_buffer_path', type=str,
+                        help="A Folder that gets used to save downloads. IF 'keep_buffer_download' is False (default) "
+                             "the content in the folder will get automatically deleted when it is no longer needed.")
 
     parser.add_argument('-num_worker', type=int, default=1,
                         help='The number of parallel workers.')
@@ -740,7 +740,6 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     load_path = args.load_path
-    load_path = "../work_chunks.json"
     save_path = args.save_path
     download_buffer_path = args.download_buffer_path
 
