@@ -611,7 +611,7 @@ def gpt_random_input(params, sub_batch_size, slice_index, slice_count):
       x = tf.squeeze(x, 0)
       x = tf.expand_dims(x, -1)
       return x[0:-1], x[1:]
-    ds = ds.map(sampler)
+    ds = ds.map(sampler, num_parallel_calls=params.num_parallel_calls)
     ds = ds.batch(sub_batch_size)
     def set_shape(*args):
       for x in args:
@@ -620,7 +620,7 @@ def gpt_random_input(params, sub_batch_size, slice_index, slice_count):
         shape[0] = sub_batch_size
         x.set_shape(shape)
       return args
-    ds = ds.map(set_shape)
+    ds = ds.map(set_shape, num_parallel_calls=params.num_parallel_calls)
     return ds
 
 def gpt_neo_input(params, sub_batch_size, slice_index, slice_count):

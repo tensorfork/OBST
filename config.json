@@ -32,7 +32,6 @@
     "optimizer": "sm3",
     "debug_train_step": false,
     "learning_rate": 0.0005,
-    "train_batch_size": 32,
     "recompute_grad": true,
     "three_axes": false,
     "use_language": true,
@@ -63,12 +62,15 @@
     "res_dropout": 0,
     "eval_batch_size": 64,
     "predict_batch_size": 1,
-    "iterations": 2500,
     "datasets": [],
     "shuffle": false,
     "residual": true,
     "scale_by_depth": true,
     "scale_by_in": false,
     "activation_function": "gelu",
-    "gradient_clipping": 1.0
+    "gradient_clipping": 1.0,
+
+    "train_batch_size": 32,
+    "iterations": 10,
+    "warmup_steps": 0
 }
