@@ -256,11 +256,11 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                        output_shape=token_out.shape)
 
                             token_mask = weighted_add(
-                                mtf.reshape(to_float(token_pad), new_shape=params.token_dim_shape),
-                                to_float(token_mask), one_hot_sequence)
+                                    mtf.reshape(to_float(token_pad), new_shape=params.token_dim_shape),
+                                    to_float(token_mask), one_hot_sequence)
 
                             frame_pad = to_float(
-                                mtf.greater(mtf.reduce_sum(padding_token, reduced_dim=tkn_per_frame), 0))
+                                    mtf.greater(mtf.reduce_sum(padding_token, reduced_dim=tkn_per_frame), 0))
                             token_x_input = weighted_add(frame_pad, to_float(token_x_input), one_hot_sequence)
 
                         return position + 1, token_x_input, token_y_input, \
@@ -327,7 +327,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
             print('\n')
             param_count = int(
-                sum(np.prod([d.size for d in variable.shape.dims]) for variable in graph.trainable_variables))
+                    sum(np.prod([d.size for d in variable.shape.dims]) for variable in graph.trainable_variables))
             var_count = int(sum(np.prod([d.size for d in variable.shape.dims]) for variable in graph.all_variables))
 
             constant = '  variables: '
@@ -608,7 +608,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         @tpu_function.on_device_training_loop
         def tpu_loop():
             global_step, manual_step = tf.tpu.outside_compilation(
-                lambda: (tf.train.get_or_create_global_step(), get_or_create_manual_step()))
+                    lambda: (tf.train.get_or_create_global_step(), get_or_create_manual_step()))
             # return training_loop.repeat(params.iterations, tpu_step, [1e7])
             return training_loop_repeat(
                     params.iterations * params.grad_accumulation,
@@ -722,15 +722,13 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                         with open('DEBUG') as f:
                             DEBUG = f.read().strip()
                         if len(DEBUG) <= 0 or params.tpu_name in DEBUG:
-                            import pdb;
+                            import pdb
                             pdb.set_trace()
                     log(f'Fetching current global step...')
                     current_global_step, current_manual_step = sess.run([global_step, manual_step])
                     log(f'global_step={current_global_step}, manual_step={current_manual_step}')
 
-                    for prefetch_count, prefetch_step in enumerate(range(i, params.train_steps, params.iterations)):
-                        if prefetch_count >= 5:
-                            break
+                    for prefetch_step in range(i, params.iterations):
                         enqueue_batch(prefetch_step)
 
                     # for j in range(params.iterations):
