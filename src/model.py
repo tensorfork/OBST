@@ -144,16 +144,6 @@ def _activate(params: ModelParameter, block_input: mtf.Tensor, name_extras: typi
     return activate(block_input)
 
 
-LAYER_FUNCTIONS = {'feed_forward': _feed_forward,
-                   'attention':    _attention,
-                   'norm':         _norm,
-                   'rezero':       _rezero,
-                   'embed':        _embed,
-                   'all_mean':     _all_mean,
-                   'activation':   _activate
-                   }
-
-
 def _convolution(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple[str]):
     convolution_size = 16
     if len(name_extras) == 0:
@@ -169,6 +159,17 @@ def _convolution(params: ModelParameter, block_input: mtf.Tensor, name_extras: t
     output = _linear(params, output, [indexed] + params.feature_dims, params.intermediate)
     output = activate(output)
     return _communicating_linear(params, output)
+
+
+LAYER_FUNCTIONS = {'feed_forward': _feed_forward,
+                   'attention':    _attention,
+                   'norm':         _norm,
+                   'rezero':       _rezero,
+                   'embed':        _embed,
+                   'all_mean':     _all_mean,
+                   'activation':   _activate,
+                   'convolution':  _convolution
+                   }
 
 
 def _block_part_fn(params: ModelParameter, block_part_config: BlockConfig, block_input: mtf.Tensor) -> mtf.Tensor:
