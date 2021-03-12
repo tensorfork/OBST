@@ -16,7 +16,7 @@ def import_float(imported):
     return tf.constant(imported, dtype=tf.float32, shape=[])
 
 
-def get_optimizer(loss: mtf.Tensor, params: ModelParameter, manual_step
+def get_optimizer(loss: mtf.Tensor, params: ModelParameter, global_step, manual_step
                   ) -> typing.Tuple[typing.Tuple[mtf.Tensor, typing.List[mtf.Assign],
                                                  typing.List[mtf.Tensor]], tf.Tensor]:
     """
@@ -25,7 +25,6 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter, manual_step
     :param params: ModelParameter instance
     :return: scalar learning rate, update operations, gradients
     """
-    global_step = tf.train.get_or_create_global_step()
     dtype = params.variable_dtype.activation_dtype
     tf_learning_rate = tf.constant(value=params.learning_rate, shape=[], dtype=tf.float32)
     global_steps_float = tf.cast(global_step, tf.float32)

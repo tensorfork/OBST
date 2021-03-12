@@ -18,8 +18,8 @@ from tensorflow_estimator.python.estimator import estimator as estimator_lib
 
 from .dataclass import ModelParameter
 from .eval import gen_sample_fn
-from .inputs import dataset, gpt_neo_input
 from .train import computation_func
+from . import inputs
 
 
 def main(args: argparse.Namespace) -> None:
@@ -51,9 +51,10 @@ def main(args: argparse.Namespace) -> None:
 
     # Fetch appropriate input functions
     if params.model_mode == 'jannet':
-        input_fn = dataset
+        input_fn = inputs.dataset
     elif params.model_mode == 'gpt':
-        input_fn = gpt_neo_input
+        input_fn_name = getattr(params, 'input_fn', 'gpt_neo_input')
+        input_fn = getattr(inputs, input_fn_name)
 
         # Set params for text only GPT mode.
         params.use_language = True
@@ -67,6 +68,7 @@ def main(args: argparse.Namespace) -> None:
     # Add to params: auto_layout, auto_layout_and_mesh_shape, use_tpu, num_cores
     mesh_shape = mtf.convert_to_shape(params.mesh_shape)
     params.num_cores = mesh_shape.size
+    params.tpu_name = args.tpu
     params.use_tpu = True if not args.tpu is None else False
     params.gpu_ids = args.gpu_ids
     # Expand attention types param

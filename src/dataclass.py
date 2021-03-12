@@ -78,7 +78,8 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.learning_rate_decay_multi = 1
         self.learning_rate_decay_start_step = 100_000
         self.learning_rate_decay_min = 5e-10
-        self.iterations = 2500
+        #self.iterations = 2500
+        self.iterations = 1
         self.initial_autoregressive_position = 128
         self.use_autoregressive_sampling = False
         self.shuffle_input_filenames = True
