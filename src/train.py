@@ -728,8 +728,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     current_global_step, current_manual_step = sess.run([global_step, manual_step])
                     log(f'global_step={current_global_step}, manual_step={current_manual_step}')
 
-                    for prefetch_step in range(i, params.iterations):
-                        enqueue_batch(prefetch_step)
+                    enqueue_batch(0)
 
                     # for j in range(params.iterations):
                     # for accum_step in range(params.grad_accumulation):
