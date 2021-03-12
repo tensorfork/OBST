@@ -3,8 +3,9 @@ Contains functions to create a training loop and log its outputs to tensorboard
 """
 import collections
 import threading
-import time
 import typing
+import time
+import json
 
 import mesh_tensorflow as mtf
 import numpy as np
@@ -226,6 +227,14 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                          for item in variable.shape.dimension_names]))):
             print(dim_name)
         print('\n')
+
+        model_size = {'model_variables': int(param_count - params.embedding_param_count),
+                      'embedding_variables': int(params.embedding_param_count),
+                      'untrainable_variables': int(var_count - param_count),
+                      'total_trainable_variables': int(param_count),
+                      'total_variables': int(var_count)}
+
+        json.dump(model_size, tf.io.gfile.GFile(f"{params.model_path}/model_size.info", 'w'))
 
         lowering = mtf.Lowering(graph, {params.mesh: params.mesh_impl})
 
