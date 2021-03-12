@@ -846,6 +846,8 @@ if __name__ == '__main__':
 
         time.sleep(start_delay)
 
+    print(f"worker_list len: {len(worker_list)} ids len: {len(ids)}")
+
     for w in worker_list:
         w.join()
 
