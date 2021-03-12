@@ -729,14 +729,15 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     log(f'global_step={current_global_step}, manual_step={current_manual_step}')
 
                     for idx, prefetch_step in enumerate(range(i, params.train_steps, params.iterations)):
-                        if idx > 5:
+                        if idx > params.enqueue_buffer:
                             break
                         enqueue_batch(prefetch_step)
 
                     # for j in range(params.iterations):
                     # for accum_step in range(params.grad_accumulation):
                     log(f'Running train_op for step {i} iterations {params.iterations}...')
-                    sess.run(train_op)
+                    loss = sess.run(train_op)
+                    print(loss)
 
                     if (i + 1) % params.summary_flush_interval == 0:
                         log('Flushing summary...')
