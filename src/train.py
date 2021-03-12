@@ -371,7 +371,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 train_op = [lowering.lowered_operation(op) for op in update_ops]
 
                 with tf.control_dependencies(train_op):
-                    tf_loss = tf.cast(lowering.export_to_tf_tensor(loss), tf.float32)
+                    tf_loss = tf.identity(tf.cast(lowering.export_to_tf_tensor(loss), tf.float32))
 
                 comput_ops = [tf_loss,
                               tf.assign_add(tf.train.get_or_create_global_step(), step),
