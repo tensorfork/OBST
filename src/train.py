@@ -10,10 +10,9 @@ import mesh_tensorflow as mtf
 import numpy as np
 import tensorflow.compat.v1 as tf
 from tensorflow.python.framework import ops
-from tensorflow.python.ops import summary_ops_v2 as summary
+from tensorflow.python.ops import summary_ops_v2 as summary, variables
 from tensorflow.python.tpu import tpu, tpu_feed
 from tensorflow.python.tpu.ops import tpu_ops
-from tensorflow.python.ops import variables
 
 from .dataclass import ModelParameter
 from .model import build
@@ -437,11 +436,6 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
     input_initializers = [ds.initializer for ds in ds_iterator]
 
-    def _thread_fn(sess: tf.Session):
-        time.sleep(1)
-        while True:
-            sess.run(enqueue_ops)
-
     compilation_state, computation = tpu.split_compile_and_replicate(_model_fn,
                                                                      [[]] * params.num_cores,
                                                                      infeed_queue,
@@ -458,23 +452,38 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                hooks=[ckpt_loader_hook,
                                                       tf.train.StepCounterHook(every_n_steps=10)] + hooks,
                                                config=session_config) as sess:
-
+            print('Compiling computation...')
+            now = time.time()
+            sess.run(compilation_state)
+            elapsed = time.time() - now
+            print(f'Compiled in {elapsed:.2f}s')
+            print("Initializing inputs...")
             sess.run(input_initializers)
-            infeed_thread = threading.Thread(target=_thread_fn, args=(sess,))
-            infeed_thread.start()
-
+            print("Initializing summary...")
             summary.initialize(session=sess)
+            print("Enqueueing first batch...")
 
+            for _ in range(params.grad_accumulation):
+                sess.run(enqueue_ops)
+
+            print(f"Starting training loop. Start step: {params.current_step}")
             for i in range(params.current_step, params.train_steps):
-
-                for accum_step in range(params.grad_accumulation):
+                if params.debug_train_step:
+                    print(f"Current step: {i}\nTraining...")
+                for _ in range(params.grad_accumulation):
                     sess.run(computation)
+                if params.debug_train_step:
+                    print(f"Enqueueing...")
+                for _ in range(params.grad_accumulation):
+                    sess.run(enqueue_ops)
 
                 if (i + 1) % params.summary_flush_interval == 0:
+                    if params.debug_train_step:
+                        print(f"Flushing summary...")
                     sess.run(flush_summary)
 
-                for fn in callback_fns:
-                    fn(i)
+                # for fn in callback_fns:
+                #    fn(i)
 
     else:  # train == 'sample'
         outfeed_dequeue_ops = []
