@@ -75,7 +75,6 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.grad_accumulation = 1
         self.train_steps = 150_000
         self.warmup_steps = 3000
-        self.enqueue_buffer = 16
         self.learning_rate_decay_multi = 1
         self.learning_rate_decay_start_step = 100_000
         self.learning_rate_decay_min = 5e-10
