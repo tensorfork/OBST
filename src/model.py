@@ -229,16 +229,16 @@ class RevGradOp(mtf.Operation):
         x2 = self._x2 if dy2_backwards is None else dy2_backwards
         y1 = self._y1 if dy1_backwards is None else dy1_backwards
         fx2 = x2
-        prev_num_operations = len(self._graph.operations)
         mapping = {self._x2: x2}
         stop = False
+        f_again_ops = []
         for op in self._forward_operations:
             if isinstance(op, (mtf.Variable, mtf.RandomOperation)):
                 continue
             if stop:
                 break
             new_op: mtf.Operation = copy.copy(op)
-            self._graph.operations.append(new_op)
+            f_again_ops.append(new_op)
             new_op._inputs = [mapping.get(t, t) for t in op._inputs]
             new_op._outputs = []
             for i, t in enumerate(op.outputs):
@@ -249,7 +249,6 @@ class RevGradOp(mtf.Operation):
                     fx2 = new_t
                     stop = True
                     break
-        f_again_ops = self._graph.operations[prev_num_operations:]
         x1 = y1 - fx2
         grads = mtf.gradients(ys=[fx2], xs=[x2] + self._variables, grad_ys=[dy1], operations=f_again_ops)
         return [dy1, x1, dy2 + grads[0], x2] + grads[1:] + [None] * len(self._fn_outputs)
