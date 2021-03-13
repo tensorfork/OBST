@@ -63,12 +63,15 @@ class Downloader:
 
         self.update_proxy()
 
-    def download(self, url: str, filename: str):
+    def download(self, url: str, filename: str, use_proxy: bool):
         try_count = 0
 
         while try_count < self.max_try:
             try:
-                r = requests.get(url, stream=True, proxies=self.proxies)
+                if use_proxy:
+                    r = requests.get(url, stream=True, proxies=self.proxies)
+                else:
+                    r = requests.get(url, stream=True)
 
                 with open(filename, 'wb') as f:
                     for chunk in r:
@@ -541,7 +544,7 @@ def worker(work: list,
                             if url is not None and ext is not None:
                                 if url != "" and ext != "":
                                     video_buffer_path = os.path.join(download_buffer_dir, _wor) + '.' + ext
-                                    download_success = downloader.download(url, video_buffer_path)
+                                    download_success = downloader.download(url, video_buffer_path, False)
 
                                     if download_success:
 
@@ -598,7 +601,7 @@ def worker(work: list,
                     if vtt_url is not None:
                         if vtt_url != "":
                             vtt = os.path.join(download_buffer_dir, _wor) + '.vtt'
-                            vtt_download_success = downloader.download(vtt_url, vtt)
+                            vtt_download_success = downloader.download(vtt_url, vtt, True)
 
                     if vtt_download_success:
                         try:
