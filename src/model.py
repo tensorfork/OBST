@@ -11,7 +11,6 @@ import numpy as np
 import tensorflow.compat.v1 as tf
 
 from .dataclass import BlockConfig, ModelParameter
-from .optimizers import import_float
 from .utils_core import default
 from .utils_mtf import activate, anonymize, anonymize_dim, concat, deduplicate, random_name, slice
 
@@ -72,7 +71,8 @@ def _embed(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension
 def _all_mean(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple):
     # maybe use einsum instead of mean
     return (mtf.one_hot(mtf.import_fully_replicated(params.mesh,
-                                                    import_float(params.attention_idx), [], str(params.attention_idx)),
+                                                    tf.constant(params.attention_idx, dtype=tf.float32, shape=[]), [],
+                                                    str(params.attention_idx)),
                         params.head_dim)
             * mtf.reduce_mean(block_input, reduced_dim=params.head_dim))
 

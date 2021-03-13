@@ -9,8 +9,9 @@ import mesh_tensorflow as mtf
 import tensorflow.compat.v1 as tf
 
 from .dataclass import ModelParameter
-from .utils_mtf import weighted_add
 from .model import RevGradOp
+from .utils_mtf import weighted_add
+
 
 def import_float(imported):
     return tf.constant(imported, dtype=tf.float32, shape=[])
