@@ -272,30 +272,32 @@ class RevGradOp(mtf.Operation):
                 grad_outputs = []
                 for out in op.outputs:
                     grad = tensor_to_gradient.get(out)
-                    if grad is not None:
+                    if grad is None:
+                        grad_outputs.append(None)
+                    else:
                         grad_outputs.append(grad[2])
                         grad[0] += 1
-                    else:
-                        grad_outputs.append(None)
-                    if grad is not None and grad[0] == len(grad[2].operation.inputs):
-                        del tensor_to_gradient[out]
+                        if grad[0] == len(grad[2].operation.inputs):
+                            del tensor_to_gradient[out]
                 if not op.has_gradient or not any(grad_outputs) or not (set(op.inputs) & downstream):
                     continue
                 with tf.variable_scope(op.name + "/revnet/gradients"):
                     for inp, grad in zip(op.inputs, op.gradient(grad_outputs)):
-                        valid_grad = inp in downstream and grad is not None
-                        if valid_grad and inp in tensor_to_gradient:
+                        if inp not in downstream or grad is None:
+                            continue
+                        if inp in tensor_to_gradient:
                             grad_list = tensor_to_gradient[inp]
                             grad_list[1] += 1
                             grad_list[2] += grad
-                        elif valid_grad:
+                        else:
                             grad_list = [0, 1, grad]
                             tensor_to_gradient[inp] = grad_list
-                        if valid_grad and grad_list[0] == len(inp.operation.outputs):
-                            if inp == x2:
-                                yield params[2], dy2 + grad_list[2]
-                                continue
-                            yield params[4 + self._variables.index(inp)], grad_list[2]
+                        if grad_list[0] != len(inp.operation.outputs):
+                            continue
+                        if inp == x2:
+                            yield params[2], dy2 + grad_list[2]
+                            continue
+                        yield params[4 + self._variables.index(inp)], grad_list[2]
 
 
 def build(params: ModelParameter,
