@@ -202,7 +202,7 @@ class RevGradOp(mtf.Operation):
                 new_outputs.update(set(op.outputs))
         explicit_inputs = [x1, x1_backwards, x2, x2_backwards]
         variables = [t for t in list(new_inputs - new_outputs - set(explicit_inputs)) if t.dtype.is_floating]
-        super(RevGradOp, self).__init__(explicit_inputs + variables + fn_outputs, "custom_gradient")
+        super(RevGradOp, self).__init__(explicit_inputs + variables + fn_outputs, random_name("custom_gradient"))
         # Make sure no one uses the internals of this function, since the gradients
         #  will probably not work correctly.
         for t in new_outputs - set(fn_outputs):
