@@ -10,7 +10,7 @@ import tensorflow.compat.v1 as tf
 
 from .dataclass import ModelParameter
 from .utils_mtf import weighted_add
-
+from .model import RevGradOp
 
 def import_float(imported):
     return tf.constant(imported, dtype=tf.float32, shape=[])
@@ -83,15 +83,17 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter, manual_step
                     del tensor_to_gradient[out]
             if not op.has_gradient or not any(grad_outputs) or not (set(op.inputs) & downstream):
                 continue
-            with tf.variable_scope(op.name + "/gradients"):
-                for inp, grad in zip(op.inputs, op.gradient(grad_outputs)):
-
+            with tf.variable_scope(op.name + "/optimizer/gradients"):
+                if isinstance(op, RevGradOp):
+                    itr = op.gradient(grad_outputs, params=op.inputs)
+                else:
+                    itr = zip(op.inputs, op.gradient(grad_outputs))
+                for inp, grad in itr:
                     valid_grad = inp in downstream and grad is not None
                     if valid_grad and inp in tensor_to_gradient:
                         grad_list = tensor_to_gradient[inp]
                         grad_list[1] += 1
                         grad_list[2] += grad
-
                     elif valid_grad:
                         grad_list = [0, 1, grad]
                         tensor_to_gradient[inp] = grad_list

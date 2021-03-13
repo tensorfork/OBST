@@ -223,7 +223,7 @@ class RevGradOp(mtf.Operation):
         for fn_output, output in zip(self._fn_outputs, self._outputs):
             lowering.set_tensor_lowering(output, lowering.tensors[fn_output])
 
-    def gradient(self, grad_ys):
+    def gradient(self, grad_ys, params: typing.Optional[typing.List[mtf.Operation]] = None):
         dy2, dy2_backwards, dy1, dy1_backwards = grad_ys
         x2 = self._x2 if dy2_backwards is None else dy2_backwards
         y1 = self._y1 if dy1_backwards is None else dy1_backwards
@@ -242,8 +242,60 @@ class RevGradOp(mtf.Operation):
                 mapping[t] = new_t
         fx2 = new_t if self._forward_operations[:-1] else x2  # it's always the last
         x1 = y1 - fx2
-        grads = mtf.gradients(ys=[fx2], xs=[x2] + self._variables, grad_ys=[dy1], operations=f_again_ops)
-        return [dy1, x1, dy2 + grads[0], x2] + grads[1:] + [None] * len(self._fn_outputs)
+        # figure out what Tensors are downstream of xs
+        downstream = set([x2] + self._variables)
+        for op in f_again_ops:
+            if op.has_gradient and set(op.inputs) & downstream:
+                downstream |= set(op.outputs)
+        if params is None:
+            tensor_to_gradient = {fx2: dy1}
+            with tf.variable_scope(fx2.graph.captured_variable_scope):
+                for op in f_again_ops[::-1]:
+                    grad_outputs = [tensor_to_gradient.get(out) for out in op.outputs]
+                    if op.has_gradient and any(grad_outputs) and set(op.inputs) & downstream:
+                        with tf.variable_scope(op.name + "/revnet/gradients"):
+                            for inp, grad in zip(op.inputs, op.gradient(grad_outputs)):
+                                if inp in downstream and grad is not None:
+                                    if inp in tensor_to_gradient:
+                                        tensor_to_gradient[inp][2] += grad
+                                    else:
+                                        tensor_to_gradient[inp] = grad
+            return ([dy1, x1, dy2 + tensor_to_gradient[x2], x2] +
+                    [tensor_to_gradient[x] for x in self._variables] +
+                    [None] * len(self._fn_outputs))
+        tensor_to_gradient = {fx2: (0, 0, dy1)}
+        yield params[0], dy1
+        yield params[1], x1
+        yield params[3], x2
+        with tf.variable_scope(fx2.graph.captured_variable_scope):
+            for op in f_again_ops[::-1]:
+                grad_outputs = []
+                for out in op.outputs:
+                    grad = tensor_to_gradient.get(out)
+                    if grad is not None:
+                        grad_outputs.append(grad[2])
+                        grad[0] += 1
+                    else:
+                        grad_outputs.append(None)
+                    if grad is not None and grad[0] == len(grad[2].operation.inputs):
+                        del tensor_to_gradient[out]
+                if not op.has_gradient or not any(grad_outputs) or not (set(op.inputs) & downstream):
+                    continue
+                with tf.variable_scope(op.name + "/revnet/gradients"):
+                    for inp, grad in zip(op.inputs, op.gradient(grad_outputs)):
+                        valid_grad = inp in downstream and grad is not None
+                        if valid_grad and inp in tensor_to_gradient:
+                            grad_list = tensor_to_gradient[inp]
+                            grad_list[1] += 1
+                            grad_list[2] += grad
+                        elif valid_grad:
+                            grad_list = [0, 1, grad]
+                            tensor_to_gradient[inp] = grad_list
+                        if valid_grad and grad_list[0] == len(inp.operation.outputs):
+                            if inp == x2:
+                                yield params[2], dy2 + grad_list[2]
+                                continue
+                            yield params[4 + self._variables.index(inp)], grad_list[2]
 
 
 def build(params: ModelParameter,
