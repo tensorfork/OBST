@@ -228,7 +228,6 @@ class RevGradOp(mtf.Operation):
         orig_fx2 = self._forward_operations[-1].outputs[0]
         x2 = self._x2 if dy2_backwards is None else dy2_backwards
         y1 = self._y1 if dy1_backwards is None else dy1_backwards
-        fx2 = x2
         mapping = {self._x2: x2}
         f_again_ops = []
         for op in self._forward_operations[:-1]:
@@ -242,7 +241,7 @@ class RevGradOp(mtf.Operation):
                 new_t = mtf.Tensor(new_op, t.shape, t.dtype, t.name, i)
                 new_op._outputs.append(new_t)
                 mapping[t] = new_t
-        fx2 = new_t  # it's always the last
+        fx2 = new_t if self._forward_operations[:-1] else x2  # it's always the last
         x1 = y1 - fx2
         grads = mtf.gradients(ys=[fx2], xs=[x2] + self._variables, grad_ys=[dy1], operations=f_again_ops)
         return [dy1, x1, dy2 + grads[0], x2] + grads[1:] + [None] * len(self._fn_outputs)
