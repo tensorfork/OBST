@@ -263,7 +263,7 @@ class RevGradOp(mtf.Operation):
             return ([dy1, x1, dy2 + tensor_to_gradient[x2], x2] +
                     [tensor_to_gradient[x] for x in self._variables] +
                     [None] * len(self._fn_outputs))
-        tensor_to_gradient = {fx2: (0, 0, dy1)}
+        tensor_to_gradient = {fx2: [0, 0, dy1]}
         yield params[0], dy1
         yield params[1], x1
         yield params[3], x2
