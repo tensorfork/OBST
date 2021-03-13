@@ -188,13 +188,24 @@ class RevGradOp(mtf.Operation):
     See comments on custom_gradient() below.
     """
 
-    def __init__(self,
-                 explicit_inputs,
-                 variables,
-                 fn_outputs,
-                 forward_operations,
-                 name=None):
+    def __init__(self, params, block_config, x1, x1_backwards, x2, x2_backwards):
+        graph: mtf.Graph = x1.graph
+        prev_ops = len(graph.operations)
+        fn_outputs = [x2, x2_backwards, x1 + _block_part_fn(params, block_config, x2), x1_backwards]
+        forward_operations = graph.operations[prev_ops:]
+        new_outputs = set()
+        new_inputs = set()
+        for op in forward_operations:
+            new_inputs.update(set(op.inputs))
+            if not isinstance(op, mtf.Variable):
+                new_outputs.update(set(op.outputs))
+        explicit_inputs = [x1, x1_backwards, x2, x2_backwards]
+        variables = [t for t in list(new_inputs - new_outputs - set(explicit_inputs)) if t.dtype.is_floating]
         super(RevGradOp, self).__init__(explicit_inputs + variables + fn_outputs, "custom_gradient")
+        # Make sure no one uses the internals of this function, since the gradients
+        #  will probably not work correctly.
+        for t in new_outputs - set(fn_outputs):
+            t.usable = False
         self._explicit_inputs = explicit_inputs
         self._variables = variables
         self._fn_outputs = fn_outputs
@@ -206,7 +217,6 @@ class RevGradOp(mtf.Operation):
             lowering.set_tensor_lowering(output, lowering.tensors[fn_output])
 
     def gradient(self, grad_ys):
-        """Backpropagation function for a revnet."""
         x1, _, x2, _ = self._explicit_inputs
         _, _, y1, _ = self._fn_outputs
         dy2, dy2_backwards, dy1, dy1_backwards = grad_ys
@@ -223,27 +233,6 @@ class RevGradOp(mtf.Operation):
         x1 = y1 - fx2
         grads = mtf.gradients(ys=[fx2], xs=[x2] + self._variables, grad_ys=[dy1], operations=f_again_ops)
         return [dy1, x1, dy2 + grads[0], x2] + grads[1:] + [None] * len(self._fn_outputs)
-
-
-def _custom_gradient(params, block_config, x1, x1_backwards, x2, x2_backwards):
-    graph: mtf.Graph = x1.graph
-    prev_ops = len(graph.operations)
-    outputs = [x2, x2_backwards, x1 + _block_part_fn(params, block_config, x2), x1_backwards]
-    forward_operations = graph.operations[prev_ops:]
-    new_outputs = set()
-    new_inputs = set()
-    for op in forward_operations:
-        new_inputs.update(set(op.inputs))
-        if not isinstance(op, mtf.Variable):
-            new_outputs.update(set(op.outputs))
-    inputs = [x1, x1_backwards, x2, x2_backwards]
-    ret = RevGradOp(inputs, [t for t in list(new_inputs - new_outputs - set(inputs)) if t.dtype.is_floating], outputs,
-                    forward_operations).outputs
-    # Make sure no one uses the internals of this function, since the gradients
-    #  will probably not work correctly.
-    for t in new_outputs - set(outputs):
-        t.usable = False
-    return ret
 
 
 def build(params: ModelParameter,
@@ -331,7 +320,7 @@ def build(params: ModelParameter,
                     x1_backwards = mtf.zeros_like(x1)
                 if x2_backwards is None:
                     x2_backwards = mtf.zeros_like(x2)
-                return _custom_gradient(params, block_config, x1, x1_backwards, x2, x2_backwards)
+                return RevGradOp(params, block_config, x1, x1_backwards, x2, x2_backwards).outputs
         else:
             out = src
 
