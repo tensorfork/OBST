@@ -230,13 +230,10 @@ class RevGradOp(mtf.Operation):
         y1 = self._y1 if dy1_backwards is None else dy1_backwards
         fx2 = x2
         mapping = {self._x2: x2}
-        stop = False
         f_again_ops = []
-        for op in self._forward_operations:
+        for op in self._forward_operations[:-1]:
             if isinstance(op, (mtf.Variable, mtf.RandomOperation)):
                 continue
-            if stop:
-                break
             new_op: mtf.Operation = copy.copy(op)
             f_again_ops.append(new_op)
             new_op._inputs = [mapping.get(t, t) for t in op._inputs]
@@ -245,10 +242,7 @@ class RevGradOp(mtf.Operation):
                 new_t = mtf.Tensor(new_op, t.shape, t.dtype, t.name, i)
                 new_op._outputs.append(new_t)
                 mapping[t] = new_t
-                if t == orig_fx2:
-                    fx2 = new_t
-                    stop = True
-                    break
+        fx2 = new_t  # it's always the last
         x1 = y1 - fx2
         grads = mtf.gradients(ys=[fx2], xs=[x2] + self._variables, grad_ys=[dy1], operations=f_again_ops)
         return [dy1, x1, dy2 + grads[0], x2] + grads[1:] + [None] * len(self._fn_outputs)
