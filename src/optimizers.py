@@ -77,10 +77,10 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter, manual_step
                 grad = tensor_to_gradient.get(out)
                 if grad is None:
                     grad_outputs.append(None)
-                else:
-                    grad_outputs.append(grad[2])
-                    grad[0] += 1
-                if grad is not None and grad[0] == len(grad[2].operation.inputs):
+                    continue
+                grad_outputs.append(grad[2])
+                grad[0] += 1
+                if grad[0] == len(grad[2].operation.inputs):
                     del tensor_to_gradient[out]
             if not op.has_gradient or not any(grad_outputs) or not (set(op.inputs) & downstream):
                 continue
