@@ -3,6 +3,7 @@ Contains all necessary functions to build a model graph
 TODO(Lucas): Write docstrings for all functions
 """
 
+import copy
 import typing
 
 import mesh_tensorflow as mtf
@@ -202,7 +203,8 @@ class RevGradOp(mtf.Operation):
                 new_outputs.update(set(op.outputs))
         explicit_inputs = [x1, x1_backwards, x2, x2_backwards]
         variables = [t for t in list(new_inputs - new_outputs - set(explicit_inputs)) if t.dtype.is_floating]
-        super(RevGradOp, self).__init__(explicit_inputs + variables + fn_outputs, random_name("custom_gradient"))
+        super(RevGradOp, self).__init__(explicit_inputs + variables + fn_outputs, x1.mesh,
+                                        random_name("custom_gradient"))
         # Make sure no one uses the internals of this function, since the gradients
         #  will probably not work correctly.
         for t in new_outputs - set(fn_outputs):
@@ -226,8 +228,28 @@ class RevGradOp(mtf.Operation):
         orig_fx2 = self._forward_operations[-1].outputs[0]
         x2 = self._x2 if dy2_backwards is None else dy2_backwards
         y1 = self._y1 if dy1_backwards is None else dy1_backwards
-        f_again_ops, mapping = self._graph.clone_operations(self._forward_operations, {self._x2: x2})
-        fx2 = mapping[orig_fx2]
+        fx2 = x2
+        prev_num_operations = len(self._graph.operations)
+        mapping = {self._x2: x2}
+        stop = False
+        for op in self._forward_operations:
+            if isinstance(op, (mtf.Variable, mtf.RandomOperation)):
+                continue
+            if stop:
+                break
+            new_op: mtf.Operation = copy.copy(op)
+            self._graph.operations.append(new_op)
+            new_op._inputs = [mapping.get(t, t) for t in op._inputs]
+            new_op._outputs = []
+            for i, t in enumerate(op.outputs):
+                new_t = mtf.Tensor(new_op, t.shape, t.dtype, t.name, i)
+                new_op._outputs.append(new_t)
+                mapping[t] = new_t
+                if t == orig_fx2:
+                    fx2 = new_t
+                    stop = True
+                    break
+        f_again_ops = self._graph.operations[prev_num_operations:]
         x1 = y1 - fx2
         grads = mtf.gradients(ys=[fx2], xs=[x2] + self._variables, grad_ys=[dy1], operations=f_again_ops)
         return [dy1, x1, dy2 + grads[0], x2] + grads[1:] + [None] * len(self._fn_outputs)
