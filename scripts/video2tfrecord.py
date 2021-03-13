@@ -2,6 +2,7 @@ import multiprocessing
 import subprocess
 import argparse
 import datetime
+import requests
 import warnings
 import hashlib
 import typing
@@ -11,7 +12,6 @@ import json
 import time
 import os
 
-from urllib.request import urlretrieve
 from transformers import GPT2Tokenizer
 from google.cloud import storage
 import tensorflow as tf
@@ -54,24 +54,73 @@ def str2bool(v):
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
 
-def downloader(url: str, filename: str, max_try: int=3):
-    try_count = 0
+class Downloader:
 
-    while try_count < max_try:
-        try:
-            urlretrieve(url, filename)
-        except Exception as e:
-            print('Download error', e)
-            try_count += 1
-        else:
-            return True
+    def __init__(self, max_try: int = 3, webshare_io_key: str = None):
+        self.max_try = max_try
+        self.webshare_io_key = webshare_io_key
+        self.proxies = None
 
-    print('Retry exceeded')
+        self.update_proxy()
 
-    if os.path.exists(filename):
-        os.remove(filename)
+    def download(self, url: str, filename: str):
+        try_count = 0
 
-    return False
+        while try_count < self.max_try:
+            try:
+                r = requests.get(url, stream=True, proxies=self.proxies)
+
+                with open(filename, 'wb') as f:
+                    for chunk in r:
+                        f.write(chunk)
+
+            except Exception as e:
+                print('Download error:', e)
+                try_count += 1
+                self.update_proxy()
+
+            else:
+                return True
+
+        print('Retry exceeded for URL:', url)
+
+        if os.path.exists(filename):
+            os.remove(filename)
+
+        return False
+
+    def update_proxy(self):
+
+        if self.webshare_io_key is not None:
+
+            proxies = []
+            next = "https://proxy.webshare.io/api/proxy/list/?page=1"
+
+            while next is not None:
+                r = requests.get(next, headers={"Authorization": f"Token {self.webshare_io_key}"})
+                dump = r.json()
+
+                next = None
+                if dump is not None:
+                    if 'next' in dump:
+                        next = dump['next']
+
+                    if 'results' in dump:
+                        proxies = proxies + [res for res in dump['results'] if res['valid']]
+
+            random.shuffle(proxies)
+            random.shuffle(proxies)
+
+            if len(proxies) > 0:
+                username = proxies[0]['username']
+                password = proxies[0]['password']
+                proxy_address = proxies[0]['proxy_address']
+                ports = proxies[0]['ports']['http']
+
+                self.proxies = {"http": f"http://{username}:{password}@{proxy_address}:{ports}",
+                                "https": f"http://{username}:{password}@{proxy_address}:{ports}"}
+            else:
+                self.proxies = None
 
 
 def frame_encoder(frame,
@@ -85,6 +134,7 @@ def frame_encoder(frame,
     :param skip_frame: A list containing a single bool that
     determines if this frame include an image or just text.
     :param mask: A int that determines when the padding tokens start.
+    :param concat: A list containing a single bool that determents if tow videos are concat at that point.
 
     This Function will encode frame to proto buffer.
     '''
@@ -331,6 +381,7 @@ def worker(work: list,
            skip_if_no_subtitles: bool = True,
            service_account_json_path: str = '',
            bucket_name: str = '',
+           webshare_io_key: str = None,
            youtube_base: str = 'https://www.youtube.com/watch?v='):
     '''
     :param work: List with path to existing videos (if so download need to be True (default))
@@ -354,6 +405,7 @@ def worker(work: list,
     (only if use_subtitles is True)
     :param service_account_json_path: The path to the json containing the service account informations.
     :param bucket_name: The Name of the google cloud storage bucket the TFrecords are should to be uploaded to.
+    :param webshare_io_key: API key for webshare.io.
     :param youtube_base: Youtube base string https://www.youtube.com/watch?v=.
 
     This function will download youtube videos and proses them and save than as TF.record files.
@@ -381,6 +433,8 @@ def worker(work: list,
         # Creat Youtube Downloader.
         youtube_getter = youtube_dl.YoutubeDL({'writeautomaticsub': True, 'ignore-errors': True, 'socket-timeout': 600})
         youtube_getter.add_default_info_extractors()
+
+        downloader = Downloader(webshare_io_key=webshare_io_key)
 
     # Loop to list of work.
     for chunk_idx, wor in enumerate(work):
@@ -487,7 +541,7 @@ def worker(work: list,
                             if url is not None and ext is not None:
                                 if url != "" and ext != "":
                                     video_buffer_path = os.path.join(download_buffer_dir, _wor) + '.' + ext
-                                    download_success = downloader(url, video_buffer_path)
+                                    download_success = downloader.download(url, video_buffer_path)
 
                                     if download_success:
 
@@ -544,7 +598,7 @@ def worker(work: list,
                     if vtt_url is not None:
                         if vtt_url != "":
                             vtt = os.path.join(download_buffer_dir, _wor) + '.vtt'
-                            vtt_download_success = downloader(vtt_url, vtt)
+                            vtt_download_success = downloader.download(vtt_url, vtt)
 
                     if vtt_download_success:
                         try:
@@ -733,6 +787,8 @@ if __name__ == '__main__':
     parser.add_argument('--bucket_name', type=str,
                         help="The Name of the google cloud storage bucket the TFrecords are should to be uploaded to."
                              " This only as an affect if 'google service account information' are present.")
+    parser.add_argument('--webshare_io_key', type=str,
+                        help="The API key for webshare.io if this param is not set no proxy will be used.")
     parser.add_argument('--start_delay', type=int, default=0,
                         help="The delay in second between the start of the next worker.")
 
@@ -757,6 +813,7 @@ if __name__ == '__main__':
     concat_token = args.concat_token
     duration_need_larger = args.duration_need_larger
 
+    webshare_io_key = args.webshare_io_key
     service_account_json_path = args.service_account_json_path
     bucket_name = args.bucket_name
     start_delay = args.start_delay
@@ -838,6 +895,7 @@ if __name__ == '__main__':
                                                          concat_token,
                                                          skip_if_no_subtitles,
                                                          service_account_json_path,
+                                                         webshare_io_key,
                                                          bucket_name))
 
         p.start()
