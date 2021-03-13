@@ -207,12 +207,14 @@ class RevGradOp(mtf.Operation):
         #  will probably not work correctly.
         for t in new_outputs - set(fn_outputs):
             t.usable = False
-        self._x1 = x1
-        self._x2 = x2
-        self._y1 = y1
-        self._variables = variables
-        self._fn_outputs = fn_outputs
-        self._outputs = [mtf.Tensor(self, x.shape, x.dtype, index=i) for i, x in enumerate(fn_outputs)]
+
+        self._graph: mtf.Graph = x1.graph
+        self._x2: mtf.Tensor = x2
+        self._y1: mtf.Tensor = y1
+        self._variables: typing.List[mtf.Variable] = variables
+        self._fn_outputs: typing.List[mtf.Tensor] = fn_outputs
+        self._outputs: typing.List[mtf.Tensor] = [mtf.Tensor(self, x.shape, x.dtype, index=i)
+                                                  for i, x in enumerate(fn_outputs)]
         self._forward_operations = forward_operations[:-1]
 
     def lower(self, lowering):
@@ -220,19 +222,11 @@ class RevGradOp(mtf.Operation):
             lowering.set_tensor_lowering(output, lowering.tensors[fn_output])
 
     def gradient(self, grad_ys):
-        x1 = self._x1
-        x2 = self._x2
-        y1 = self._y1
         dy2, dy2_backwards, dy1, dy1_backwards = grad_ys
-        f_ops = self._forward_operations
-        orig_fx2 = f_ops[-1].outputs[0]
-        orig_x2 = x2
-        if dy2_backwards is not None:
-            x2 = dy2_backwards
-        if dy1_backwards is not None:
-            y1 = dy1_backwards
-        graph = x1.graph
-        f_again_ops, mapping = graph.clone_operations(f_ops, {orig_x2: x2})
+        orig_fx2 = self._forward_operations[-1].outputs[0]
+        x2 = self._x2 if dy2_backwards is None else dy2_backwards
+        y1 = self._y1 if dy1_backwards is None else dy1_backwards
+        f_again_ops, mapping = self._graph.clone_operations(self._forward_operations, {self._x2: x2})
         fx2 = mapping[orig_fx2]
         x1 = y1 - fx2
         grads = mtf.gradients(ys=[fx2], xs=[x2] + self._variables, grad_ys=[dy1], operations=f_again_ops)
