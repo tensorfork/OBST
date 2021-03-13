@@ -97,8 +97,7 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter, manual_step
                         grad_list[1] += 1
                         grad_list[2] += grad
                     else:
-                        grad_list = [0, 1, grad]
-                        tensor_to_gradient[inp] = grad_list
+                        tensor_to_gradient[inp] = grad_list = [0, 1, grad]
                     if len(inp.operation.outputs) != grad_list[1] or inp not in tensor_to_var:
                         continue
                     grad = grad_list[2]

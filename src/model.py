@@ -263,8 +263,10 @@ class RevGradOp(mtf.Operation):
             return ([dy1, x1, dy2 + tensor_to_gradient[x2], x2] +
                     [tensor_to_gradient[x] for x in self._variables] +
                     [None] * len(self._fn_outputs))
-        tensor_to_gradient = {fx2: [0, 0, dy1]}
-        yield params[0], dy1
+        tensor_to_gradient = {}
+        if dy1 is not None:
+            tensor_to_gradient[fx2] = [0, 0, dy1]
+            yield params[0], dy1
         yield params[1], x1
         yield params[3], x2
         with tf.variable_scope(fx2.graph.captured_variable_scope):
@@ -290,8 +292,7 @@ class RevGradOp(mtf.Operation):
                             grad_list[1] += 1
                             grad_list[2] += grad
                         else:
-                            grad_list = [0, 1, grad]
-                            tensor_to_gradient[inp] = grad_list
+                            tensor_to_gradient[inp] = grad_list = [0, 1, grad]
                         if grad_list[0] != len(inp.operation.outputs):
                             continue
                         if inp == x2:
