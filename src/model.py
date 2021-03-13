@@ -225,7 +225,6 @@ class RevGradOp(mtf.Operation):
 
     def gradient(self, grad_ys):
         dy2, dy2_backwards, dy1, dy1_backwards = grad_ys
-        orig_fx2 = self._forward_operations[-1].outputs[0]
         x2 = self._x2 if dy2_backwards is None else dy2_backwards
         y1 = self._y1 if dy1_backwards is None else dy1_backwards
         mapping = {self._x2: x2}
