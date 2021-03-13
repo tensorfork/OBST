@@ -257,16 +257,14 @@ class RevGradOp(mtf.Operation):
                             for inp, grad in zip(op.inputs, op.gradient(grad_outputs)):
                                 if inp in downstream and grad is not None:
                                     if inp in tensor_to_gradient:
-                                        tensor_to_gradient[inp][2] += grad
+                                        tensor_to_gradient[inp] += grad
                                     else:
                                         tensor_to_gradient[inp] = grad
             return ([dy1, x1, dy2 + tensor_to_gradient[x2], x2] +
                     [tensor_to_gradient[x] for x in self._variables] +
                     [None] * len(self._fn_outputs))
-        tensor_to_gradient = {}
-        if dy1 is not None:
-            tensor_to_gradient[fx2] = [0, 0, dy1]
-            yield params[0], dy1
+        tensor_to_gradient = {fx2: [0, 0, dy1]}
+        yield params[0], dy1
         yield params[1], x1
         yield params[3], x2
         with tf.variable_scope(fx2.graph.captured_variable_scope):
@@ -279,7 +277,7 @@ class RevGradOp(mtf.Operation):
                     else:
                         grad_outputs.append(grad[2])
                         grad[0] += 1
-                        if grad[0] == len(grad[2].operation.inputs):
+                        if grad[2] is not None and grad[0] == len(grad[2].operation.inputs):
                             del tensor_to_gradient[out]
                 if not op.has_gradient or not any(grad_outputs) or not (set(op.inputs) & downstream):
                     continue
@@ -290,7 +288,10 @@ class RevGradOp(mtf.Operation):
                         if inp in tensor_to_gradient:
                             grad_list = tensor_to_gradient[inp]
                             grad_list[1] += 1
-                            grad_list[2] += grad
+                            if grad_list[2] is None:
+                                grad_list[2] = grad
+                            else:
+                                grad_list[2] += grad
                         else:
                             tensor_to_gradient[inp] = grad_list = [0, 1, grad]
                         if grad_list[0] != len(inp.operation.outputs):
