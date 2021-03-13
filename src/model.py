@@ -225,22 +225,31 @@ class RevGradOp(mtf.Operation):
 
     def gradient(self, grad_ys, params: typing.Optional[typing.List[mtf.Operation]] = None):
         dy2, dy2_backwards, dy1, dy1_backwards = grad_ys
+        orig_fx2 = self._forward_operations[-1].outputs[0]
         x2 = self._x2 if dy2_backwards is None else dy2_backwards
         y1 = self._y1 if dy1_backwards is None else dy1_backwards
+        fx2 = x2
+        prev_num_operations = len(self._graph.operations)
         mapping = {self._x2: x2}
-        f_again_ops = []
-        for op in self._forward_operations[:-1]:
+        stop = False
+        for op in self._forward_operations:
             if isinstance(op, (mtf.Variable, mtf.RandomOperation)):
                 continue
+            if stop:
+                break
             new_op: mtf.Operation = copy.copy(op)
-            f_again_ops.append(new_op)
+            self._graph.operations.append(new_op)
             new_op._inputs = [mapping.get(t, t) for t in op._inputs]
             new_op._outputs = []
             for i, t in enumerate(op.outputs):
                 new_t = mtf.Tensor(new_op, t.shape, t.dtype, t.name, i)
                 new_op._outputs.append(new_t)
                 mapping[t] = new_t
-        fx2 = new_t if self._forward_operations[:-1] else x2  # it's always the last
+                if t == orig_fx2:
+                    fx2 = new_t
+                    stop = True
+                    break
+        f_again_ops = self._graph.operations[prev_num_operations:]
         x1 = y1 - fx2
         # figure out what Tensors are downstream of xs
         downstream = set([x2] + self._variables)
