@@ -191,7 +191,8 @@ class RevGradOp(mtf.Operation):
     def __init__(self, params, block_config, x1, x1_backwards, x2, x2_backwards):
         graph: mtf.Graph = x1.graph
         prev_ops = len(graph.operations)
-        fn_outputs = [x2, x2_backwards, x1 + _block_part_fn(params, block_config, x2), x1_backwards]
+        y1 = x1 + _block_part_fn(params, block_config, x2)
+        fn_outputs = [x2, x2_backwards, y1, x1_backwards]
         forward_operations = graph.operations[prev_ops:]
         new_outputs = set()
         new_inputs = set()
@@ -206,21 +207,24 @@ class RevGradOp(mtf.Operation):
         #  will probably not work correctly.
         for t in new_outputs - set(fn_outputs):
             t.usable = False
-        self._explicit_inputs = explicit_inputs
+        self._x1 = x1
+        self._x2 = x2
+        self._y1 = y1
         self._variables = variables
         self._fn_outputs = fn_outputs
         self._outputs = [mtf.Tensor(self, x.shape, x.dtype, index=i) for i, x in enumerate(fn_outputs)]
-        self._forward_operations = forward_operations
+        self._forward_operations = forward_operations[:-1]
 
     def lower(self, lowering):
         for fn_output, output in zip(self._fn_outputs, self._outputs):
             lowering.set_tensor_lowering(output, lowering.tensors[fn_output])
 
     def gradient(self, grad_ys):
-        x1, _, x2, _ = self._explicit_inputs
-        _, _, y1, _ = self._fn_outputs
+        x1 = self._x1
+        x2 = self._x2
+        y1 = self._y1
         dy2, dy2_backwards, dy1, dy1_backwards = grad_ys
-        f_ops = self._forward_operations[:-1]
+        f_ops = self._forward_operations
         orig_fx2 = f_ops[-1].outputs[0]
         orig_x2 = x2
         if dy2_backwards is not None:
