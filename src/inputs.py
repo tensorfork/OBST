@@ -39,14 +39,16 @@ def get_video_decoder(language_token_num_per_frame=0, frame_height=None, frame_w
 
     # Decoding Key.
     features = {
-            'frame': tf.FixedLenFeature([], tf.string)
-            }
+                'frame': tf.FixedLenFeature([], tf.string),
+                'concat': tf.FixedLenFeature([], tf.int64),
+                'skip_frame': tf.FixedLenFeature([], tf.int64)
+               }
 
     if decode_language_token:
-        features.update({'tokens':     tf.FixedLenFeature([language_token_num_per_frame], tf.int64),
-                         'skip_frame': tf.FixedLenFeature([], tf.int64),
-                         'mask':       tf.FixedLenFeature([], tf.int64)
-                         })
+        features.update({
+                         'tokens': tf.FixedLenFeature([language_token_num_per_frame], tf.int64),
+                         'mask': tf.FixedLenFeature([], tf.int64)
+                        })
 
     def frame_decoder(proto):
         '''
@@ -58,20 +60,21 @@ def get_video_decoder(language_token_num_per_frame=0, frame_height=None, frame_w
 
         sample = tf.parse_single_example(proto, features)
         frame = tf.image.decode_image(sample['frame'])
+        concat = sample['concat']
+        skip_frame = sample['skip_frame']
+
+        if skip_frame > 0 or concat > 0:
+            frame = tf.zeros(shape=(frame_height, frame_width, color_channels), dtype=tf.uint8)
 
         if decode_language_token:
             tokens = sample['tokens']
-            skip_frame = sample['skip_frame']
             mask = sample['skip_frame']
-
-            if skip_frame > 0:
-                frame = tf.zeros(shape=(frame_height, frame_width, color_channels), dtype=tf.uint8)
 
             b_mask = tf.less_equal(token_range, tf.cast(mask, tf.int32))
 
-            return frame, tokens, skip_frame, b_mask
+            return frame, concat, skip_frame, tokens, b_mask
 
-        return frame
+        return frame, concat, skip_frame
 
     return tf.function(frame_decoder, experimental_compile=False)
 
@@ -151,10 +154,10 @@ def dataset_text(path: str, params: ModelParameter, sub_batch_size: int, slice_i
     padding_frame_mask = tf.zeros((time_patch_size), dtype=tf.bool)
     padding_frame_mask = tf.data.Dataset.from_tensors(padding_frame_mask).repeat()
 
-    padding_token_mask = tf.ones((time_patch_size, language_token_patch, token_patch_size), dtype=tf.bool)
-    padding_token_mask = tf.data.Dataset.from_tensors(padding_token_mask).repeat()
+    padding_cat_mask = tf.ones((time_patch_size), dtype=tf.bool)
+    padding_cat_mask = tf.data.Dataset.from_tensors(padding_cat_mask).repeat()
 
-    def _memory_func(x, _padding_token, _padding_frame, _padding_frame_mask, _padding_token_mask):
+    def _memory_func(x, _padding_token, _padding_frame, _padding_frame_mask, _padding_cat_mask):
 
         x = tf.reshape(x, (sub_batch_size, time_patch_size + 1, language_token_per_frame - 1))
         _padding_token = tf.reshape(_padding_token, (sub_batch_size, time_patch_size + 1, 1))
@@ -178,12 +181,16 @@ def dataset_text(path: str, params: ModelParameter, sub_batch_size: int, slice_i
                                                          frame_height_patch * frame_width_patch,
                                                          channel_color_size))
 
-        _padding_token_mask = tf.reshape(_padding_token_mask,
-                                         (sub_batch_size, time_patch_size, language_token_patch, token_patch_size))
+        #_padding_token_mask = tf.reshape(_padding_token_mask,
+        #                                 (sub_batch_size, time_patch_size, language_token_patch, token_patch_size))
 
-        return {'frame':   _padding_frame, 'token_x': token_x, 'token_y': token_y, 'txt_msk': _padding_token_mask,
+        #_padding_cat_mask = tf.reshape(_padding_cat_mask, (sub_batch_size, time_patch_size))
+
+        _padding_token_mask = tf.not_equal(token_y, tf.constant(params.concat_token, dtype=tf.int32))
+
+        return {'frame': _padding_frame, 'token_x': token_x, 'token_y': token_y, 'txt_msk': _padding_token_mask,
                 'vid_msk_src': _padding_frame_mask, 'vid_msk_tag': _padding_frame_mask,
-                }
+                'cat_mask_x': _padding_cat_mask, 'cat_mask_y': _padding_cat_mask}
 
     data = split_files(path, slice_index, slice_count, params.data_seed * params.shuffle_input_filenames)
     decoder = decode_intstring if 'int64' in data[0] else decode_bytestring
@@ -199,7 +206,7 @@ def dataset_text(path: str, params: ModelParameter, sub_batch_size: int, slice_i
                                                    chunk_size=-1))
 
     data = data.shuffle(256, seed=params.data_seed)
-    data = tf.data.Dataset.zip((data, padding_token, padding_frame, padding_frame_mask, padding_token_mask))
+    data = tf.data.Dataset.zip((data, padding_token, padding_frame, padding_frame_mask, padding_cat_mask))
     data = data.batch(sub_batch_size)
     data = data.map(_memory_func, num_parallel_calls=tf.data.experimental.AUTOTUNE)
 
@@ -248,10 +255,10 @@ def dataset_video(path: str, params: ModelParameter, sub_batch_size: int, slice_
         token_x, token_y, out_frame, frame_mask,\
         frame_mask_x, frame_mask_y, token_mask, token = (None, None, None, None, None, None, None, None)
 
-        frame, *args = args
+        frame, concat, frame_mask, *args = args
 
         if params.use_language:
-            token, frame_mask, token_mask, *args = args
+            token, token_mask, *args = args
 
         frame = tf.reshape(frame, (sub_batch_size, time_patch_size + 1, time_patch, frame_height_patch, patch_size,
                                    frame_width_patch, patch_size, color_channels))
@@ -265,6 +272,19 @@ def dataset_video(path: str, params: ModelParameter, sub_batch_size: int, slice_
             out_frame = tf.reshape(frame, (sub_batch_size, time_patch_size + 1, frame_height_patch * frame_width_patch,
                                            channel_color_size))
 
+        concat = tf.reshape(concat, (sub_batch_size, time_patch_size + 1))
+        concat = 1 - concat
+        concat = tf.cast(concat, tf.bool)
+
+        cat_mask_x = concat[:, :time_patch_size]
+        cat_mask_y = concat[:, 1:time_patch_size + 1]
+
+        frame_mask = tf.reshape(frame_mask, (sub_batch_size, time_patch_size + 1))
+        frame_mask = 1 - frame_mask
+        frame_mask = tf.cast(frame_mask, tf.bool)
+        frame_mask_x = frame_mask[:, :time_patch_size]
+        frame_mask_y = frame_mask[:, 1:time_patch_size + 1]
+
         if params.use_language:
             token = tf.reshape(token, (sub_batch_size, time_patch_size + 1, language_token_patch, token_patch_size))
             token = tf.cast(token, tf.int32)
@@ -272,26 +292,20 @@ def dataset_video(path: str, params: ModelParameter, sub_batch_size: int, slice_
             token_x = token[:, :time_patch_size]
             token_y = token[:, 1:time_patch_size + 1]
 
-            frame_mask = tf.reshape(frame_mask, (sub_batch_size, time_patch_size + 1))
-            frame_mask = 1 - frame_mask
-            frame_mask = tf.cast(frame_mask, tf.bool)
-            frame_mask_x = frame_mask[:, :time_patch_size]
-            frame_mask_y = frame_mask[:, 1:time_patch_size + 1]
-
             token_mask = token_mask[:, 1:time_patch_size + 1]
             token_mask = tf.reshape(token_mask,
                                     (sub_batch_size, time_patch_size, language_token_patch, token_patch_size))
             token_mask = tf.cast(token_mask, tf.bool)
 
         return {k: v for k, v in {'frame':   out_frame, 'token_x': token_x, 'token_y': token_y,
-                                  'vid_msk_src': frame_mask_x, 'vid_msk_tag': frame_mask_y,
-                                  'txt_msk': token_mask}.items() if v is not None}
+                                  'vid_msk_src': frame_mask_x, 'vid_msk_tag': frame_mask_y, 'txt_msk': token_mask,
+                                  'cat_mask_x': cat_mask_x, 'cat_mask_y': cat_mask_y}.items() if v is not None}
 
     if language_token_per_frame > 0:
-        interleave_func = lambda x, y, z, a: tf.data.Dataset.zip((x, y, z, a)) \
+        interleave_func = lambda x, y, z, a, b: tf.data.Dataset.zip((x, y, z, a, b)) \
             .batch(n_ctx + time_patch, drop_remainder=True)
     else:
-        interleave_func = lambda x: x.batch(n_ctx + time_patch, drop_remainder=True)
+        interleave_func = lambda x, y: tf.data.Dataset.zip((x, y)).batch(n_ctx + time_patch, drop_remainder=True)
 
     frame_decoder = get_video_decoder(language_token_num_per_frame=language_token_per_frame,
                                       frame_height=frame_height, frame_width=frame_width, color_channels=color_channels)

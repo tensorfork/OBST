@@ -152,8 +152,10 @@ def _block_part_fn(params: ModelParameter, block_part_config: BlockConfig, block
 
 def build(params: ModelParameter,
           vid: typing.Optional[mtf.Tensor],
+          cat_mask_src: typing.Optional[mtf.Tensor],
+          cat_mask_tag: typing.Optional[mtf.Tensor],
           txt_src: typing.Optional[mtf.Tensor],
-          txt_tgt: typing.Optional[mtf.Tensor],
+          txt_tag: typing.Optional[mtf.Tensor],
           vid_msk_src: typing.Optional[mtf.Tensor],
           vid_msk_tag: typing.Optional[mtf.Tensor],
           txt_msk: typing.Optional[mtf.Tensor],
@@ -165,13 +167,24 @@ def build(params: ModelParameter,
     :param params: Instance of ModelParameter for which to build the graph
     :param vid: Optional Video to attend over, length=(context+1)
     :param txt_src: Optional tokenized text source, will be embedded
-    :param txt_tgt: Optional tokenized text target, required when source is given
+    :param txt_tag: Optional tokenized text target, required when source is given
     :param vid_msk_src: Optional mask for zero frames
     :param vid_msk_tag: Optional mask to remove loss for certain video frames
     :param txt_msk: Optional mask to remove loss for certain token positions
     :return: (Generated Video, Total Loss, Video Loss, Token Loss)
     """
     with mtf.utils.outside_all_rewrites(), tf.variable_scope(params.model_mode):
+
+        if cat_mask_src is None:
+            cat_mask_src = mtf.ones(params.mesh, [], params.variable_dtype.activation_dtype)
+        else:
+            cat_mask_src = mtf.cast(cat_mask_src, params.variable_dtype.activation_dtype)
+
+        if cat_mask_tag is None:
+            cat_mask_tag = mtf.ones(params.mesh, [], params.variable_dtype.activation_dtype)
+        else:
+            cat_mask_tag = mtf.cast(cat_mask_tag, params.variable_dtype.activation_dtype)
+
         if txt_msk is None:
             txt_msk = mtf.ones(params.mesh, [], params.variable_dtype.activation_dtype)
         else:
@@ -195,7 +208,7 @@ def build(params: ModelParameter,
         frame_out: typing.Union[int, mtf.Tensor] = 0
         token_out: typing.Union[int, mtf.Tensor] = 0
 
-        spatial_ctx: mtf.Dimension = txt_tgt.shape[-2] if params.use_language else vid.shape[2]
+        spatial_ctx: mtf.Dimension = txt_tag.shape[-2] if params.use_language else vid.shape[2]
 
         # Slice and Normalize the Video input add a zero frame memory token.
         if params.use_video:
@@ -204,6 +217,7 @@ def build(params: ModelParameter,
             tgt = slice(vid, 1, context_dimension.size, context_dimension)
             src = slice(vid, 0, context_dimension.size - 1, context_dimension)
             src = src * vid_msk_src + _embed(params, shape=vid.shape[2:], name_extras=tuple()) * (1 - vid_msk_src)
+            src = src * cat_mask_src + _embed(params, shape=vid.shape[2:], name_extras=tuple()) * (1 - cat_mask_src)
             src = _linear_to_features(params, src, input_features)
 
         # Language embedding and initial feed forward.
@@ -212,7 +226,7 @@ def build(params: ModelParameter,
                                           mtf.one_hot(txt_src, params.vocab_dim,
                                                       dtype=params.variable_dtype.activation_dtype),
                                           [params.vocab_dim])
-            txt_src = _linear(params, txt_src, [txt_tgt.shape[-1], params.key_dim], [params.key_dim])
+            txt_src = _linear(params, txt_src, [txt_tag.shape[-1], params.key_dim], [params.key_dim])
 
         # Connect video and language Input.
         if params.use_video and params.use_language:
@@ -247,16 +261,16 @@ def build(params: ModelParameter,
         # Language Loss
         if params.use_language:
             token_out = _linear_from_features(params, slice(out, 0, params.language_token_patch, spatial_ctx),
-                                              [txt_tgt.shape[-1], params.vocab_dim])
-            cross_entropy = mtf.layers.softmax_cross_entropy_with_logits(token_out, txt_tgt, params.vocab_dim,
+                                              [txt_tag.shape[-1], params.vocab_dim])
+            cross_entropy = mtf.layers.softmax_cross_entropy_with_logits(token_out, txt_tag, params.vocab_dim,
                                                                          params.z_loss)
-            token_loss = mtf.reduce_mean(txt_msk * cross_entropy)
+            token_loss = mtf.reduce_mean(cross_entropy * txt_msk * cat_mask_tag)
 
         # Video Loss
         if params.use_video:
             out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)
             frame_out = mtf.sigmoid(_linear_from_features(params, out, input_features))
-            video_loss: mtf.Tensor = mtf.reduce_mean(mtf.abs(frame_out - tgt) * vid_msk_tag)
+            video_loss: mtf.Tensor = mtf.reduce_mean(mtf.abs(frame_out - tgt) * vid_msk_tag * cat_mask_tag)
 
         params.layer_idx = 0
 

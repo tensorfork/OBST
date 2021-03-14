@@ -38,6 +38,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.data_seed = 456772
         self.train = True
         self.padding_token = 0
+        self.concat_token = 4
         self.n_ctx = 32
         self.n_head = 8
         self.n_embd = 256
@@ -162,13 +163,17 @@ class ModelParameter(typing.Dict[str, typing.Any]):
 
         if self.use_video:
             self.input_pipeline_shape['frame'] = self.frame_input_shape
+            self.input_pipeline_shape['cat_mask_x'] = self.frame_mask_shape
+            self.input_pipeline_shape['cat_mask_y'] = self.frame_mask_shape
+            self.input_pipeline_shape['vid_msk_src'] = self.frame_mask_shape
+            self.input_pipeline_shape['vid_msk_tag'] = self.frame_mask_shape
+
         if self.use_language:
             self.input_pipeline_shape['token_x'] = self.token_dim_shape
             self.input_pipeline_shape['token_y'] = self.token_dim_shape
+
         if self.use_language and self.use_video:
             self.token_dim_shape._dims.insert(2, mtf.Dimension("height", self.language_token_patch))
-            self.input_pipeline_shape['vid_msk_src'] = self.frame_mask_shape
-            self.input_pipeline_shape['vid_msk_tag'] = self.frame_mask_shape
             self.input_pipeline_shape['txt_msk'] = self.token_dim_shape
 
         self.input_pipeline_shape = align_tensor_op(self.input_pipeline_shape)
@@ -208,9 +213,10 @@ class ModelParameter(typing.Dict[str, typing.Any]):
 def align_tensor_op(x):
     tensors = []
     if 'frame' in x:
-        tensors.append(x['frame'])
+        tensors.extend([x['frame'], x['cat_mask_x'], x['cat_mask_y']])
+        tensors.extend([x['vid_msk_src'], x['vid_msk_tag']])
     if 'token_x' in x:
         tensors.extend([x['token_x'], x['token_y']])
-    if 'vid_msk_src' in x:
-        tensors.extend([x['vid_msk_src'], x['vid_msk_tag'], x['txt_msk']])
+    if 'txt_msk' in x:
+        tensors.append(x['txt_msk'])
     return tensors
