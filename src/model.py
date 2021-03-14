@@ -181,7 +181,7 @@ def _block_part_fn(params: ModelParameter, block_part_config: BlockConfig, block
     if not params.use_revnet and block_part_config.skip:
         out += block_input
     return out
-mtf.custom_gradient()
+
 
 class RevGradOp(mtf.Operation):
     """Operation to implement custom gradients.
