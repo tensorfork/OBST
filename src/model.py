@@ -229,7 +229,7 @@ class RevGradOp(mtf.Operation):
         x2 = self._x2 if dy2_backwards is None else dy2_backwards
         y1 = self._y1 if dy1_backwards is None else dy1_backwards
         prev_num_operations = len(self._graph.operations)
-        mapping = {orig_fx2: x2}
+        mapping = {self._x2: x2}
         for op in self._forward_operations:
             if isinstance(op, (mtf.Variable, mtf.RandomOperation)):
                 continue
