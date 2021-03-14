@@ -80,7 +80,9 @@ class Downloader:
             except Exception as e:
                 print('Download error:', e)
                 try_count += 1
-                self.update_proxy()
+
+                if use_proxy:
+                    self.update_proxy()
 
             else:
                 return True
