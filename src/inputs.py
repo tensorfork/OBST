@@ -460,26 +460,4 @@ def gpt_neo_input(params, sub_batch_size, slice_index, slice_count):
     dset = dset.batch(sub_batch_size)
     dset = dset.map(_memory_func)
     dset = dset.map(align_tensor_op)
-
-    options = tf.data.Options()
-    options.experimental_deterministic = not params.train
-    options.experimental_optimization.autotune = True
-    options.experimental_optimization.autotune_buffers = True
-    options.experimental_optimization.filter_fusion = True
-    options.experimental_optimization.hoist_random_uniform = True
-    options.experimental_optimization.map_and_batch_fusion = True
-    options.experimental_optimization.map_and_filter_fusion = False
-    options.experimental_optimization.map_fusion = True
-    options.experimental_optimization.map_parallelization = True
-    options.experimental_optimization.map_vectorization.enabled = True
-    options.experimental_optimization.map_vectorization.use_choose_fastest = True
-    options.experimental_optimization.noop_elimination = True
-    options.experimental_optimization.parallel_batch = True
-    options.experimental_optimization.shuffle_and_repeat_fusion = True
-    options.experimental_optimization.apply_default_optimizations = False
-    options.experimental_threading.max_intra_op_parallelism = 1
-    options.experimental_threading.private_threadpool_size = 48
-    options.experimental_distribute.auto_shard = True
-    dset = dset.with_options(options)
-
     return dset
