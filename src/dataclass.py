@@ -7,8 +7,6 @@ import mesh_tensorflow as mtf
 import tensorflow.compat.v1 as tf
 from tensorflow.python.tpu.device_assignment import DeviceAssignment
 
-from .utils_mtf import anonymize_dim
-
 
 class BlockConfig:
     def __init__(self, config):
@@ -44,6 +42,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.n_embd = 256
         self.n_blocks = 16
         self.buffer_size = 4
+        self.shuffle_buffer = 256
         self.interleaved_datasets = 256
         self.token_patch_size = 4
         self.learning_rate = 5e-5
@@ -78,6 +77,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.train_steps = 150_000
         self.warmup_steps = 3000
         self.learning_rate_decay_multi = 1
+        self.convolution_size = 16
         self.learning_rate_decay_start_step = 100_000
         self.learning_rate_decay_min = 5e-10
         self.iterations = 2500
@@ -134,9 +134,9 @@ class ModelParameter(typing.Dict[str, typing.Any]):
 
         self.feature_dims = self.head_dimensions + [self.key_dim]
 
-        self.intermediate = [self.head_dim,
-                             anonymize_dim(self.key_dim,
-                                           int(self.key_dim.size * self.intermediate_feed_forward_multiplier))]
+        self.intermediate = [mtf.Dimension("intermediate",
+                                           int(self.n_head * self.key_dim.size *
+                                               self.intermediate_feed_forward_multiplier))]
 
         self.vocab_dim = mtf.Dimension("vocab", self.vocab_size)
         self.batch_dim = mtf.Dimension("batch", self.train_batch_size)

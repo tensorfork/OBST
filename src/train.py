@@ -2,19 +2,19 @@
 Contains functions to create a training loop and log its outputs to tensorboard
 """
 import collections
-import threading
-import typing
-import time
 import json
+import threading
+import time
+import typing
 
 import mesh_tensorflow as mtf
 import numpy as np
 import tensorflow.compat.v1 as tf
+from tensorflow.compat.v1.data import Dataset
 from tensorflow.python.framework import ops
-from tensorflow.python.ops import summary_ops_v2 as summary
+from tensorflow.python.ops import summary_ops_v2 as summary, variables
 from tensorflow.python.tpu import tpu, tpu_feed
 from tensorflow.python.tpu.ops import tpu_ops
-from tensorflow.python.ops import variables
 
 from .dataclass import ModelParameter
 from .model import build
@@ -156,7 +156,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
                         token_x_input = mtf.cast(token_x_input, dtype=tf.int32)
 
-                    return position + 1, token_x_input, token_y_input, frame_input, frame_mask_src,\
+                    return position + 1, token_x_input, token_y_input, frame_input, frame_mask_src, \
                            frame_mask_tag, token_mask
 
                 if token_mask is not None:
@@ -240,11 +240,12 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             print(dim_name)
         print('\n')
 
-        model_size = {'model_variables': int(param_count - params.embedding_param_count),
-                      'embedding_variables': int(params.embedding_param_count),
-                      'untrainable_variables': int(var_count - param_count),
+        model_size = {'model_variables':           int(param_count - params.embedding_param_count),
+                      'embedding_variables':       int(params.embedding_param_count),
+                      'untrainable_variables':     int(var_count - param_count),
                       'total_trainable_variables': int(param_count),
-                      'total_variables': int(var_count)}
+                      'total_variables':           int(var_count)
+                      }
 
         json.dump(model_size, tf.io.gfile.GFile(f"{params.model_path}/model_size.info", 'w'))
 
@@ -401,9 +402,28 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             all_sub_batch_pnums = [pnum_map.flatten().tolist() for pnum_map in pnum_maps]
 
         with ops.device(f"/job:worker/task:{host_id}/device:CPU:0"):
-
-            _ds_iterator = input_fn(params, sub_batch_size, sub_batch_i,
-                                    len(hosts_to_hold_ds)).make_initializable_iterator()
+            dataset = input_fn(params, sub_batch_size, sub_batch_i, len(hosts_to_hold_ds)).prefetch(params.buffer_size)
+            options = tf.data.Options()
+            options.experimental_deterministic = not params.train
+            options.experimental_optimization.autotune = True
+            options.experimental_optimization.autotune_buffers = True
+            options.experimental_optimization.filter_fusion = True
+            options.experimental_optimization.hoist_random_uniform = True
+            options.experimental_optimization.map_and_batch_fusion = True
+            options.experimental_optimization.map_and_filter_fusion = False
+            options.experimental_optimization.map_fusion = True
+            options.experimental_optimization.map_parallelization = True
+            options.experimental_optimization.map_vectorization.enabled = True
+            options.experimental_optimization.map_vectorization.use_choose_fastest = True
+            options.experimental_optimization.noop_elimination = True
+            options.experimental_optimization.parallel_batch = True
+            options.experimental_optimization.shuffle_and_repeat_fusion = True
+            options.experimental_optimization.apply_default_optimizations = False
+            options.experimental_threading.max_intra_op_parallelism = 1
+            options.experimental_threading.private_threadpool_size = 48
+            options.experimental_distribute.auto_shard = True
+            dataset: Dataset = dataset.with_options(options)
+            _ds_iterator = dataset.make_initializable_iterator()
             ds_iterator.append(_ds_iterator)
             all_input_tensors = _ds_iterator.get_next()
 
@@ -458,11 +478,6 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
     input_initializers = [ds.initializer for ds in ds_iterator]
 
-    def _thread_fn(sess: tf.Session):
-        time.sleep(1)
-        while True:
-            sess.run(enqueue_ops)
-
     compilation_state, computation = tpu.split_compile_and_replicate(_model_fn,
                                                                      [[]] * params.num_cores,
                                                                      infeed_queue,
@@ -479,23 +494,38 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                hooks=[ckpt_loader_hook,
                                                       tf.train.StepCounterHook(every_n_steps=10)] + hooks,
                                                config=session_config) as sess:
-
+            print('Compiling computation...')
+            now = time.time()
+            sess.run(compilation_state)
+            elapsed = time.time() - now
+            print(f'Compiled in {elapsed:.2f}s')
+            print("Initializing inputs...")
             sess.run(input_initializers)
-            infeed_thread = threading.Thread(target=_thread_fn, args=(sess,))
-            infeed_thread.start()
-
+            print("Initializing summary...")
             summary.initialize(session=sess)
+            print("Enqueueing first batch...")
 
+            for _ in range(params.grad_accumulation):
+                sess.run(enqueue_ops)
+
+            print(f"Starting training loop. Start step: {params.current_step}")
             for i in range(params.current_step, params.train_steps):
-
-                for accum_step in range(params.grad_accumulation):
+                if params.debug_train_step:
+                    print(f"Current step: {i}\nTraining...")
+                for _ in range(params.grad_accumulation):
                     sess.run(computation)
+                if params.debug_train_step:
+                    print(f"Enqueueing...")
+                for _ in range(params.grad_accumulation):
+                    sess.run(enqueue_ops)
 
                 if (i + 1) % params.summary_flush_interval == 0:
+                    if params.debug_train_step:
+                        print(f"Flushing summary...")
                     sess.run(flush_summary)
 
-                for fn in callback_fns:
-                    fn(i)
+                # for fn in callback_fns:
+                #    fn(i)
 
     else:  # train == 'sample'
         outfeed_dequeue_ops = []

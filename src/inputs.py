@@ -205,7 +205,7 @@ def dataset_text(path: str, params: ModelParameter, sub_batch_size: int, slice_i
                                                    patch_size=(language_token_per_frame - 1),
                                                    chunk_size=-1))
 
-    data = data.shuffle(256, seed=params.data_seed)
+    data = data.shuffle(params.shuffle_buffer, seed=params.data_seed)
     data = tf.data.Dataset.zip((data, padding_token, padding_frame, padding_frame_mask, padding_cat_mask))
     data = data.batch(sub_batch_size)
     data = data.map(_memory_func, num_parallel_calls=tf.data.experimental.AUTOTUNE)
@@ -252,7 +252,7 @@ def dataset_video(path: str, params: ModelParameter, sub_batch_size: int, slice_
 
     def _pre_func(*args):
 
-        token_x, token_y, out_frame, frame_mask,\
+        token_x, token_y, out_frame, frame_mask, \
         frame_mask_x, frame_mask_y, token_mask, token = (None, None, None, None, None, None, None, None)
 
         frame, concat, frame_mask, *args = args
@@ -297,7 +297,7 @@ def dataset_video(path: str, params: ModelParameter, sub_batch_size: int, slice_
                                     (sub_batch_size, time_patch_size, language_token_patch, token_patch_size))
             token_mask = tf.cast(token_mask, tf.bool)
 
-        return {k: v for k, v in {'frame':   out_frame, 'token_x': token_x, 'token_y': token_y,
+        return {k: v for k, v in {'frame': out_frame, 'token_x': token_x, 'token_y': token_y,
                                   'vid_msk_src': frame_mask_x, 'vid_msk_tag': frame_mask_y, 'txt_msk': token_mask,
                                   'cat_mask_x': cat_mask_x, 'cat_mask_y': cat_mask_y}.items() if v is not None}
 
@@ -314,9 +314,9 @@ def dataset_video(path: str, params: ModelParameter, sub_batch_size: int, slice_
                                                                    params.data_seed * params.shuffle_input_filenames))
 
     data = data.repeat()
-    data = data.apply(tf.data.experimental.parallel_interleave(lambda x: _decode_func(x),
-                                                               cycle_length=params.interleaved_datasets, block_length=1,
-                                                               sloppy=False))
+    data = data.interleave(lambda x: _decode_func(x),
+                           cycle_length=params.interleaved_datasets,
+                           num_parallel_calls=tf.data.experimental.AUTOTUNE)
     data = data.batch(sub_batch_size)
     data = data.map(_pre_func, num_parallel_calls=tf.data.experimental.AUTOTUNE)
 
@@ -361,7 +361,6 @@ def dataset(params: ModelParameter, sub_batch_size, slice_index, slice_count):
     dset = dset.map(memory_op)
     dset = dset.map(align_tensor_op)
     dset = dset.skip(params.current_step)
-    dset = dset.prefetch(params.buffer_size)
 
     return dset
 
@@ -453,30 +452,12 @@ def gpt_neo_input(params, sub_batch_size, slice_index, slice_count):
         return {'token_x': vals1, 'token_y': vals2}
 
     decoder = decode_intstring if 'int64' in filenames[0] else decode_bytestring
-    dset = dset.interleave(lambda x: _text_decoder(decoder, x, params.n_ctx, params.token_patch_size, -1))
+    dset = dset.interleave(lambda x: _text_decoder(decoder, x, params.n_ctx, params.token_patch_size, -1),
+                           cycle_length=params.interleaved_datasets,
+                           num_parallel_calls=tf.data.experimental.AUTOTUNE)
 
-    dset = dset.shuffle(512, seed=params.data_seed)
+    dset = dset.shuffle(params.shuffle_buffer, seed=params.data_seed)
     dset = dset.batch(sub_batch_size)
-
     dset = dset.map(_memory_func)
     dset = dset.map(align_tensor_op)
-
-    options = tf.data.Options()
-    options.experimental_optimization.autotune = True
-    options.experimental_optimization.autotune_buffers = True
-    options.experimental_optimization.filter_fusion = True
-    options.experimental_optimization.hoist_random_uniform = True
-    options.experimental_optimization.map_and_batch_fusion = True
-    options.experimental_optimization.map_and_filter_fusion = False
-    options.experimental_optimization.map_fusion = True
-    options.experimental_optimization.map_parallelization = True
-    options.experimental_optimization.map_vectorization.enabled = True
-    options.experimental_optimization.map_vectorization.use_choose_fastest = True
-    options.experimental_optimization.noop_elimination = True
-    options.experimental_optimization.parallel_batch = True
-    options.experimental_optimization.shuffle_and_repeat_fusion = True
-    options.experimental_optimization.apply_default_optimizations = False
-
-    # dataset = dataset.with_options(options)
-
     return dset

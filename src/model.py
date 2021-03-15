@@ -49,7 +49,7 @@ def _linear(params: ModelParameter, block_input: mtf.Tensor, old: typing.List[mt
 
 def _linear_to_features(params: ModelParameter, block_input: mtf.Tensor,
                         old: typing.Optional[typing.List[mtf.Dimension]] = None) -> mtf.Tensor:
-    return _linear(params, block_input, default(old, params.intermediate), params.feature_dims)
+    return _linear(params, block_input, default(old, params.feature_dims), params.feature_dims)
 
 
 def _linear_from_features(params: ModelParameter, block_input: mtf.Tensor,
@@ -58,8 +58,7 @@ def _linear_from_features(params: ModelParameter, block_input: mtf.Tensor,
 
 
 def _communicating_linear(params: ModelParameter, block_input: mtf.Tensor):
-    return mtf.add_n([_linear_to_features(params, mtf.shift(block_input, i, params.head_dim, True))
-                      for i in range(params.n_head)])
+    return _linear_to_features(params, block_input, params.intermediate)
 
 
 def _embed(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
@@ -68,14 +67,24 @@ def _embed(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension
     return _normal_var(params, shape, params.embedding_stddev)
 
 
+def _all_mean(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple):
+    # maybe use einsum instead of mean
+    return (mtf.one_hot(mtf.import_fully_replicated(params.mesh,
+                                                    tf.constant(params.attention_idx, dtype=tf.float32, shape=[]), [],
+                                                    str(params.attention_idx)),
+                        params.head_dim)
+            * mtf.reduce_mean(block_input, reduced_dim=params.head_dim))
+
+
 def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple[str]):
     idx, dim = _get_attention_dim(params, block_input)
+    params.attention_idx += 1
     tmp = anonymize_dim(dim)
     base = activate(_linear_from_features(params, block_input))
 
     key = bias = 0
     if 'embedded' in name_extras or 'context' in name_extras:
-        key = _linear_to_features(params, base) * dim.size ** -0.5
+        key = _communicating_linear(params, base) * dim.size ** -0.5
     if 'embedded' in name_extras or 'positional' in name_extras:
         bias = _embed(params, [dim] + params.feature_dims, tuple())
     key = anonymize(key + bias, dim)
@@ -109,13 +118,12 @@ def _rezero(params, block_input: mtf.Tensor, name_extras: typing.Tuple[str]) -> 
 
 
 def _feed_forward(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple[str]) -> mtf.Tensor:
-    intermediate = ([params.head_dim,
-                     anonymize_dim(params.key_dim, params.key_dim.size * params.group_linear_factor)]
-                    if 'group' in name_extras else None)
-    mid = activate(_linear_from_features(params, block_input, intermediate))
     if 'group' in name_extras:
-        return _linear_to_features(params, mid, intermediate)
-    return _communicating_linear(params, mid)
+        intermediate = [params.head_dim,
+                        anonymize_dim(params.key_dim, params.key_dim.size * params.group_linear_factor)]
+    else:
+        intermediate = params.intermediate
+    return _linear_to_features(params, activate(_linear_from_features(params, block_input, intermediate)), intermediate)
 
 
 def _norm(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple[str]) -> mtf.Tensor:
@@ -132,11 +140,35 @@ def _norm(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.T
     return block_input
 
 
+def _activate(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple[str]):
+    return activate(block_input)
+
+
+def _convolution(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple[str]):
+    convolution_size = 16
+    if len(name_extras) == 0:
+        convolution_size = int(name_extras[0])
+    idx, dim = _get_attention_dim(params, block_input)
+    anonymous_block_input = anonymize(block_input, dim)
+    indexed = mtf.Dimension("indexed", convolution_size)
+    one_hot = mtf.range(params.mesh, indexed, params.variable_dtype.activation_dtype)
+    one_hot -= params.convolution_size
+    one_hot += mtf.range(params.mesh, dim, params.variable_dtype.activation_dtype)
+    one_hot = mtf.one_hot(one_hot, dim)
+    output = mtf.einsum([one_hot, anonymous_block_input], block_input.shape + [indexed])
+    output = _linear(params, output, [indexed] + params.feature_dims, params.intermediate)
+    output = activate(output)
+    return _communicating_linear(params, output)
+
+
 LAYER_FUNCTIONS = {'feed_forward': _feed_forward,
                    'attention':    _attention,
                    'norm':         _norm,
                    'rezero':       _rezero,
-                   'embed':        _embed
+                   'embed':        _embed,
+                   'all_mean':     _all_mean,
+                   'activation':   _activate,
+                   'convolution':  _convolution
                    }
 
 
@@ -148,6 +180,114 @@ def _block_part_fn(params: ModelParameter, block_part_config: BlockConfig, block
     if not params.use_revnet and block_part_config.skip:
         out += block_input
     return out
+
+
+class RevGradOp(mtf.Operation):
+    """Operation to implement custom gradients.
+
+    See comments on custom_gradient() below.
+    """
+
+    def __init__(self, params, block_config, x1, x1_backwards, x2, x2_backwards):
+        graph: mtf.Graph = x1.graph
+        prev_ops = len(graph.operations)
+        y1 = x1 + _block_part_fn(params, block_config, x2)
+        fn_outputs = [x2, x2_backwards, y1, x1_backwards]
+        forward_operations = graph.operations[prev_ops:]
+        new_outputs = set()
+        new_inputs = set()
+        for op in forward_operations:
+            new_inputs.update(set(op.inputs))
+            if not isinstance(op, mtf.Variable):
+                new_outputs.update(set(op.outputs))
+        explicit_inputs = [x1, x1_backwards, x2, x2_backwards]
+        variables = [t for t in list(new_inputs - new_outputs - set(explicit_inputs)) if t.dtype.is_floating]
+        super(RevGradOp, self).__init__(explicit_inputs + variables + fn_outputs, x1.mesh,
+                                        random_name("custom_gradient"))
+        # Make sure no one uses the internals of this function, since the gradients
+        #  will probably not work correctly.
+        for t in new_outputs - set(fn_outputs):
+            t.usable = False
+
+        self._graph: mtf.Graph = x1.graph
+        self._x2: mtf.Tensor = x2
+        self._y1: mtf.Tensor = y1
+        self._variables: typing.List[mtf.Variable] = variables
+        self._fn_outputs: typing.List[mtf.Tensor] = fn_outputs
+        self._outputs: typing.List[mtf.Tensor] = [mtf.Tensor(self, x.shape, x.dtype, index=i)
+                                                  for i, x in enumerate(fn_outputs)]
+        self._forward_operations = forward_operations[:-1]
+
+    def lower(self, lowering):
+        for fn_output, output in zip(self._fn_outputs, self._outputs):
+            lowering.set_tensor_lowering(output, lowering.tensors[fn_output])
+
+    def gradient(self, grad_ys, params: typing.Optional[typing.List[mtf.Operation]] = None):
+        dy2, dy2_backwards, dy1, dy1_backwards = grad_ys
+        x2 = self._x2 if dy2_backwards is None else dy2_backwards
+        f_again_ops, mapping = self._graph.clone_operations(self._forward_operations, {self._x2: x2})
+        fx2 = mapping[self._forward_operations[-1].outputs[0]]
+        # figure out what Tensors are downstream of xs
+        downstream = set([x2] + self._variables)
+        for op in f_again_ops:
+            if op.has_gradient and set(op.inputs) & downstream:
+                downstream |= set(op.outputs)
+        tensor_to_gradient = {fx2: dy1}
+        if params is None:
+            yield dy1
+            yield (self._y1 if dy1_backwards is None else dy1_backwards) - fx2
+            with tf.variable_scope(fx2.graph.captured_variable_scope):
+                for op in f_again_ops[::-1]:
+                    grad_outputs = [tensor_to_gradient.get(out) for out in op.outputs]
+                    if not op.has_gradient or not any(grad_outputs) or not set(op.inputs) & downstream:
+                        continue
+                    with tf.variable_scope(op.name + "/revnet/gradients"):
+                        for inp, grad in zip(op.inputs, op.gradient(grad_outputs)):
+                            if inp not in downstream or grad is None:
+                                continue
+                            if inp in tensor_to_gradient:
+                                tensor_to_gradient[inp] += grad
+                            else:
+                                tensor_to_gradient[inp] = grad
+            yield dy2 + tensor_to_gradient[x2]
+            yield x2
+            for g in (tensor_to_gradient.get(x, None) for x in self._variables):
+                yield g
+            return
+        tensor_to_gradient = {fx2: [0, 0, dy1]}
+        yield params[0], dy1
+        yield params[1], (self._y1 if dy1_backwards is None else dy1_backwards) - fx2
+        yield params[3], x2
+        with tf.variable_scope(fx2.graph.captured_variable_scope):
+            for op in f_again_ops[::-1]:
+                grad_outputs = []
+                for out in op.outputs:
+                    grad = tensor_to_gradient.get(out)
+                    if grad is None:
+                        grad_outputs.append(None)
+                        continue
+                    grad_outputs.append(grad[2])
+                    grad[0] += 1
+                    if grad[0] == len(grad[2].operation.inputs):
+                        del tensor_to_gradient[out]
+                if not op.has_gradient or not any(grad_outputs) or not set(op.inputs) & downstream:
+                    continue
+                for inp, grad in zip(op.inputs, op.gradient(grad_outputs)):
+                    if inp not in downstream or grad is None:
+                        continue
+                    if inp in tensor_to_gradient:
+                        grad_list = tensor_to_gradient[inp]
+                        grad_list[1] += 1
+                        with tf.variable_scope(op.name + "/revnet/gradients"):
+                            grad_list[2] += grad
+                    else:
+                        tensor_to_gradient[inp] = grad_list = [0, 1, grad]
+                    if len(inp.operation.outputs) != grad_list[1]:
+                        continue
+                    if inp not in self._variables:
+                        continue
+                    yield params[4 + self._variables.index(inp)], grad_list[2]
+        yield params[2], dy2 + tensor_to_gradient[x2][2]
 
 
 def build(params: ModelParameter,
@@ -242,9 +382,14 @@ def build(params: ModelParameter,
         if params.use_revnet:
             out = (src, None, src, None)
 
-            def _layer_builder(block_input: typing.Tuple[mtf.Tensor], block_config: BlockConfig):
-                return mtf.layers.reversible_half_residual_and_swap(*block_input,
-                                                                    lambda x: _block_part_fn(params, block_config, x))
+            def _layer_builder(block_input: typing.Tuple[mtf.Tensor, mtf.Tensor, mtf.Tensor, mtf.Tensor],
+                               block_config: BlockConfig):
+                x1, x1_backwards, x2, x2_backwards = block_input
+                if x1_backwards is None:
+                    x1_backwards = mtf.zeros_like(x1)
+                if x2_backwards is None:
+                    x2_backwards = mtf.zeros_like(x2)
+                return RevGradOp(params, block_config, x1, x1_backwards, x2, x2_backwards).outputs
         else:
             out = src
 

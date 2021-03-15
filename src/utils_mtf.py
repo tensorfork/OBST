@@ -114,7 +114,7 @@ def pad(tensor: mtf.Tensor, dim: typing.Union[mtf.Dimension, str], padding: typi
     return mtf.pad(anonymize(tensor, dim), padding, anonymize_dim(dim))
 
 
-def random_name() -> str:
+def random_name(prefix="") -> str:
     """
     Generates a random name based on the globally set seed using python's random module.
     Each name has 256 bits of entropy and a final length of 44 base64 encoded characters.
@@ -122,7 +122,7 @@ def random_name() -> str:
     :return: random string
     """
     _NAME_INDEX[0] += 1
-    return str(_NAME_INDEX[0])
+    return f'{prefix}{_NAME_INDEX[0]}'
 
 
 def to_float(tensor: mtf.Tensor) -> mtf.Tensor:

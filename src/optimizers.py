@@ -9,6 +9,7 @@ import mesh_tensorflow as mtf
 import tensorflow.compat.v1 as tf
 
 from .dataclass import ModelParameter
+from .model import RevGradOp
 from .utils_mtf import weighted_add
 
 
@@ -74,81 +75,83 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter, manual_step
             grad_outputs = []
             for out in op.outputs:
                 grad = tensor_to_gradient.get(out)
-                if grad is not None:
-                    grad_outputs.append(grad[2])
-                    grad[0] += 1
-                else:
+                if grad is None:
                     grad_outputs.append(None)
-                if grad is not None and grad[0] == len(grad[2].operation.inputs):
+                    continue
+                grad_outputs.append(grad[2])
+                grad[0] += 1
+                if grad[0] == len(grad[2].operation.inputs):
                     del tensor_to_gradient[out]
             if not op.has_gradient or not any(grad_outputs) or not (set(op.inputs) & downstream):
                 continue
-            with tf.variable_scope(op.name + "/gradients"):
-                for inp, grad in zip(op.inputs, op.gradient(grad_outputs)):
-
-                    valid_grad = inp in downstream and grad is not None
-                    if valid_grad and inp in tensor_to_gradient:
+            with tf.variable_scope(op.name + "/optimizer/gradients"):
+                if isinstance(op, RevGradOp):
+                    itr = op.gradient(grad_outputs, params=op.inputs)
+                else:
+                    itr = zip(op.inputs, op.gradient(grad_outputs))
+                for inp, grad in itr:
+                    if inp not in downstream or grad is None:
+                        continue
+                    if inp in tensor_to_gradient:
                         grad_list = tensor_to_gradient[inp]
                         grad_list[1] += 1
                         grad_list[2] += grad
+                    else:
+                        tensor_to_gradient[inp] = grad_list = [0, 1, grad]
+                    if len(inp.operation.outputs) != grad_list[1] or inp not in tensor_to_var:
+                        continue
+                    grad = grad_list[2]
+                    var: mtf.Variable = tensor_to_var[inp]
+                    if params.grad_accumulation > 1:
+                        grad_buffer = variable(var, "grad_accumulation", var.shape)
+                        update_ops.append(mtf.assign(grad_buffer, grad + grad_buffer * mstep))
+                        grad = grad_buffer * step / params.grad_accumulation
+                    if params.gradient_clip > 0:
+                        grd_norm = mtf.sqrt(mtf.reduce_sum(mtf.square(grad)) + 1e-5)
+                        wgt_norm = mtf.sqrt(mtf.reduce_sum(mtf.square(var.value)) + 1e-3)
+                        grad = weighted_add(grd_norm / wgt_norm * params.gradient_clip * grad, grad,
+                                            mtf.cast(mtf.greater(wgt_norm / grd_norm, params.gradient_clip), dtype))
+                    if var.shape.ndims <= 1 or params.optimizer == 'adam':
+                        exp_avg_p1_ptr = variable(var, 'exp_avg_p1', var.shape)
+                        exp_avg_p2_ptr = variable(var, 'exp_avg_p2', var.shape)
 
-                    elif valid_grad:
-                        grad_list = [0, 1, grad]
-                        tensor_to_gradient[inp] = grad_list
+                        exp_avg_p1 = weighted_add(exp_avg_p1_ptr, grad, beta1)
+                        exp_avg_p2 = weighted_add(exp_avg_p2_ptr, mtf.square(grad), beta2)
 
-                    if valid_grad and len(inp.operation.outputs) == grad_list[1] and inp in tensor_to_var:
-                        grad = grad_list[2]
-                        var: mtf.Variable = tensor_to_var[inp]
-                        if params.grad_accumulation > 1:
-                            grad_buffer = variable(var, "grad_accumulation", var.shape)
-                            update_ops.append(mtf.assign(grad_buffer, grad + grad_buffer * mstep))
-                            grad = grad_buffer * step / params.grad_accumulation
-                        if params.gradient_clip > 0:
-                            grd_norm = mtf.sqrt(mtf.reduce_sum(mtf.square(grad)) + 1e-5)
-                            wgt_norm = mtf.sqrt(mtf.reduce_sum(mtf.square(var.value)) + 1e-3)
-                            grad = weighted_add(grd_norm / wgt_norm * params.gradient_clip * grad, grad,
-                                                mtf.cast(mtf.greater(wgt_norm / grd_norm, params.gradient_clip), dtype))
-                        if var.shape.ndims <= 1 or params.optimizer == 'adam':
-                            exp_avg_p1_ptr = variable(var, 'exp_avg_p1', var.shape)
-                            exp_avg_p2_ptr = variable(var, 'exp_avg_p2', var.shape)
+                        weight_update = exp_avg_p1 * mtf.rsqrt(exp_avg_p2 + epsilon)
+                        update_ops.extend([mtf.assign(exp_avg_p1_ptr, exp_avg_p1),
+                                           mtf.assign(exp_avg_p2_ptr, exp_avg_p2)])
+                    elif params.optimizer == 'sgd':
+                        weight_update = grad
+                    elif params.optimizer == 'novograd':
+                        exp_avg_p1 = exp_avg_p1_ptr = variable(var, "exp_avg_p1", var.shape)
+                        exp_avg_p2 = exp_avg_p2_ptr = variable(var, "exp_avg_p2", [])
 
-                            exp_avg_p1 = weighted_add(exp_avg_p1_ptr, grad, beta1)
-                            exp_avg_p2 = weighted_add(exp_avg_p2_ptr, mtf.square(grad), beta2)
+                        exp_avg_p2 = weighted_add(exp_avg_p2, mtf.reduce_sum(mtf.square(grad)), beta2)
+                        weight_update = beta1 * exp_avg_p1 + grad * mtf.rsqrt(exp_avg_p2 + epsilon)
+                        update_ops.extend([mtf.assign(exp_avg_p1_ptr, beta1 * exp_avg_p1_ptr +
+                                                      grad * mtf.rsqrt(exp_avg_p2 + epsilon)),
+                                           mtf.assign(exp_avg_p2_ptr, exp_avg_p2)])
+                    elif params.optimizer == 'sm3':
+                        update = variable(var, "dim0", [var.shape.dims[0]])
+                        buffer = [update]
 
-                            weight_update = exp_avg_p1 * mtf.rsqrt(exp_avg_p2 + epsilon)
-                            update_ops.extend([mtf.assign(exp_avg_p1_ptr, exp_avg_p1),
-                                               mtf.assign(exp_avg_p2_ptr, exp_avg_p2)])
-                        elif params.optimizer == 'sgd':
-                            weight_update = grad
-                        elif params.optimizer == 'novograd':
-                            exp_avg_p1 = exp_avg_p1_ptr = variable(var, "exp_avg_p1", var.shape)
-                            exp_avg_p2 = exp_avg_p2_ptr = variable(var, "exp_avg_p2", [])
+                        for i in range(1, var.shape.ndims):
+                            buffer.append(variable(var, f"dim{i}", [var.shape.dims[i]]))
+                            update = mtf.minimum(update, buffer[-1])
 
-                            exp_avg_p2 = weighted_add(exp_avg_p2, mtf.reduce_sum(mtf.square(grad)), beta2)
-                            weight_update = beta1 * exp_avg_p1 + grad * mtf.rsqrt(exp_avg_p2 + epsilon)
-                            update_ops.extend([mtf.assign(exp_avg_p1_ptr, beta1 * exp_avg_p1_ptr +
-                                                          grad * mtf.rsqrt(exp_avg_p2 + epsilon)),
-                                               mtf.assign(exp_avg_p2_ptr, exp_avg_p2)])
-                        elif params.optimizer == 'sm3':
-                            update = variable(var, "dim0", [var.shape.dims[0]])
-                            buffer = [update]
+                        update += mtf.square(grad)
 
-                            for i in range(1, var.shape.ndims):
-                                buffer.append(variable(var, f"dim{i}", [var.shape.dims[i]]))
-                                update = mtf.minimum(update, buffer[-1])
-
-                            update += mtf.square(grad)
-
-                            weight_update = grad * mtf.rsqrt(update + epsilon)
-                            update_ops.extend([mtf.assign(buf_ptr, mtf.reduce_max(update, output_shape=[dim]))
-                                               for buf_ptr, dim in zip(buffer, update.shape.dims)])
-                        weight_update *= learning_rate
-                        if params.weight_decay > 0:
-                            weight_update += params.weight_decay * var.value
-                        if var.shape.size > 1:
-                            weight_update += mtf.reduce_mean(var.value)
-                        if params.grad_accumulation > 1:
-                            weight_update *= step
-                        update_ops.append(mtf.assign_sub(var, weight_update))
+                        weight_update = grad * mtf.rsqrt(update + epsilon)
+                        update_ops.extend([mtf.assign(buf_ptr, mtf.reduce_max(update, output_shape=[dim]))
+                                           for buf_ptr, dim in zip(buffer, update.shape.dims)])
+                    weight_update *= learning_rate
+                    if params.weight_decay > 0:
+                        weight_update += params.weight_decay * var.value
+                    if var.shape.size > 1:
+                        weight_update += mtf.reduce_mean(var.value)
+                    if params.grad_accumulation > 1:
+                        weight_update *= step
+                    update_ops.append(mtf.assign_sub(var, weight_update))
 
     return params.mesh.graph.trainable_variables[0].graph.combine_assignments(update_ops), tf_learning_rate
