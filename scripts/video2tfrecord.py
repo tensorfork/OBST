@@ -102,6 +102,8 @@ class Downloader:
             next = "https://proxy.webshare.io/api/proxy/list/?page=1"
 
             while next is not None:
+                if not next.startswith('https://'):
+                    next = 'https://proxy.webshare.io' + next
                 r = requests.get(next, headers={"Authorization": f"Token {self.webshare_io_key}"})
                 dump = r.json()
 
