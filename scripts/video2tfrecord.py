@@ -385,8 +385,8 @@ def worker(work: list,
            concat_token: int = 50256,
            skip_if_no_subtitles: bool = True,
            service_account_json_path: str = '',
-           bucket_name: str = '',
            webshare_io_key: str = None,
+           bucket_name: str = '',
            youtube_base: str = 'https://www.youtube.com/watch?v='):
     '''
     :param work: List with path to existing videos (if so download need to be True (default))
@@ -409,8 +409,8 @@ def worker(work: list,
     :param skip_if_no_subtitles: If True the video will be skipped if no subtitles are available.
     (only if use_subtitles is True)
     :param service_account_json_path: The path to the json containing the service account informations.
-    :param bucket_name: The Name of the google cloud storage bucket the TFrecords are should to be uploaded to.
     :param webshare_io_key: API key for webshare.io.
+    :param bucket_name: The Name of the google cloud storage bucket the TFrecords are should to be uploaded to.
     :param youtube_base: Youtube base string https://www.youtube.com/watch?v=.
 
     This function will download youtube videos and proses them and save than as TF.record files.
