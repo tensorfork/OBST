@@ -26,24 +26,32 @@ class GFile:
 
     def __init__(self, name, mode):
         self.file = tf.io.gfile.GFile(name, mode)
+        self.write_count = 0
 
     def fileno(self):
         return 9
 
     def write(self, data):
         self.file.write(data)
+
+        self.write_count = self.write_count + 1
+
+        if self.write_count > 200:
+            self.flush()
+
         return 3
 
     def write_flush(self, data):
         self.file.write(data)
-        self.file.flush()
+        self.flush()
         return 3
 
     def flush(self):
+        self.write_count = 0
         self.file.flush()
 
     def close(self):
-        self.file.flush()
+        self.flush()
         self.file.close()
 
 if __name__ == '__main__':

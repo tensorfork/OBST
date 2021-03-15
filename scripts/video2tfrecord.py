@@ -2,7 +2,9 @@ import multiprocessing
 import subprocess
 import argparse
 import datetime
+import requests
 import warnings
+import hashlib
 import typing
 import random
 import glob
@@ -10,7 +12,6 @@ import json
 import time
 import os
 
-from urllib.request import urlretrieve
 from transformers import GPT2Tokenizer
 from google.cloud import storage
 import tensorflow as tf
@@ -53,36 +54,94 @@ def str2bool(v):
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
 
-def downloader(url: str, filename: str, max_try: int=3):
-    try_count = 0
+class Downloader:
 
-    while try_count < max_try:
-        try:
-            urlretrieve(url, filename)
-        except:
-            try_count += 1
-        else:
-            return True
+    def __init__(self, max_try: int = 3, webshare_io_key: str = None):
+        self.max_try = max_try
+        self.webshare_io_key = webshare_io_key
+        self.proxies = None
 
-    print('Retry exceeded')
+        self.update_proxy()
 
-    if os.path.exists(filename):
-        os.remove(filename)
+    def download(self, url: str, filename: str, use_proxy: bool):
+        try_count = 0
 
-    return False
+        while try_count < self.max_try:
+            try:
+                if use_proxy:
+                    r = requests.get(url, stream=True, proxies=self.proxies)
+                else:
+                    r = requests.get(url, stream=True)
+
+                with open(filename, 'wb') as f:
+                    for chunk in r:
+                        f.write(chunk)
+
+            except Exception as e:
+                print('Download error:', e)
+                try_count += 1
+
+                if use_proxy:
+                    self.update_proxy()
+
+            else:
+                return True
+
+        print('Retry exceeded for URL:', url)
+
+        if os.path.exists(filename):
+            os.remove(filename)
+
+        return False
+
+    def update_proxy(self):
+
+        if self.webshare_io_key is not None:
+
+            proxies = []
+            _next = "/api/proxy/list/?page=1"
+
+            while _next is not None:
+
+                r = requests.get('https://proxy.webshare.io' + _next,
+                                 headers={"Authorization": f"Token {self.webshare_io_key}"})
+                dump = r.json()
+
+                _next = None
+                if dump is not None:
+                    if 'next' in dump:
+                        _next = dump['next']
+
+                    if 'results' in dump:
+                        proxies = proxies + [res for res in dump['results'] if res['valid']]
+
+            random.shuffle(proxies)
+            random.shuffle(proxies)
+
+            if len(proxies) > 0:
+                username = proxies[0]['username']
+                password = proxies[0]['password']
+                proxy_address = proxies[0]['proxy_address']
+                ports = proxies[0]['ports']['http']
+
+                self.proxies = {"http": f"http://{username}:{password}@{proxy_address}:{ports}",
+                                "https": f"http://{username}:{password}@{proxy_address}:{ports}"}
+            else:
+                self.proxies = None
 
 
 def frame_encoder(frame,
                   text_tokens: typing.List[int] = None,
                   skip_frame: typing.List[bool] = [False],
                   mask: typing.List[int] = None,
-                  concat: typing.List[bool] = False):
+                  concat: typing.List[bool] = [False]):
     '''
     :param frame: A byte String containing a jpg encoded image.
     :param text_tokens: A list containing int ped tokens.
     :param skip_frame: A list containing a single bool that
     determines if this frame include an image or just text.
     :param mask: A int that determines when the padding tokens start.
+    :param concat: A list containing a single bool that determents if tow videos are concat at that point.
 
     This Function will encode frame to proto buffer.
     '''
@@ -306,7 +365,7 @@ def char_level_encoder(words: list):
     chars = []
 
     for word in words:
-        w = " " + word
+        w = word
         chars.append([ord(c) for c in w])
 
     return chars
@@ -328,6 +387,7 @@ def worker(work: list,
            concat_token: int = 50256,
            skip_if_no_subtitles: bool = True,
            service_account_json_path: str = '',
+           webshare_io_key: str = None,
            bucket_name: str = '',
            youtube_base: str = 'https://www.youtube.com/watch?v='):
     '''
@@ -351,6 +411,7 @@ def worker(work: list,
     :param skip_if_no_subtitles: If True the video will be skipped if no subtitles are available.
     (only if use_subtitles is True)
     :param service_account_json_path: The path to the json containing the service account informations.
+    :param webshare_io_key: API key for webshare.io.
     :param bucket_name: The Name of the google cloud storage bucket the TFrecords are should to be uploaded to.
     :param youtube_base: Youtube base string https://www.youtube.com/watch?v=.
 
@@ -380,12 +441,13 @@ def worker(work: list,
         youtube_getter = youtube_dl.YoutubeDL({'writeautomaticsub': True, 'ignore-errors': True, 'socket-timeout': 600})
         youtube_getter.add_default_info_extractors()
 
-    # Loop to list of work.
-    for wor_idx, wor in enumerate(work):
+        downloader = Downloader(webshare_io_key=webshare_io_key)
 
-        print('worker:', worker_id, 'work idx:', wor_idx)
+    # Loop to list of work.
+    for chunk_idx, wor in enumerate(work):
 
         _tfrecord_name = "|".join(wor)
+        _tfrecord_name = hashlib.sha3_256(_tfrecord_name.encode('utf-8')).hexdigest()
         _save_name = os.path.join(buffer_save_dir, _tfrecord_name + '.tfrecord')
 
         contains_video_already = False
@@ -393,7 +455,10 @@ def worker(work: list,
         # Create TF Record Writer
         with tf.io.TFRecordWriter(_save_name) as tf_writer:
 
-            for _wor in wor:
+            for wor_idx, _wor in enumerate(wor):
+
+                print(f"worker: {worker_id} chunk: {chunk_idx} video: {wor_idx}")
+
                 # Assume by default the download was successful.
                 download_success = True
 
@@ -480,12 +545,10 @@ def worker(work: list,
                             url = video_url['url']
                             ext = video_url['ext']
 
-                            print(video_url_idx, ext)
-
                             if url is not None and ext is not None:
                                 if url != "" and ext != "":
                                     video_buffer_path = os.path.join(download_buffer_dir, _wor) + '.' + ext
-                                    download_success = downloader(url, video_buffer_path)
+                                    download_success = downloader.download(url, video_buffer_path, False)
 
                                     if download_success:
 
@@ -515,7 +578,8 @@ def worker(work: list,
                                             break
                                         else:
                                             warnings.warn("worker: " + str(worker_id) + " cv2 failed to open:" +
-                                                          video_buffer_path, [__ff['ext'] for __ff in video_urls])
+                                                          video_buffer_path + " " +
+                                                          str([__ff["ext"] for __ff in video_urls]))
 
                                             if os.path.exists(video_buffer_path):
                                                 os.remove(video_buffer_path)
@@ -541,7 +605,7 @@ def worker(work: list,
                     if vtt_url is not None:
                         if vtt_url != "":
                             vtt = os.path.join(download_buffer_dir, _wor) + '.vtt'
-                            vtt_download_success = downloader(vtt_url, vtt)
+                            vtt_download_success = downloader.download(vtt_url, vtt, True)
 
                     if vtt_download_success:
                         try:
@@ -559,6 +623,7 @@ def worker(work: list,
                         bpe_list = []
 
                 _wor = video_buffer_path
+                print(_wor, 'subtitles_available:', subtitles_available)
 
 
                 # Check if this video need to be skipt. This will happen if subtitles are required but are not available.
@@ -729,6 +794,8 @@ if __name__ == '__main__':
     parser.add_argument('--bucket_name', type=str,
                         help="The Name of the google cloud storage bucket the TFrecords are should to be uploaded to."
                              " This only as an affect if 'google service account information' are present.")
+    parser.add_argument('--webshare_io_key', type=str,
+                        help="The API key for webshare.io if this param is not set no proxy will be used.")
     parser.add_argument('--start_delay', type=int, default=0,
                         help="The delay in second between the start of the next worker.")
 
@@ -753,6 +820,7 @@ if __name__ == '__main__':
     concat_token = args.concat_token
     duration_need_larger = args.duration_need_larger
 
+    webshare_io_key = args.webshare_io_key
     service_account_json_path = args.service_account_json_path
     bucket_name = args.bucket_name
     start_delay = args.start_delay
@@ -787,20 +855,25 @@ if __name__ == '__main__':
 
     ids, duration = split_equal(ids, duration, num_worker, duration_need_larger)
 
+    split_chunk_count = 0
     split_video_count = 0
     split_video_duration = 0
 
     for i in range(len(ids)):
-        buffer_video_count = len(ids[i])
+        buffer_chunk_count = len(ids[i])
+        buffer_video_count = sum([len(__ids) for __ids in ids[i]])
         buffer_video_duration = sum(duration[i])
 
-        print('split:', i, 'videos:', buffer_video_count, 'duration:', buffer_video_duration)
+        print('split:', i, 'chunks:', buffer_chunk_count, 'videos:',
+              buffer_video_count, 'duration:', buffer_video_duration)
 
+        split_chunk_count += buffer_chunk_count
         split_video_count += buffer_video_count
         split_video_duration += buffer_video_duration
 
     print('')
-    print('total num of videos:', split_video_count, 'total video duration:', split_video_duration)
+    print('total num of chunks:', split_chunk_count, 'total num of videos:',
+          split_video_count, 'total video duration:', split_video_duration)
     print('')
 
 
@@ -829,6 +902,7 @@ if __name__ == '__main__':
                                                          concat_token,
                                                          skip_if_no_subtitles,
                                                          service_account_json_path,
+                                                         webshare_io_key,
                                                          bucket_name))
 
         p.start()
@@ -836,6 +910,8 @@ if __name__ == '__main__':
         worker_list.append(p)
 
         time.sleep(start_delay)
+
+    print(f"worker_list len: {len(worker_list)} ids len: {len(ids)}")
 
     for w in worker_list:
         w.join()

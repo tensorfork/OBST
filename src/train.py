@@ -3,8 +3,9 @@ Contains functions to create a training loop and log its outputs to tensorboard
 """
 import collections
 import threading
-import time
 import typing
+import time
+import json
 
 import mesh_tensorflow as mtf
 import numpy as np
@@ -76,6 +77,8 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         # params.mode = mode
 
         frame_input = None
+        cat_mask_src = None
+        cat_mask_tag = None
         token_x_input = None
         token_y_input = None
         frame_mask_src = None
@@ -84,13 +87,15 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
         if params.use_video:
             frame_input = _import_tensor(params, args[0], params.frame_input_shape, "frame_input")
+            cat_mask_src = _import_tensor(params, args[1], params.frame_mask_shape, "cat_mask_x")
+            cat_mask_tag = _import_tensor(params, args[2], params.frame_mask_shape, "cat_mask_y")
+            frame_mask_src = _import_tensor(params, args[3], params.frame_mask_shape, "vid_msk_src")
+            frame_mask_tag = _import_tensor(params, args[4], params.frame_mask_shape, "vid_msk_tag")
 
             if params.use_language:
-                token_x_input = _import_tensor(params, args[1], params.token_dim_shape, "tkn_src")
-                token_y_input = _import_tensor(params, args[2], params.token_dim_shape, "tkn_tgt")
-                frame_mask_src = _import_tensor(params, args[3], params.frame_mask_shape, "vid_msk_src")
-                frame_mask_tag = _import_tensor(params, args[4], params.frame_mask_shape, "vid_msk_tag")
-                token_mask = _import_tensor(params, args[5], params.token_dim_shape, "txt_msk")
+                token_x_input = _import_tensor(params, args[5], params.token_dim_shape, "tkn_src")
+                token_y_input = _import_tensor(params, args[6], params.token_dim_shape, "tkn_tgt")
+                token_mask = _import_tensor(params, args[7], params.token_dim_shape, "txt_msk")
 
         else:  # params.use_language
             token_x_input = _import_tensor(params, args[0], params.token_dim_shape, "tkn_src")
@@ -99,6 +104,8 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         if params.train or not params.use_autoregressive_sampling:
             loss, video_loss, token_loss, frame_out, token_out = build(params,
                                                                        frame_input,
+                                                                       cat_mask_src,
+                                                                       cat_mask_tag,
                                                                        token_x_input,
                                                                        token_y_input,
                                                                        frame_mask_src,
@@ -116,6 +123,8 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
                     _, _, _, frame_out, token_out = build(params,
                                                           frame_input,
+                                                          mtf.ones(params.mesh, [], tf.float32),
+                                                          mtf.ones(params.mesh, [], tf.float32),
                                                           token_x_input,
                                                           token_y_input,
                                                           frame_mask_src,
@@ -144,8 +153,10 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                         frame_pad = to_float(mtf.greater(mtf.reduce_sum(padding_token, reduced_dim=tkn_per_frame), 0))
                         token_x_input = weighted_add(frame_pad, to_float(token_x_input), one_hot_sequence)
 
-                    return position + 1, token_x_input, token_y_input, \
-                           frame_input, frame_mask_src, frame_mask_tag, token_mask
+                        token_x_input = mtf.cast(token_x_input, dtype=tf.int32)
+
+                    return position + 1, token_x_input, token_y_input, frame_input, frame_mask_src,\
+                           frame_mask_tag, token_mask
 
                 if token_mask is not None:
                     token_mask = to_float(token_mask)
@@ -155,14 +166,16 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     frame_mask_tag = to_float(frame_mask_tag)
 
                 while_loop_inputs = [mtf.zeros(params.mesh, [], tf.int32) + params.initial_autoregressive_position,
-                                     token_x_input, token_y_input, frame_input,
-                                     frame_mask_src, frame_mask_tag, token_mask]
+                                     token_x_input, token_y_input, frame_input, frame_mask_src, frame_mask_tag,
+                                     token_mask]
 
             else:  # -> params.use_language
                 steps = params.sequence_dim.size
 
                 def body_fn(position, token_x, token_y, *states):
                     _, _, _, _, token_out = build(params,
+                                                  mtf.ones(params.mesh, [], tf.float32),
+                                                  mtf.ones(params.mesh, [], tf.float32),
                                                   mtf.ones(params.mesh, [], tf.float32),
                                                   token_x,
                                                   token_y,
@@ -190,7 +203,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             if params.use_language:
                 token_out = loop_out[2]
             if params.use_video:
-                frame_out = loop_out[4]
+                frame_out = loop_out[3]
 
         if params.train:
             update_ops, learning_rate = get_optimizer(loss, params, manual_global_step)
@@ -225,6 +238,14 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                          for item in variable.shape.dimension_names]))):
             print(dim_name)
         print('\n')
+
+        model_size = {'model_variables': int(param_count - params.embedding_param_count),
+                      'embedding_variables': int(params.embedding_param_count),
+                      'untrainable_variables': int(var_count - param_count),
+                      'total_trainable_variables': int(param_count),
+                      'total_variables': int(var_count)}
+
+        json.dump(model_size, tf.io.gfile.GFile(f"{params.model_path}/model_size.info", 'w'))
 
         lowering = mtf.Lowering(graph, {params.mesh: params.mesh_impl})
 
@@ -274,7 +295,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
             if params.use_language:
                 predictions['token_out'] = lowering.export_to_tf_tensor(token_out)
-                predictions['token_tgt'] = args[1 + int(params.use_video)]
+                predictions['token_tgt'] = args[1 + int(params.use_video) * 5]
 
             predictions = [val if val.dtype == tf.float32 else tf.cast(val, tf.float32) for val in predictions.values()]
             output_shapes.extend([pred.shape for pred in predictions])
