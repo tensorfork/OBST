@@ -99,18 +99,18 @@ class Downloader:
         if self.webshare_io_key is not None:
 
             proxies = []
-            next = "https://proxy.webshare.io/api/proxy/list/?page=1"
+            _next = "/api/proxy/list/?page=1"
 
-            while next is not None:
-                if not next.startswith('https://'):
-                    next = 'https://proxy.webshare.io' + next
-                r = requests.get(next, headers={"Authorization": f"Token {self.webshare_io_key}"})
+            while _next is not None:
+
+                r = requests.get('https://proxy.webshare.io' + _next,
+                                 headers={"Authorization": f"Token {self.webshare_io_key}"})
                 dump = r.json()
 
-                next = None
+                _next = None
                 if dump is not None:
                     if 'next' in dump:
-                        next = dump['next']
+                        _next = dump['next']
 
                     if 'results' in dump:
                         proxies = proxies + [res for res in dump['results'] if res['valid']]
