@@ -412,7 +412,7 @@ def build(params: ModelParameter,
             mask = compare_range(params, params.batch_dim, anonymize_dim(params.batch_dim), mtf.equal) * 2 - 1
         if params.use_language and not params.contrastive:
             log_softmax = mtf.reduce_logsumexp(token_out, params.vocab_dim) - token_out
-            log_softmax *= mtf.one_hot(txt_tgt, params.vocab_dim, params.variable_dtype.activation_dtype)
+            log_softmax *= mtf.one_hot(txt_tgt, params.vocab_dim, dtype=params.variable_dtype.activation_dtype)
             log_softmax /= txt_tgt.size
             token_loss = mtf.reduce_sum(log_softmax)
         if params.use_language and params.contrastive:
