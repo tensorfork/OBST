@@ -91,7 +91,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             cat_mask_src = _import_tensor(params, args[1], params.frame_mask_shape, "cat_mask_x")
             cat_mask_tag = _import_tensor(params, args[2], params.frame_mask_shape, "cat_mask_y")
             frame_mask_src = _import_tensor(params, args[3], params.frame_mask_shape, "vid_msk_src")
-            frame_mask_tag = _import_tensor(params, args[4], params.frame_mask_shape, "vid_msk_tag")
+            frame_mask_tag = _import_tensor(params, args[4], params.frame_mask_shape, "vid_msk_tgt")
 
             if params.use_language:
                 token_x_input = _import_tensor(params, args[5], params.token_dim_shape, "tkn_src")

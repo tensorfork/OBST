@@ -23,6 +23,9 @@ class ModelParameter(typing.Dict[str, typing.Any]):
 
         self.use_video = True
         self.use_language = True
+        self.input_dropout = 0.
+        self.output_offset = 1
+        self.contrastive = False
         self.use_checkpointing = False
         self.steps_per_checkpoint = 100_000
         self.time_patch = 1
@@ -166,7 +169,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             self.input_pipeline_shape['cat_mask_x'] = self.frame_mask_shape
             self.input_pipeline_shape['cat_mask_y'] = self.frame_mask_shape
             self.input_pipeline_shape['vid_msk_src'] = self.frame_mask_shape
-            self.input_pipeline_shape['vid_msk_tag'] = self.frame_mask_shape
+            self.input_pipeline_shape['vid_msk_tgt'] = self.frame_mask_shape
 
         if self.use_language:
             self.input_pipeline_shape['token_x'] = self.token_dim_shape
@@ -214,7 +217,7 @@ def align_tensor_op(x):
     tensors = []
     if 'frame' in x:
         tensors.extend([x['frame'], x['cat_mask_x'], x['cat_mask_y']])
-        tensors.extend([x['vid_msk_src'], x['vid_msk_tag']])
+        tensors.extend([x['vid_msk_src'], x['vid_msk_tgt']])
     if 'token_x' in x:
         tensors.extend([x['token_x'], x['token_y']])
     if 'txt_msk' in x:
