@@ -157,6 +157,7 @@ def _convolution(params: ModelParameter, block_input: mtf.Tensor, name_extras: t
         one_hot = mtf.range(params.mesh, indexed, params.variable_dtype.activation_dtype)
         one_hot -= params.convolution_size
         one_hot += mtf.range(params.mesh, dim, params.variable_dtype.activation_dtype)
+        one_hot = mtf.maximum(one_hot, 0)
         one_hot = mtf.one_hot(one_hot, dim)
         output = mtf.einsum([one_hot, anonymous_block_input], block_input.shape + [indexed])
         output = _linear(params, output, [indexed] + params.feature_dims, params.intermediate)
