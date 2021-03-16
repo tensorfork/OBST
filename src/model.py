@@ -132,11 +132,14 @@ def _norm(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.T
         normalized_shape = normalized_shape - [_get_attention_dim(params, block_input).dim]
     if 'group' not in name_extras:
         normalized_shape = normalized_shape - [params.head_dim]
-
-    block_input -= mtf.reduce_mean(block_input, output_shape=normalized_shape)
-    block_input *= mtf.rsqrt(1e-6 + mtf.reduce_mean(mtf.square(block_input), output_shape=normalized_shape))
-    block_input *= _normal_var(params, params.feature_dims, mean=1)
-    block_input += _normal_var(params, params.feature_dims, mean=0)
+    if 'mean' in name_extras:
+        block_input -= mtf.reduce_mean(block_input, output_shape=normalized_shape)
+    if 'std' in name_extras:
+        block_input *= mtf.rsqrt(1e-6 + mtf.reduce_mean(mtf.square(block_input), output_shape=normalized_shape))
+    if 'scale' in name_extras:
+        block_input *= _normal_var(params, params.feature_dims, mean=1)
+    if 'shift' in name_extras:
+        block_input += _normal_var(params, params.feature_dims, mean=0)
     return block_input
 
 
@@ -145,20 +148,23 @@ def _activate(params: ModelParameter, block_input: mtf.Tensor, name_extras: typi
 
 
 def _convolution(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple[str]):
-    convolution_size = 16
-    if len(name_extras) == 0:
-        convolution_size = int(name_extras[0])
     idx, dim = _get_attention_dim(params, block_input)
-    anonymous_block_input = anonymize(block_input, dim)
-    indexed = mtf.Dimension("indexed", convolution_size)
-    one_hot = mtf.range(params.mesh, indexed, params.variable_dtype.activation_dtype)
-    one_hot -= params.convolution_size
-    one_hot += mtf.range(params.mesh, dim, params.variable_dtype.activation_dtype)
-    one_hot = mtf.one_hot(one_hot, dim)
-    output = mtf.einsum([one_hot, anonymous_block_input], block_input.shape + [indexed])
-    output = _linear(params, output, [indexed] + params.feature_dims, params.intermediate)
-    output = activate(output)
-    return _communicating_linear(params, output)
+    convolution_size = 16
+    if len(name_extras) > 0 and name_extras[-1].isdigit():
+        convolution_size = int(name_extras[-1])
+    if "gather" in name_extras:
+        anonymous_block_input = anonymize(block_input, dim)
+        indexed = mtf.Dimension("indexed", convolution_size)
+        one_hot = mtf.range(params.mesh, indexed, params.variable_dtype.activation_dtype)
+        one_hot -= params.convolution_size
+        one_hot += mtf.range(params.mesh, dim, params.variable_dtype.activation_dtype)
+        one_hot = mtf.one_hot(one_hot, dim)
+        output = mtf.einsum([one_hot, anonymous_block_input], block_input.shape + [indexed])
+        output = _linear(params, output, [indexed] + params.feature_dims, params.intermediate)
+        output = activate(output)
+        return _communicating_linear(params, output)
+    out = [mtf.shift(_linear_from_features(params, block_input), i, dim, False) for i in range(convolution_size)]
+    return _communicating_linear(params, activate(mtf.add_n(out)))
 
 
 LAYER_FUNCTIONS = {'feed_forward': _feed_forward,
