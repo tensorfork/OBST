@@ -104,8 +104,7 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
     lgt = mtf.einsum([qry, key], reduced_dims=[params.key_dim])
 
     if idx in params.masked_attention_dimensions:  # it's auto-regressive
-        lgt += mtf.cast(mtf.less(mtf.range(params.mesh, dim, tf.int32),
-                                 mtf.range(params.mesh, tmp, tf.int32)),
+        lgt += mtf.cast(mtf.less(mtf.range(params.mesh, dim, tf.int32), mtf.range(params.mesh, tmp, tf.int32)),
                         params.variable_dtype.activation_dtype) * -1e12
 
     lgt = mtf.exp(lgt - mtf.reduce_max(mtf.stop_gradient(lgt), reduced_dim=tmp))
