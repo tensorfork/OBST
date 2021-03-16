@@ -412,6 +412,8 @@ def build(params: ModelParameter,
             mask = compare_range(params, params.batch_dim, anonymize_dim(params.batch_dim), mtf.equal) * 2 - 1
         if params.use_language and not params.contrastive:
             token_loss = mtf.layers.softmax_cross_entropy_with_logits(token_out, txt_tgt, params.vocab_dim)
+            token_loss *= txt_msk
+            token_loss = mtf.reduce_mean(token_loss)
         if params.use_language and params.contrastive:
             token_loss = mtf.einsum([token_out, anonymize(token_out, params.batch_dim), mask], output_shape=[])
             token_loss /= token_out.size * params.train_batch_size
