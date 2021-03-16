@@ -308,7 +308,7 @@ def build(params: ModelParameter,
           cat_mask_src: typing.Optional[mtf.Tensor],
           cat_mask_tgt: typing.Optional[mtf.Tensor],
           txt_src: typing.Optional[mtf.Tensor],
-          txt_tag: typing.Optional[mtf.Tensor],
+          txt_tgt: typing.Optional[mtf.Tensor],
           vid_msk_src: typing.Optional[mtf.Tensor],
           vid_msk_tgt: typing.Optional[mtf.Tensor],
           txt_msk: typing.Optional[mtf.Tensor],
@@ -322,7 +322,7 @@ def build(params: ModelParameter,
     :param cat_mask_src: Optional mask for zero frames
     :param cat_mask_tgt: Optional mask to remove loss for certain video frames
     :param txt_src: Optional tokenized text source, will be embedded
-    :param txt_tag: Optional tokenized text target, required when source is given
+    :param txt_tgt: Optional tokenized text target, required when source is given
     :param vid_msk_src: Optional mask for zero frames
     :param vid_msk_tgt: Optional mask to remove loss for certain video frames
     :param txt_msk: Optional mask to remove loss for certain token positions
@@ -343,7 +343,7 @@ def build(params: ModelParameter,
         frame_out: typing.Union[int, mtf.Tensor] = 0
         token_out: typing.Union[int, mtf.Tensor] = 0
 
-        spatial_ctx: mtf.Dimension = txt_tag.shape[-2] if params.use_language else vid.shape[2]
+        spatial_ctx: mtf.Dimension = txt_tgt.shape[-2] if params.use_language else vid.shape[2]
 
         if params.use_video and params.input_dropout > 0:
             vid = mtf.dropout(vid, rate=params.input_dropout)
@@ -365,7 +365,7 @@ def build(params: ModelParameter,
         if params.use_language and params.input_dropout > 0:
             txt_src = mtf.dropout(txt_src, rate=params.input_dropout)
         if params.use_language:
-            txt_src = _linear(params, txt_src, [txt_tag.shape[-1], params.key_dim], [params.key_dim])
+            txt_src = _linear(params, txt_src, [txt_tgt.shape[-1], params.key_dim], [params.key_dim])
 
         # Connect video and language Input.
         if params.use_video and params.use_language:
@@ -404,14 +404,14 @@ def build(params: ModelParameter,
 
         if params.use_language:
             token_out = _linear_from_features(params, slice(out, 0, params.language_token_patch, spatial_ctx),
-                                              [txt_tag.shape[-1], params.vocab_dim])
+                                              [txt_tgt.shape[-1], params.vocab_dim])
         if params.use_video:
             out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)
             frame_out = mtf.sigmoid(_linear_from_features(params, out, input_features))
         if params.contrastive:
             mask = compare_range(params, params.batch_dim, anonymize_dim(params.batch_dim), mtf.equal) * 2 - 1
         if params.use_language and not params.contrastive:
-            token_loss = mtf.layers.softmax_cross_entropy_with_logits(token_out, txt_tag, params.vocab_dim)
+            token_loss = mtf.layers.softmax_cross_entropy_with_logits(token_out, txt_tgt, params.vocab_dim)
         if params.use_language and params.contrastive:
             token_loss = mtf.einsum([token_out, anonymize(token_out, params.batch_dim), mask], output_shape=[])
             token_loss /= token_out.size * params.train_batch_size
