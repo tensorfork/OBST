@@ -346,8 +346,7 @@ def build(params: ModelParameter,
         spatial_ctx: mtf.Dimension = txt_tag.shape[-2] if params.use_language else vid.shape[2]
 
         if params.use_video and params.input_dropout > 0:
-            vid *= mtf.cast(mtf.random_uniform(params.mesh, vid.shape) > params.input_dropout,
-                            params.variable_dtype.activation_dtype)
+            vid = mtf.dropout(vid, rate=params.input_dropout)
         if params.use_video:
             context_dimension = vid.shape[1]
             input_features = vid.shape[-1:]
@@ -364,8 +363,7 @@ def build(params: ModelParameter,
                                                       dtype=params.variable_dtype.activation_dtype),
                                           [params.vocab_dim])
         if params.use_language and params.input_dropout > 0:
-            txt_src *= mtf.cast(mtf.random_uniform(params.mesh, txt_src.shape) > params.input_dropout,
-                                params.variable_dtype.activation_dtype)
+            txt_src = mtf.dropout(txt_src, rate=params.input_dropout)
         if params.use_language:
             txt_src = _linear(params, txt_src, [txt_tag.shape[-1], params.key_dim], [params.key_dim])
 
