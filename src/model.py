@@ -415,7 +415,19 @@ def build(params: ModelParameter,
         if params.use_video:
             out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)
             frame_out = mtf.sigmoid(_linear_from_features(params, out, input_features))
-            video_loss: mtf.Tensor = mtf.reduce_mean(mtf.abs(frame_out - tgt) * vid_msk_tag * cat_mask_tag)
+
+            loss_type: str = params.use_video.lower()
+
+            if loss_type in ['mse', 'l1']:
+                video_loss: mtf.Tensor = mtf.abs(frame_out - tgt) * vid_msk_tag * cat_mask_tag
+            elif loss_type in ['bce', 'sigmoid_cross_entropy', 'binary_cross_entropy']:
+                video_loss: mtf.Tensor = mtf.layers.sigmoid_cross_entropy_with_logits(frame_out, tgt)
+
+            else:
+                raise ValueError(f"{loss_type} is NOT a supported name for a video loss.")
+
+            video_loss: mtf.Tensor = mtf.reduce_mean(video_loss * vid_msk_tag * cat_mask_tag)
+
 
         params.layer_idx = 0
 

@@ -94,6 +94,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.debug_train_step = True
         self.model_mode = 'jannet'
         self.optimizer = 'adam'
+        self.video_loss = 'mse'
         self.use_revnet = True
         self.use_initial_position_embedding = False
         self.block_config = [{'layer': ["norm-group-instance", "feed_forward-group", "rezero"]},
