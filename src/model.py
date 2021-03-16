@@ -410,20 +410,18 @@ def build(params: ModelParameter,
         if params.use_video:
             out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)
             frame_out = mtf.sigmoid(_linear_from_features(params, out, input_features))
+        if params.contrastive:
+            mask = compare_range(params, params.batch_dim, anonymize_dim(params.batch_dim), mtf.equal) * 2 - 1
         if params.use_language and not params.contrastive:
             token_loss = mtf.layers.softmax_cross_entropy_with_logits(token_out, txt_tag, params.vocab_dim)
         if params.use_language and params.contrastive:
-            dim = _get_attention_dim(params, token_out).dim
-            token_loss = mtf.einsum([token_out, anonymize(token_out, dim),
-                                     compare_range(params, dim, anonymize_dim(dim), mtf.equal) * 2 - 1],
-                                    output_shape=[]) / (token_out.size * dim.size)
+            token_loss = mtf.einsum([token_out, anonymize(token_out, params.batch_dim), mask], output_shape=[])
+            token_loss /= token_out.size * params.train_batch_size
         if params.use_video and not params.contrastive:
             video_loss: mtf.Tensor = mtf.reduce_mean(mtf.abs(frame_out - tgt) * vid_msk_tgt * cat_mask_tgt)
         if params.use_video and params.contrastive:
-            dim = frame_out.shape[1]
-            video_loss = mtf.einsum([frame_out, anonymize(frame_out, dim),
-                                     compare_range(params, dim, anonymize_dim(dim), mtf.equal) * 2 - 1],
-                                    output_shape=[]) / (frame_out.size * dim.size)
+            video_loss = mtf.einsum([frame_out, anonymize(frame_out, params.batch_dim), mask], output_shape=[])
+            video_loss /= frame_out.size * params.train_batch_size
 
         params.layer_idx = 0
 
