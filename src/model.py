@@ -408,21 +408,13 @@ def build(params: ModelParameter,
         if params.use_video:
             out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)
             frame_out = mtf.sigmoid(_linear_from_features(params, out, input_features))
-        if params.contrastive:
-            mask = compare_range(params, params.batch_dim, anonymize_dim(params.batch_dim), mtf.equal) * 2 - 1
-        if params.use_language and not params.contrastive:
+        if params.use_language:
             log_softmax = mtf.reduce_logsumexp(token_out, params.vocab_dim) - token_out
             log_softmax *= mtf.one_hot(txt_tgt, params.vocab_dim, dtype=params.variable_dtype.activation_dtype)
             log_softmax /= txt_tgt.size
             token_loss = mtf.reduce_sum(log_softmax)
-        if params.use_language and params.contrastive:
-            token_loss = mtf.einsum([token_out, anonymize(token_out, params.batch_dim), mask], output_shape=[])
-            token_loss /= token_out.size * params.train_batch_size
-        if params.use_video and not params.contrastive:
+        if params.use_video:
             video_loss: mtf.Tensor = mtf.reduce_mean(mtf.abs(frame_out - tgt) * vid_msk_tgt * cat_mask_tgt)
-        if params.use_video and params.contrastive:
-            video_loss = mtf.einsum([frame_out, anonymize(frame_out, params.batch_dim), mask], output_shape=[])
-            video_loss /= frame_out.size * params.train_batch_size
 
         params.layer_idx = 0
 
