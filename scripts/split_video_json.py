@@ -40,7 +40,7 @@ if __name__ == '__main__':
     split = args.split
     prefix = args.prefix
 
-    if os.listdir(load_path):
+    if os.path.isdir(load_path):
         load_path = [os.path.join(load_path, p) for p in os.listdir(load_path)]
     else:
         load_path = [load_path]
