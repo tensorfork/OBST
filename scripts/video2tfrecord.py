@@ -78,7 +78,7 @@ class Downloader:
                         f.write(chunk)
 
             except Exception as e:
-                print('Download error:', e)
+                print(f'Download error with proxy: {use_proxy} \n error:', e)
                 try_count += 1
 
                 if use_proxy:
@@ -583,6 +583,8 @@ def worker(work: list,
 
                                             if os.path.exists(video_buffer_path):
                                                 os.remove(video_buffer_path)
+
+                                    print(f"Video download error video_url_idx: {video_url_idx} type: {ext}")
 
 
 
