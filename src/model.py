@@ -415,10 +415,10 @@ def build(params: ModelParameter,
             out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)
             frame_out = mtf.sigmoid(_linear_from_features(params, out, vid.shape[-1:]))
         if params.use_language:
-            log_softmax = mtf.reduce_logsumexp(token_out, params.vocab_dim) - token_out
-            log_softmax *= mtf.one_hot(txt_tgt, params.vocab_dim, dtype=params.variable_dtype.activation_dtype)
-            log_softmax /= txt_tgt.size
-            token_loss = mtf.reduce_sum(log_softmax)
+            target = mtf.one_hot(txt_tgt, params.vocab_dim, dtype=params.variable_dtype.activation_dtype)
+            token_loss = mtf.reduce_sum(mtf.reduce_logsumexp(token_out, params.vocab_dim))
+            token_loss -= mtf.einsum([token_out, target], output_shape=[])
+            token_loss /= txt_tgt.size
         if params.use_video:
             video_loss: mtf.Tensor = mtf.reduce_mean(mtf.abs(frame_out - tgt) * vid_msk_tgt * cat_mask_tgt)
 
