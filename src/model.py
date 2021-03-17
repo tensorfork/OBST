@@ -305,7 +305,7 @@ def default_ones(params, inp):
 
 def build(params: ModelParameter,
           vid: typing.Optional[mtf.Tensor],
-          cat_mask_src: typing.Optional[mtf.Tensor],
+          cat_msk_src: typing.Optional[mtf.Tensor],
           cat_mask_tgt: typing.Optional[mtf.Tensor],
           txt_src: typing.Optional[mtf.Tensor],
           txt_tgt: typing.Optional[mtf.Tensor],
@@ -319,7 +319,7 @@ def build(params: ModelParameter,
     text source and text target.
     :param params: Instance of ModelParameter for which to build the graph
     :param vid: Optional Video to attend over, length=(context+1)
-    :param cat_mask_src: Optional mask for zero frames
+    :param cat_msk_src: Optional mask for zero frames
     :param cat_mask_tgt: Optional mask to remove loss for certain video frames
     :param txt_src: Optional tokenized text source, will be embedded
     :param txt_tgt: Optional tokenized text target, required when source is given
@@ -329,7 +329,7 @@ def build(params: ModelParameter,
     :return: (Generated Video, Total Loss, Video Loss, Token Loss)
     """
     with mtf.utils.outside_all_rewrites(), tf.variable_scope(params.model_mode):
-        cat_mask_src = default_ones(params, cat_mask_src)
+        cat_msk_src = default_ones(params, cat_msk_src)
         cat_mask_tgt = default_ones(params, cat_mask_tgt)
         txt_msk = default_ones(params, txt_msk)
         vid_msk_src = default_ones(params, vid_msk_src)
@@ -345,51 +345,35 @@ def build(params: ModelParameter,
 
         spatial_ctx: mtf.Dimension = txt_tgt.shape[-2] if params.use_language else vid.shape[2]
 
-        def _input(*inputs):
-            inputs = list(inputs)
-            if params.use_video:
-                vid_ = inputs.pop(0)
-            if params.use_language:
-                txt_ = inputs.pop(0)
-            if params.use_language and params.use_video:
-                vid_msk_, cat_msk_ = inputs
-            if params.use_video and params.input_dropout > 0:
-                vid_ = mtf.dropout(vid_, rate=params.input_dropout)
-            if params.use_video:
-                context_dimension = vid_.shape[1]
-                input_features = vid_.shape[-1:]
-                tgt_ = slice(vid_, 1, context_dimension.size, context_dimension)
-                src_ = slice(vid_, 0, context_dimension.size - 1, context_dimension)
-                src_ = src_ * vid_msk_ + _embed(params, shape=vid_.shape[2:], name_extras=tuple()) * (1 - vid_msk_)
-                src_ = src_ * cat_msk_ + _embed(params, shape=vid_.shape[2:], name_extras=tuple()) * (1 - cat_msk_)
-                src_ = _linear_to_features(params, src_, input_features)
-
-            # Language embedding and initial feed forward.
-            if params.use_language:
-                txt_ = _linear_to_features(params,
-                                           mtf.one_hot(txt_, params.vocab_dim,
-                                                       dtype=params.variable_dtype.activation_dtype),
-                                           [params.vocab_dim])
-            if params.use_language and params.input_dropout > 0:
-                txt_ = mtf.dropout(txt_, rate=params.input_dropout)
-            if params.use_language:
-                txt_ = _linear(params, txt_, [txt_tgt.shape[-1], params.key_dim], [params.key_dim])
-
-            if params.use_video and params.use_language:
-                src_ = concat([src_, txt_], spatial_ctx)
-            elif not params.use_video:
-                src_: mtf.Tensor = txt_
-
-            if params.use_initial_position_embedding:
-                src_ += _embed(params, src_.shape[1:-1], name_extras=tuple())
-            if params.use_video:
-                return src_, tgt_
-            return src_
-
-        src = mtf.recompute_grad(_input, [x for x in [vid, txt_src, vid_msk_src, cat_mask_src] if x is not None])
-
+        if params.use_video and params.input_dropout > 0:
+            vid = mtf.dropout(vid, rate=params.input_dropout)
         if params.use_video:
-            src, tgt = src
+            context_dimension = vid.shape[1]
+            input_features = vid.shape[-1:]
+            tgt = slice(vid, 1, context_dimension.size, context_dimension)
+            src = slice(vid, 0, context_dimension.size - 1, context_dimension)
+            src = src * vid_msk_src + _embed(params, shape=vid.shape[2:], name_extras=tuple()) * (1 - vid_msk_src)
+            src = src * cat_msk_src + _embed(params, shape=vid.shape[2:], name_extras=tuple()) * (1 - cat_msk_src)
+            src = _linear_to_features(params, src, input_features)
+
+        # Language embedding and initial feed forward.
+        if params.use_language:
+            txt = _linear_to_features(params,
+                                      mtf.one_hot(txt_src, params.vocab_dim,
+                                                  dtype=params.variable_dtype.activation_dtype),
+                                      [params.vocab_dim])
+        if params.use_language and params.input_dropout > 0:
+            txt = mtf.dropout(txt, rate=params.input_dropout)
+        if params.use_language:
+            txt = _linear(params, txt, [txt_tgt.shape[-1], params.key_dim], [params.key_dim])
+
+        if params.use_video and params.use_language:
+            src = concat([src, txt], spatial_ctx)
+        elif not params.use_video:
+            src: mtf.Tensor = txt
+
+        if params.use_initial_position_embedding:
+            src += _embed(params, src.shape[1:-1], name_extras=tuple())
 
         if params.use_revnet:
             out = (src, None, src, None)
