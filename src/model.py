@@ -345,38 +345,44 @@ def build(params: ModelParameter,
 
         spatial_ctx: mtf.Dimension = txt_tgt.shape[-2] if params.use_language else vid.shape[2]
 
-        if params.use_video and params.input_dropout > 0:
-            vid = mtf.dropout(vid, rate=params.input_dropout)
+        def _input(vid_, txt_, vid_msk_, cat_msk_):
+            if params.use_video and params.input_dropout > 0:
+                vid_ = mtf.dropout(vid_, rate=params.input_dropout)
+            if params.use_video:
+                context_dimension = vid_.shape[1]
+                input_features = vid_.shape[-1:]
+                tgt_ = slice(vid_, 1, context_dimension.size, context_dimension)
+                src_ = slice(vid_, 0, context_dimension.size - 1, context_dimension)
+                src_ = src_ * vid_msk_ + _embed(params, shape=vid_.shape[2:], name_extras=tuple()) * (1 - vid_msk_)
+                src_ = src_ * cat_msk_ + _embed(params, shape=vid_.shape[2:], name_extras=tuple()) * (1 - cat_msk_)
+                src_ = _linear_to_features(params, src_, input_features)
+
+            # Language embedding and initial feed forward.
+            if params.use_language:
+                txt_ = _linear_to_features(params,
+                                           mtf.one_hot(txt_, params.vocab_dim,
+                                                       dtype=params.variable_dtype.activation_dtype),
+                                           [params.vocab_dim])
+            if params.use_language and params.input_dropout > 0:
+                txt_ = mtf.dropout(txt_, rate=params.input_dropout)
+            if params.use_language:
+                txt_ = _linear(params, txt_, [txt_tgt.shape[-1], params.key_dim], [params.key_dim])
+
+            if params.use_video and params.use_language:
+                src_ = concat([src_, txt_], spatial_ctx)
+            elif not params.use_video:
+                src_: mtf.Tensor = txt_
+
+            if params.use_initial_position_embedding:
+                src_ += _embed(params, src_.shape[1:-1], name_extras=tuple())
+            if params.use_video:
+                return src_, tgt_
+            return src_
+
+        src = mtf.recompute_grad(_input, [vid, txt_src, vid_msk_src, cat_mask_src])
+
         if params.use_video:
-            context_dimension = vid.shape[1]
-            input_features = vid.shape[-1:]
-            tgt = slice(vid, 1, context_dimension.size, context_dimension)
-            src = slice(vid, 0, context_dimension.size - 1, context_dimension)
-            src = src * vid_msk_src + _embed(params, shape=vid.shape[2:], name_extras=tuple()) * (1 - vid_msk_src)
-            src = src * cat_mask_src + _embed(params, shape=vid.shape[2:], name_extras=tuple()) * (1 - cat_mask_src)
-            src = _linear_to_features(params, src, input_features)
-
-        # Language embedding and initial feed forward.
-        if params.use_language:
-            txt_src = _linear_to_features(params,
-                                          mtf.one_hot(txt_src, params.vocab_dim,
-                                                      dtype=params.variable_dtype.activation_dtype),
-                                          [params.vocab_dim])
-        if params.use_language and params.input_dropout > 0:
-            txt_src = mtf.dropout(txt_src, rate=params.input_dropout)
-        if params.use_language:
-            txt_src = _linear(params, txt_src, [txt_tgt.shape[-1], params.key_dim], [params.key_dim])
-
-        # Connect video and language Input.
-        if params.use_video and params.use_language:
-            src = concat([src, txt_src], spatial_ctx)
-
-        # If language only mode, set the language input as src.
-        elif not params.use_video:
-            src: mtf.Tensor = txt_src
-
-        if params.use_initial_position_embedding:
-            src = src + _embed(params, src.shape[1:-1], name_extras=tuple())
+            src, tgt = src
 
         if params.use_revnet:
             out = (src, None, src, None)
@@ -407,7 +413,7 @@ def build(params: ModelParameter,
                                               [txt_tgt.shape[-1], params.vocab_dim])
         if params.use_video:
             out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)
-            frame_out = mtf.sigmoid(_linear_from_features(params, out, input_features))
+            frame_out = mtf.sigmoid(_linear_from_features(params, out, vid.shape[-1:]))
         if params.use_language:
             log_softmax = mtf.reduce_logsumexp(token_out, params.vocab_dim) - token_out
             log_softmax *= mtf.one_hot(txt_tgt, params.vocab_dim, dtype=params.variable_dtype.activation_dtype)
