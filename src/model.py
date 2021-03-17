@@ -345,7 +345,14 @@ def build(params: ModelParameter,
 
         spatial_ctx: mtf.Dimension = txt_tgt.shape[-2] if params.use_language else vid.shape[2]
 
-        def _input(vid_, txt_, vid_msk_, cat_msk_):
+        def _input(*inputs):
+            inputs = list(inputs)
+            if params.use_video:
+                vid_ = inputs.pop(0)
+            if params.use_language:
+                txt_ = inputs.pop(0)
+            if params.use_language and params.use_video:
+                vid_msk_, cat_msk_ = inputs
             if params.use_video and params.input_dropout > 0:
                 vid_ = mtf.dropout(vid_, rate=params.input_dropout)
             if params.use_video:
@@ -379,7 +386,7 @@ def build(params: ModelParameter,
                 return src_, tgt_
             return src_
 
-        src = mtf.recompute_grad(_input, [vid, txt_src, vid_msk_src, cat_mask_src])
+        src = mtf.recompute_grad(_input, [x for x in [vid, txt_src, vid_msk_src, cat_mask_src] if x is not None])
 
         if params.use_video:
             src, tgt = src
