@@ -14,12 +14,12 @@ def split_equal(ids: list, duration: list, num: int, min_duration: int = 256):
     duration_sum = [0] * num
 
     for d, i in sort:
-        if d > min_duration or min_duration <= 0:
+        if np.sum(d) > min_duration or min_duration <= 0:
             pos = np.argmin(duration_sum)
 
             ids_split[pos].append(i)
             duration_spit[pos].append(d)
-            duration_sum[pos] = duration_sum[pos] + d
+            duration_sum[pos] = duration_sum[pos] + np.sum(d)
 
     return ids_split, duration_spit
 
@@ -61,20 +61,26 @@ if __name__ == '__main__':
 
     ids, duration = split_equal(ids, duration, split, -1)
 
+    split_chunk_count = 0
     split_video_count = 0
     split_video_duration = 0
 
     for i in range(len(ids)):
-        buffer_video_count = len(ids[i])
-        buffer_video_duration = sum(duration[i])
+        buffer_chunk_count = len(ids[i])
+        buffer_video_count = int(np.sum([np.sum([len(___ids) for ___ids in __ids]) for __ids in ids[i]]))
+        buffer_video_duration = int(np.sum([np.sum(d) for d in duration[i]]))
 
-        print('split:', i, 'videos:', buffer_video_count, 'duration:', buffer_video_duration)
+        print('split:', i, 'chunks:', buffer_chunk_count, 'videos:',
+              buffer_video_count, 'duration:', buffer_video_duration)
 
+        split_chunk_count += buffer_chunk_count
         split_video_count += buffer_video_count
         split_video_duration += buffer_video_duration
 
     print('')
-    print('total num of videos:', split_video_count, 'total video duration:', split_video_duration)
+    print('total num of chunks:', split_chunk_count, 'total num of videos:',
+          split_video_count, 'total video duration:', split_video_duration)
+    print('')
 
     for idx, (i, d) in enumerate(zip(ids, duration)):
 
