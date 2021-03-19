@@ -94,7 +94,8 @@ def model_fn(features: typing.Dict[str, tf.Tensor], mode: str, params: ModelPara
     graph = mtf.Graph()
 
     # Build mtf mesh object
-    params.mesh = mtf.Mesh(graph, "mesh", mtf.utils.BalancedVariablePlacer(params.cpu_devices))
+    params.mesh = mtf.Mesh(graph, "mesh", mtf.utils.BalancedVariablePlacer(
+            [params.context.tpu_host_placement_function(host_id=i) for i in range(params.context.num_hosts)])
 
     # Build mtf_features & seq length dict for getting number of microbatches
     # We need to pack inputs into a dict to pass into serialize_training_step
@@ -111,19 +112,19 @@ def model_fn(features: typing.Dict[str, tf.Tensor], mode: str, params: ModelPara
 
     if params.use_video:
         frame_input = _import_tensor(params, features['frame'], params.frame_input_shape, "frame_input")
-        cat_mask_src = _import_tensor(params, features['cat_mask_x'], params.frame_mask_shape, "cat_mask_x")
-        cat_mask_tgt = _import_tensor(params, features['cat_mask_y'], params.frame_mask_shape, "cat_mask_y")
-        frame_mask_src = _import_tensor(params, features['vid_msk_src'], params.frame_mask_shape, "vid_msk_src")
-        frame_mask_tgt = _import_tensor(params, features['vid_msk_tgt'], params.frame_mask_shape, "vid_msk_tgt")
+    cat_mask_src = _import_tensor(params, features['cat_mask_x'], params.frame_mask_shape, "cat_mask_x")
+    cat_mask_tgt = _import_tensor(params, features['cat_mask_y'], params.frame_mask_shape, "cat_mask_y")
+    frame_mask_src = _import_tensor(params, features['vid_msk_src'], params.frame_mask_shape, "vid_msk_src")
+    frame_mask_tgt = _import_tensor(params, features['vid_msk_tgt'], params.frame_mask_shape, "vid_msk_tgt")
 
-        if params.use_language:
-            token_x_input = _import_tensor(params, features['token_x'], params.token_dim_shape, "tkn_src")
-            token_y_input = _import_tensor(params, features['token_y'], params.token_dim_shape, "tkn_tgt")
-            token_mask = _import_tensor(params, features['txt_msk'], params.token_dim_shape, "txt_msk")
+    if params.use_language:
+        token_x_input = _import_tensor(params, features['token_x'], params.token_dim_shape, "tkn_src")
+    token_y_input = _import_tensor(params, features['token_y'], params.token_dim_shape, "tkn_tgt")
+    token_mask = _import_tensor(params, features['txt_msk'], params.token_dim_shape, "txt_msk")
 
     else:  # params.use_language
-        token_x_input = _import_tensor(params, features['token_x'], params.token_dim_shape, "tkn_src")
-        token_y_input = _import_tensor(params, features['token_y'], params.token_dim_shape, "tkn_tgt")
+    token_x_input = _import_tensor(params, features['token_x'], params.token_dim_shape, "tkn_src")
+    token_y_input = _import_tensor(params, features['token_y'], params.token_dim_shape, "tkn_tgt")
 
     loss, video_loss, token_loss, frame_out, token_out = build(params,
                                                                frame_input,
@@ -152,52 +153,54 @@ def model_fn(features: typing.Dict[str, tf.Tensor], mode: str, params: ModelPara
     max_str = max(len(name) for name, _ in variable_mapping)
     max_int = max(len(count) for _, count in variable_mapping)
     for name, count in variable_mapping:
-        if not name:
-            print('-' * (max_str + max_int + len(constant)))
-            continue
-        print(f'{name:<{max_str}s}{constant}{count:>{max_int}s}')
+        if
+    not name: \
+    print('-' * (max_str + max_int + len(constant)))
+    continue
+    print(f'{name:<{max_str}s}{constant}{count:>{max_int}s}')
 
-    print("\nDimensions:")
-    for dim_name in sorted(list(set([item for variable in graph.all_variables
-                                     for item in variable.shape.dimension_names]))):
-        print(dim_name)
-    print('\n')
 
-    lowering = mtf.Lowering(graph, {params.mesh: params.mesh_impl})
+print("\nDimensions:")
+for dim_name in sorted(list(set([item for variable in graph.all_variables
+                                 for item in variable.shape.dimension_names]))):
+    print(dim_name)
+print('\n')
 
-    host_call = create_host_call(params.model_path)
-    mtf.utils.remove_summaries()
+lowering = mtf.Lowering(graph, {params.mesh: params.mesh_impl})
 
-    # Creates train_op
-    global_step = tf.train.get_or_create_global_step()
+host_call = create_host_call(params.model_path)
+mtf.utils.remove_summaries()
 
-    tf_update_ops = [lowering.lowered_operation(op) for op in update_ops]
-    step = tf.mod(manual_global_step, tf.constant(params.grad_accumulation, dtype=tf.int64))
-    step = tf.equal(step, tf.constant(0, dtype=tf.int64))
-    step = tf.cast(step, tf.int64)
-    tf_update_ops.append(tf.assign_add(global_step, step))
-    tf_update_ops.append(tf.assign_add(manual_global_step, tf.constant(1, dtype=tf.int64, shape=[])))
+# Creates train_op
+global_step = tf.train.get_or_create_global_step()
 
-    train_op = tf.group(tf_update_ops)
+tf_update_ops = [lowering.lowered_operation(op) for op in update_ops]
+step = tf.mod(manual_global_step, tf.constant(params.grad_accumulation, dtype=tf.int64))
+step = tf.equal(step, tf.constant(0, dtype=tf.int64))
+step = tf.cast(step, tf.int64)
+tf_update_ops.append(tf.assign_add(global_step, step))
+tf_update_ops.append(tf.assign_add(manual_global_step, tf.constant(1, dtype=tf.int64, shape=[])))
 
-    tf_loss = lowering.export_to_tf_tensor(loss)
-    tf_loss = tf.cast(tf_loss, tf.float32)
-    with mtf.utils.outside_all_rewrites():
-        hooks = [mtf.MtfRestoreHook(lowering)]
-        if params.use_checkpointing:
-            saver = tf.add_to_collection(tf.GraphKeys.SAVERS, tf.train.Saver(tf.global_variables(),
-                                                                             sharded=True,
-                                                                             max_to_keep=1,
-                                                                             defer_build=False,
-                                                                             save_relative_paths=True))
-            hooks.append(tf.train.CheckpointSaverHook(params.model_path,
-                                                      save_steps=params.steps_per_checkpoint,
-                                                      saver=saver,
-                                                      listeners=[mtf.MtfCheckpointSaverListener(lowering)]))
+train_op = tf.group(tf_update_ops)
 
-        return tpu_estimator.TPUEstimatorSpec(tf.estimator.ModeKeys.TRAIN,
-                                              loss=tf_loss,
-                                              host_call=host_call,
-                                              training_hooks=hooks,
-                                              prediction_hooks=[mtf.MtfRestoreHook(lowering)],
-                                              train_op=train_op)
+tf_loss = lowering.export_to_tf_tensor(loss)
+tf_loss = tf.cast(tf_loss, tf.float32)
+with mtf.utils.outside_all_rewrites():
+    hooks = [mtf.MtfRestoreHook(lowering)]
+    if params.use_checkpointing:
+        saver = tf.add_to_collection(tf.GraphKeys.SAVERS, tf.train.Saver(tf.global_variables(),
+                                                                         sharded=True,
+                                                                         max_to_keep=1,
+                                                                         defer_build=False,
+                                                                         save_relative_paths=True))
+        hooks.append(tf.train.CheckpointSaverHook(params.model_path,
+                                                  save_steps=params.steps_per_checkpoint,
+                                                  saver=saver,
+                                                  listeners=[mtf.MtfCheckpointSaverListener(lowering)]))
+
+    return tpu_estimator.TPUEstimatorSpec(tf.estimator.ModeKeys.TRAIN,
+                                          loss=tf_loss,
+                                          host_call=host_call,
+                                          training_hooks=hooks,
+                                          prediction_hooks=[mtf.MtfRestoreHook(lowering)],
+                                          train_op=train_op)
