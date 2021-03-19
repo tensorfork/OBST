@@ -178,7 +178,6 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             self.token_dim_shape._dims.insert(2, mtf.Dimension("height", self.language_token_patch))
             self.input_pipeline_shape['txt_msk'] = self.token_dim_shape
 
-        self.input_pipeline_shape = align_tensor_op(self.input_pipeline_shape)
         self.attention_idx = 0
         tf.config.optimizer.set_experimental_options(self.tensorflow_optimization_settings)
     def __getitem__(self, key: str) -> typing.Any:
@@ -211,14 +210,3 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         """
         return self.__dict__
 
-
-def align_tensor_op(x):
-    tensors = []
-    if 'frame' in x:
-        tensors.extend([x['frame'], x['cat_mask_x'], x['cat_mask_y']])
-        tensors.extend([x['vid_msk_src'], x['vid_msk_tgt']])
-    if 'token_x' in x:
-        tensors.extend([x['token_x'], x['token_y']])
-    if 'txt_msk' in x:
-        tensors.append(x['txt_msk'])
-    return tensors

@@ -86,7 +86,7 @@ def _import_tensor(params, tensor, shape, name):
     return mtf.import_laid_out_tensor(params.mesh, params.mesh_impl.LaidOutTensor([tensor]), shape, name)
 
 
-def model_fn(features: typing.List[tf.Tensor], mode: str, params: ModelParameter):
+def model_fn(features: typing.Dict[str, tf.Tensor], mode: str, params: ModelParameter):
     manual_global_step = tf.get_variable("manual_global_step", [], tf.int64, initializer=tf.zeros_initializer(),
                                          trainable=False,
                                          aggregation=variables.VariableAggregation.ONLY_FIRST_REPLICA)
@@ -102,37 +102,37 @@ def model_fn(features: typing.List[tf.Tensor], mode: str, params: ModelParameter
 
     frame_input = None
     cat_mask_src = None
-    cat_mask_tag = None
+    cat_mask_tgt = None
     token_x_input = None
     token_y_input = None
     frame_mask_src = None
-    frame_mask_tag = None
+    frame_mask_tgt = None
     token_mask = None
 
     if params.use_video:
-        frame_input = _import_tensor(params, features[0], params.frame_input_shape, "frame_input")
-        cat_mask_src = _import_tensor(params, features[1], params.frame_mask_shape, "cat_mask_x")
-        cat_mask_tag = _import_tensor(params, features[2], params.frame_mask_shape, "cat_mask_y")
-        frame_mask_src = _import_tensor(params, features[3], params.frame_mask_shape, "vid_msk_src")
-        frame_mask_tag = _import_tensor(params, features[4], params.frame_mask_shape, "vid_msk_tgt")
+        frame_input = _import_tensor(params, features['frame'], params.frame_input_shape, "frame_input")
+        cat_mask_src = _import_tensor(params, features['cat_mask_x'], params.frame_mask_shape, "cat_mask_x")
+        cat_mask_tgt = _import_tensor(params, features['cat_mask_y'], params.frame_mask_shape, "cat_mask_y")
+        frame_mask_src = _import_tensor(params, features['vid_msk_src'], params.frame_mask_shape, "vid_msk_src")
+        frame_mask_tgt = _import_tensor(params, features['vid_msk_tgt'], params.frame_mask_shape, "vid_msk_tgt")
 
         if params.use_language:
-            token_x_input = _import_tensor(params, features[5], params.token_dim_shape, "tkn_src")
-            token_y_input = _import_tensor(params, features[6], params.token_dim_shape, "tkn_tgt")
-            token_mask = _import_tensor(params, features[7], params.token_dim_shape, "txt_msk")
+            token_x_input = _import_tensor(params, features['token_x'], params.token_dim_shape, "tkn_src")
+            token_y_input = _import_tensor(params, features['token_y'], params.token_dim_shape, "tkn_tgt")
+            token_mask = _import_tensor(params, features['txt_msk'], params.token_dim_shape, "txt_msk")
 
     else:  # params.use_language
-        token_x_input = _import_tensor(params, features[0], params.token_dim_shape, "tkn_src")
-        token_y_input = _import_tensor(params, features[1], params.token_dim_shape, "tkn_tgt")
+        token_x_input = _import_tensor(params, features['token_x'], params.token_dim_shape, "tkn_src")
+        token_y_input = _import_tensor(params, features['token_y'], params.token_dim_shape, "tkn_tgt")
 
     loss, video_loss, token_loss, frame_out, token_out = build(params,
                                                                frame_input,
                                                                cat_mask_src,
-                                                               cat_mask_tag,
+                                                               cat_mask_tgt,
                                                                token_x_input,
                                                                token_y_input,
                                                                frame_mask_src,
-                                                               frame_mask_tag,
+                                                               frame_mask_tgt,
                                                                token_mask)
 
     update_ops, learning_rate = get_optimizer(loss, params, manual_global_step)
