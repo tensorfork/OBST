@@ -25,6 +25,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.use_language = True
         self.input_dropout = 0.
         self.output_offset = 1
+        self.weight_standardisation = True
         self.use_checkpointing = False
         self.steps_per_checkpoint = 100_000
         self.time_patch = 1

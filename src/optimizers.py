@@ -6,15 +6,20 @@ from __future__ import absolute_import, division, print_function
 import typing
 
 import mesh_tensorflow as mtf
+import numpy as np
 import tensorflow.compat.v1 as tf
 
 from .dataclass import ModelParameter
 from .model import RevGradOp
-from .utils_mtf import weighted_add
+from .utils_mtf import anonymize, anonymize_dim, weighted_add
 
 
 def import_float(imported):
     return tf.constant(imported, dtype=tf.float32, shape=[])
+
+
+def sum_dim(inp: mtf.Tensor, dims: typing.List[mtf.Dimension]):
+    return mtf.einsum([inp, anonymize(dims, dims)], output_shape=mtf.Shape(dims) + [anonymize_dim(d) for d in dims])
 
 
 def get_optimizer(loss: mtf.Tensor, params: ModelParameter, manual_step
@@ -100,7 +105,7 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter, manual_step
                         tensor_to_gradient[inp] = grad_list = [0, 1, grad]
                     if len(inp.operation.outputs) != grad_list[1] or inp not in tensor_to_var:
                         continue
-                    grad = grad_list[2]
+                    grad: mtf.Tensor = grad_list[2]
                     var: mtf.Variable = tensor_to_var[inp]
                     if params.grad_accumulation > 1:
                         grad_buffer = variable(var, "grad_accumulation", var.shape)
@@ -121,6 +126,13 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter, manual_step
                         weight_update = exp_avg_p1 * mtf.rsqrt(exp_avg_p2 + epsilon)
                         update_ops.extend([mtf.assign(exp_avg_p1_ptr, exp_avg_p1),
                                            mtf.assign(exp_avg_p2_ptr, exp_avg_p2)])
+                    elif params.optimizer == 'shampoo':
+                        shape = grad.shape
+                        buffers = []
+                        if all(f in grad.shape.dims for f in params.feature_dims):
+                            shape = shape - params.feature_dims
+                            buffers.append(sum_dim(grad, params.feature_dims))
+                        buffers.extend([sum_dim(grad, [d]) for d in shape.dims])
                     elif params.optimizer == 'sgd':
                         weight_update = grad
                     elif params.optimizer == 'novograd':
@@ -152,6 +164,17 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter, manual_step
                         weight_update += mtf.reduce_mean(var.value)
                     if params.grad_accumulation > 1:
                         weight_update *= step
-                    update_ops.append(mtf.assign_sub(var, weight_update))
-
+                    if params.weight_standardisation:
+                        var -= weight_update
+                        shape = [d.size for d in var.shape.dims]
+                        feature_dims_used = all(f in shape for f in params.feature_dims)
+                        if feature_dims_used and shape.index(params.key_dim.size) == -1:
+                            fan_in = np.prod(shape[:-2])
+                        elif feature_dims_used:
+                            fan_in = np.prod(shape[:2])
+                        elif len(shape) == 2:
+                            fan_in = shape[0]
+                        update_ops.append(mtf.assign(var, 1.6077447771479307 / np.sqrt(fan_in)))
+                    else:
+                        update_ops.append(mtf.assign_sub(var, weight_update))
     return params.mesh.graph.trainable_variables[0].graph.combine_assignments(update_ops), tf_learning_rate

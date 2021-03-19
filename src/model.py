@@ -8,6 +8,8 @@ import typing
 import mesh_tensorflow as mtf
 import numpy as np
 import tensorflow.compat.v1 as tf
+import tensorflow.python.ops.init_ops as init_ops
+from tensorflow.python.ops import random_ops
 
 from .dataclass import BlockConfig, ModelParameter
 from .utils_core import default
@@ -31,8 +33,26 @@ def _get_variable(params: ModelParameter, shape: typing.Union[typing.List[mtf.Di
                             initializer=initializer)
 
 
+class HeInit(init_ops.Initializer):
+    def __init__(self, params: ModelParameter, feature_dims_used):
+        self.params = params
+        self.feature_dims_used = feature_dims_used
+
+    def __call__(self, shape, dtype=None, partition_info=None):
+        scale_shape = list(shape if partition_info is None else partition_info.full_shape)
+        if self.feature_dims_used and scale_shape.index(self.params.key_dim.size) == -1:
+            fan_in = np.prod(scale_shape[:-2])
+        elif self.feature_dims_used:
+            fan_in = np.prod(scale_shape[:2])
+        elif len(scale_shape) == 2:
+            fan_in = scale_shape[0]
+        else:
+            raise ValueError(f"Shape: {scale_shape}\nParams: {self.params}\nFeatureDimsUsed: {self.feature_dims_used}")
+        return random_ops.truncated_normal(shape, 0.0, 1.6077447771479307 / np.sqrt(fan_in), tf.float32, seed=None)
+
+
 def _orthogonal_var(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape]) -> mtf.Tensor:
-    return _get_variable(params, shape, tf.random_normal_initializer(stddev=0.02))
+    return _get_variable(params, shape, HeInit(params, all(f in shape for f in params.feature_dims)))  # he normal init
 
 
 def _normal_var(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
