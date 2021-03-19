@@ -9,7 +9,7 @@ from itertools import cycle
 import tensorflow.compat.v1 as tf
 from tensorflow.data import Dataset
 
-from .dataclass import ModelParameter
+from .dataclass import ModelParameter, align_tensor_op
 
 
 def split_files(path, slice_index, slice_count, seed):
@@ -361,6 +361,7 @@ def dataset(params: ModelParameter, sub_batch_size, slice_index, slice_count):
         dset = datasets[0]
 
     dset = dset.map(memory_op)
+    dset = dset.map(align_tensor_op)
     dset = dset.skip(params.current_step)
 
     return dset
@@ -462,4 +463,5 @@ def gpt_neo_input(params, sub_batch_size, slice_index, slice_count):
     dset = dset.shuffle(params.shuffle_buffer, seed=params.data_seed)
     dset = dset.batch(sub_batch_size)
     dset = dset.map(_memory_func)
+    dset = dset.map(align_tensor_op)
     return dset
