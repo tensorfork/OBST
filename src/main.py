@@ -60,7 +60,6 @@ def main(args: argparse.Namespace) -> None:
     # Add to params: auto_layout, auto_layout_and_mesh_shape, use_tpu, num_cores
     mesh_shape = mtf.convert_to_shape(params.mesh_shape)
     params.num_cores = mesh_shape.size
-    params.layout_rules = mtf.convert_to_layout_rules(params.layout)
     params.use_tpu = True if not args.tpu is None else False
     params.gpu_ids = args.gpu_ids
     # Expand attention types param

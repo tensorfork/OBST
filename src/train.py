@@ -96,13 +96,13 @@ def model_fn(features: typing.Dict[str, tf.Tensor], mode: str, params: dict):
     graph = mtf.Graph()
 
     # Build mtf mesh object
-
+    mesh_shape = mtf.convert_to_shape(params.mesh_shape)
+    mesh_impl = mtf.simd_mesh_impl.SimdMeshImpl(mesh_shape, mtf.convert_to_layout_rules(params.layout),
+                                                [""] * mesh_shape.size, params.context.device_assignment)
     params.mesh = mtf.Mesh(graph, "mesh", mtf.utils.BalancedVariablePlacer(
             [params.context.tpu_host_placement_function(host_id=i) for i in range(params.context.num_hosts)]))
-    # Build mtf_features & seq length dict for getting number of microbatches
-    # We need to pack inputs into a dict to pass into serialize_training_step
-    # params.mode = mode
-
+    params.mesh_impl = mesh_impl
+    print(params.mesh)
 
     frame_input = None
     cat_mask_src = None
