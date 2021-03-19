@@ -4,22 +4,15 @@
 
 import argparse
 import json
-import re
-from functools import partial
 
 import mesh_tensorflow as mtf
-import numpy as np
 import tensorflow.compat.v1 as tf
-from tensorflow.compat.v1 import tpu
-from tensorflow.python.ops import summary_ops_v2 as summary
-from tensorflow.python.tpu.device_assignment import device_assignment
-from tensorflow.python.tpu.topology import Topology
+from tensorflow.python.tpu import tpu_config, tpu_estimator
 from tensorflow_estimator.python.estimator import estimator as estimator_lib
 
 from .dataclass import ModelParameter
-from .eval import gen_sample_fn
 from .inputs import dataset, gpt_neo_input
-from .train import computation_func
+from .train import model_fn
 
 
 def main(args: argparse.Namespace) -> None:
@@ -72,75 +65,59 @@ def main(args: argparse.Namespace) -> None:
     # Expand attention types param
     params.predict = args.predict
 
-    '''
     if args.dry:
         inp = {'token_x': tf.zeros([1]), 'token_y': tf.zeros([1]), 'frame': tf.zeros([1]), 'vid_msk': tf.zeros([1]),
-               'txt_msk': tf.zeros([1])
+               'tkn_msk': tf.zeros([1])
                }
-        get_model_fn(params)(inp)
+        model_fn(inp, "TRAIN", params.dict())
         return
-    '''
-
-    mtf_mesh_shape = mtf.convert_to_shape(params.mesh_shape)
-    params.layout_rules = mtf.convert_to_layout_rules(params.layout)
 
     tpu_cluster_resolver = tf.distribute.cluster_resolver.TPUClusterResolver(args.tpu)
-    session_config = tf.ConfigProto()
-    session_config.allow_soft_placement = True
-    tpu_cluster_spec = tpu_cluster_resolver.cluster_spec()
 
-    if tpu_cluster_spec:
-        session_config.cluster_def.CopyFrom(tpu_cluster_spec.as_cluster_def())
+    tf.tpu.experimental.initialize_tpu_system(tpu_cluster_resolver)
 
-    with tf.Graph().as_default():
+    options = tf.data.Options()
+    options.experimental_deterministic = not params.train
+    options.experimental_optimization.autotune = True
+    options.experimental_optimization.autotune_buffers = True
+    options.experimental_optimization.filter_fusion = True
+    options.experimental_optimization.hoist_random_uniform = True
+    options.experimental_optimization.map_and_batch_fusion = True
+    options.experimental_optimization.map_and_filter_fusion = False
+    options.experimental_optimization.map_fusion = True
+    options.experimental_optimization.map_parallelization = True
+    options.experimental_optimization.map_vectorization.enabled = True
+    options.experimental_optimization.map_vectorization.use_choose_fastest = True
+    options.experimental_optimization.noop_elimination = True
+    options.experimental_optimization.parallel_batch = True
+    options.experimental_optimization.shuffle_and_repeat_fusion = True
+    options.experimental_optimization.apply_default_optimizations = False
+    options.experimental_threading.max_intra_op_parallelism = 1
+    options.experimental_threading.private_threadpool_size = 48
+    options.experimental_distribute.auto_shard = True
 
-        with tf.Session(target=tpu_cluster_resolver.master(), config=session_config) as sess:
-            tf.tpu.experimental.initialize_tpu_system(tpu_cluster_resolver)
+    def get_dataset():
+        return input_fn(params, params.train_batch_size, 0, 1).prefetch(params.buffer_size).with_options(options)
 
-            all_devices = sess.list_devices()
+    config = tpu_config.TPUConfig(num_shards=mesh_shape.size,
+                                  iterations_per_loop=params.iterations,
+                                  num_cores_per_replica=1,
+                                  per_host_input_for_training=tpu_config.InputPipelineConfig.BROADCAST)
+    config = tpu_config.RunConfig(cluster=tpu_cluster_resolver,
+                                  model_dir=params.model_path,
+                                  save_checkpoints_steps=None,  # Disable the default saver
+                                  save_checkpoints_secs=None,  # Disable the default saver
+                                  log_step_count_steps=params.iterations,
+                                  save_summary_steps=params.iterations,
+                                  tpu_config=config)
+    estimator = tpu_estimator.TPUEstimator(use_tpu=params.use_tpu,
+                                           model_fn=model_fn,
+                                           config=config,
+                                           train_batch_size=params.train_batch_size,
+                                           predict_batch_size=1,
+                                           params=params.dict())
 
-            cpus = []
-            for d in all_devices:
-                if d.device_type == 'CPU':
-                    cpus += [re.sub('device:CPU', 'cpu', d.name)]
+    current_step = int(estimator_lib._load_global_step_from_checkpoint_dir(params.model_path))
 
-            cpu_devices = []
-            for c in cpus:
-                m = re.match('/job:(.*)/replica:(.*)/task:(.*)/.*', c)
-                cpu_devices.append((m.group(1), int(m.group(2)), int(m.group(3)), c))
-
-            cpu_devices = [_[3] for _ in sorted(cpu_devices)]
-            params.cpu_devices = [n for n in cpu_devices if 'coordinator' not in n]
-
-            topology = sess.run(tpu.initialize_system())
-            topo_object = Topology(serialized=topology)
-
-            params.num_cores = int(np.prod(topo_object.mesh_shape))
-            params.num_hosts = int(topo_object.num_tasks)
-            params.num_cores_per_host = int(params.num_cores // params.num_hosts)
-            if params.num_cores_per_host != int(topo_object.num_tpus_per_task):
-                raise ValueError
-
-            params.d_assignment = device_assignment(topology, num_replicas=params.num_cores,
-                                                    computation_shape=[1, ] * mtf.utils.topology_rank(topology))
-            params.mesh_impl = mtf.simd_mesh_impl.SimdMeshImpl(mtf_mesh_shape, params.layout_rules,
-                                                               None, params.d_assignment)
-
-        if params.train:
-            summary_writer = summary.create_file_writer(params.model_path)
-            with summary_writer.as_default(), (summary.always_record_summaries()):
-                computation_func(params,
-                                 input_fn,
-                                 session_config,
-                                 tpu_cluster_resolver,
-                                 [lambda x: print(f"Current step: {x}")] * params.debug_train_step)
-        else:  # train == 'sample'
-            computation_func(params,
-                             input_fn,
-                             session_config,
-                             tpu_cluster_resolver,
-                             [gen_sample_fn(params)])
-    tf.logging.info('finished.')
-
-    with tf.Session(target=tpu_cluster_resolver.get_master(), config=session_config) as sess:
-        sess.run(tpu.shutdown_system())
+    if current_step < params.train_steps:
+        estimator.train(input_fn=get_dataset, max_steps=10 ** 9)

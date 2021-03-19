@@ -180,7 +180,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
 
         self.input_pipeline_shape = align_tensor_op(self.input_pipeline_shape)
         self.attention_idx = 0
-
+        tf.config.optimizer.set_experimental_options(self.tensorflow_optimization_settings)
     def __getitem__(self, key: str) -> typing.Any:
         print(f"Getting {key} via deprecated interface")
         return self.key

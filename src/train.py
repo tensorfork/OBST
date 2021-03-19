@@ -86,15 +86,7 @@ def _import_tensor(params, tensor, shape, name):
     return mtf.import_laid_out_tensor(params.mesh, params.mesh_impl.LaidOutTensor([tensor]), shape, name)
 
 
-def computation_func(params: ModelParameter, input_fn: typing.Callable,
-                     session_config, cluster_resolver, callback_fns):
-    # TODO(Lucas): move tf dataset to iterator/queue
-    # TODO(Lucas): clean up code + optimize
-    host_id_to_tf_device = "/job:worker/task:{:d}/device:CPU:0"
-    hooks = []
-    output_shapes = []
-    tf.config.optimizer.set_experimental_options(params.tensorflow_optimization_settings)
-
+def model_fn(features: typing.List[tf.Tensor], mode: str, params: ModelParameter):
     manual_global_step = tf.get_variable("manual_global_step", [], tf.int64, initializer=tf.zeros_initializer(),
                                          trainable=False,
                                          aggregation=variables.VariableAggregation.ONLY_FIRST_REPLICA)
@@ -118,20 +110,20 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
     token_mask = None
 
     if params.use_video:
-        frame_input = _import_tensor(params, args[0], params.frame_input_shape, "frame_input")
-        cat_mask_src = _import_tensor(params, args[1], params.frame_mask_shape, "cat_mask_x")
-        cat_mask_tag = _import_tensor(params, args[2], params.frame_mask_shape, "cat_mask_y")
-        frame_mask_src = _import_tensor(params, args[3], params.frame_mask_shape, "vid_msk_src")
-        frame_mask_tag = _import_tensor(params, args[4], params.frame_mask_shape, "vid_msk_tgt")
+        frame_input = _import_tensor(params, features[0], params.frame_input_shape, "frame_input")
+        cat_mask_src = _import_tensor(params, features[1], params.frame_mask_shape, "cat_mask_x")
+        cat_mask_tag = _import_tensor(params, features[2], params.frame_mask_shape, "cat_mask_y")
+        frame_mask_src = _import_tensor(params, features[3], params.frame_mask_shape, "vid_msk_src")
+        frame_mask_tag = _import_tensor(params, features[4], params.frame_mask_shape, "vid_msk_tgt")
 
         if params.use_language:
-            token_x_input = _import_tensor(params, args[5], params.token_dim_shape, "tkn_src")
-            token_y_input = _import_tensor(params, args[6], params.token_dim_shape, "tkn_tgt")
-            token_mask = _import_tensor(params, args[7], params.token_dim_shape, "txt_msk")
+            token_x_input = _import_tensor(params, features[5], params.token_dim_shape, "tkn_src")
+            token_y_input = _import_tensor(params, features[6], params.token_dim_shape, "tkn_tgt")
+            token_mask = _import_tensor(params, features[7], params.token_dim_shape, "txt_msk")
 
     else:  # params.use_language
-        token_x_input = _import_tensor(params, args[0], params.token_dim_shape, "tkn_src")
-        token_y_input = _import_tensor(params, args[1], params.token_dim_shape, "tkn_tgt")
+        token_x_input = _import_tensor(params, features[0], params.token_dim_shape, "tkn_src")
+        token_y_input = _import_tensor(params, features[1], params.token_dim_shape, "tkn_tgt")
 
     loss, video_loss, token_loss, frame_out, token_out = build(params,
                                                                frame_input,
@@ -190,30 +182,6 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
     tf_loss = lowering.export_to_tf_tensor(loss)
     tf_loss = tf.cast(tf_loss, tf.float32)
-
-    options = tf.data.Options()
-    options.experimental_deterministic = not params.train
-    options.experimental_optimization.autotune = True
-    options.experimental_optimization.autotune_buffers = True
-    options.experimental_optimization.filter_fusion = True
-    options.experimental_optimization.hoist_random_uniform = True
-    options.experimental_optimization.map_and_batch_fusion = True
-    options.experimental_optimization.map_and_filter_fusion = False
-    options.experimental_optimization.map_fusion = True
-    options.experimental_optimization.map_parallelization = True
-    options.experimental_optimization.map_vectorization.enabled = True
-    options.experimental_optimization.map_vectorization.use_choose_fastest = True
-    options.experimental_optimization.noop_elimination = True
-    options.experimental_optimization.parallel_batch = True
-    options.experimental_optimization.shuffle_and_repeat_fusion = True
-    options.experimental_optimization.apply_default_optimizations = False
-    options.experimental_threading.max_intra_op_parallelism = 1
-    options.experimental_threading.private_threadpool_size = 48
-    options.experimental_distribute.auto_shard = True
-
-    def get_dataset():
-        return input_fn(params, params.train_batch_size, 0, 1).prefetch(params.buffer_size).with_options(options)
-
     with mtf.utils.outside_all_rewrites():
         hooks = [mtf.MtfRestoreHook(lowering)]
         if params.use_checkpointing:
@@ -227,10 +195,9 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                       saver=saver,
                                                       listeners=[mtf.MtfCheckpointSaverListener(lowering)]))
 
-        estimator = tpu_estimator.TPUEstimatorSpec(tf.estimator.ModeKeys.TRAIN,
-                                                   loss=tf_loss,
-                                                   host_call=host_call,
-                                                   training_hooks=hooks,
-                                                   prediction_hooks=[mtf.MtfRestoreHook(lowering)],
-                                                   train_op=train_op)
-    estimator.train(input_fn=get_dataset, max_steps=10 ** 9)
+        return tpu_estimator.TPUEstimatorSpec(tf.estimator.ModeKeys.TRAIN,
+                                              loss=tf_loss,
+                                              host_call=host_call,
+                                              training_hooks=hooks,
+                                              prediction_hooks=[mtf.MtfRestoreHook(lowering)],
+                                              train_op=train_op)
