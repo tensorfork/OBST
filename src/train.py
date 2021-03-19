@@ -83,7 +83,8 @@ def create_host_call(model_dir: str) -> typing.Optional[typing.Tuple[typing.Call
 
 
 def _import_tensor(params, tensor, shape, name):
-    return mtf.import_laid_out_tensor(params.mesh, params.mesh_impl.LaidOutTensor([tensor]), shape, name)
+    return mtf.import_fully_replicated(params.mesh, tensor, shape, name)
+    # return mtf.import_laid_out_tensor(params.mesh, params.mesh_impl.LaidOutTensor([tensor]), shape, name)
 
 
 def model_fn(features: typing.Dict[str, tf.Tensor], mode: str, params: dict):
