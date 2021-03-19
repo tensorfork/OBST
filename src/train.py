@@ -168,6 +168,7 @@ def model_fn(features: typing.Dict[str, tf.Tensor], mode: str, params: dict):
 
     lowering = mtf.Lowering(graph, {params.mesh: params.mesh_impl})
 
+    mtf.scalar_summary("loss", loss)
     host_call = create_host_call(params.model_path)
     mtf.utils.remove_summaries()
 
