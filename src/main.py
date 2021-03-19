@@ -4,10 +4,15 @@
 
 import argparse
 import json
+import re
 
 import mesh_tensorflow as mtf
+import numpy as np
 import tensorflow.compat.v1 as tf
+from tensorflow.compat.v1 import tpu
 from tensorflow.python.tpu import tpu_config, tpu_estimator
+from tensorflow.python.tpu.device_assignment import device_assignment
+from tensorflow.python.tpu.topology import Topology
 from tensorflow_estimator.python.estimator import estimator as estimator_lib
 
 from .dataclass import ModelParameter
@@ -60,6 +65,7 @@ def main(args: argparse.Namespace) -> None:
     # Add to params: auto_layout, auto_layout_and_mesh_shape, use_tpu, num_cores
     mesh_shape = mtf.convert_to_shape(params.mesh_shape)
     params.num_cores = mesh_shape.size
+    params.layout_rules = mtf.convert_to_layout_rules(params.layout)
     params.use_tpu = True if not args.tpu is None else False
     params.gpu_ids = args.gpu_ids
     # Expand attention types param
@@ -95,6 +101,42 @@ def main(args: argparse.Namespace) -> None:
     options.experimental_threading.max_intra_op_parallelism = 1
     options.experimental_threading.private_threadpool_size = 48
     options.experimental_distribute.auto_shard = True
+
+    session_config = tf.ConfigProto()
+    session_config.allow_soft_placement = True
+    with tf.Graph().as_default():
+
+        with tf.Session(target=tpu_cluster_resolver.master(), config=session_config) as sess:
+            tf.tpu.experimental.initialize_tpu_system(tpu_cluster_resolver)
+
+            all_devices = sess.list_devices()
+
+            cpus = []
+            for d in all_devices:
+                if d.device_type == 'CPU':
+                    cpus += [re.sub('device:CPU', 'cpu', d.name)]
+
+            cpu_devices = []
+            for c in cpus:
+                m = re.match('/job:(.*)/replica:(.*)/task:(.*)/.*', c)
+                cpu_devices.append((m.group(1), int(m.group(2)), int(m.group(3)), c))
+
+            cpu_devices = [_[3] for _ in sorted(cpu_devices)]
+            params.cpu_devices = [n for n in cpu_devices if 'coordinator' not in n]
+
+            topology = sess.run(tpu.initialize_system())
+            topo_object = Topology(serialized=topology)
+
+            params.num_cores = int(np.prod(topo_object.mesh_shape))
+            params.num_hosts = int(topo_object.num_tasks)
+            params.num_cores_per_host = int(params.num_cores // params.num_hosts)
+            if params.num_cores_per_host != int(topo_object.num_tpus_per_task):
+                raise ValueError
+
+            params.d_assignment = device_assignment(topology, num_replicas=params.num_cores,
+                                                    computation_shape=[1, ] * mtf.utils.topology_rank(topology))
+            params.mesh_impl = mtf.simd_mesh_impl.SimdMeshImpl(mesh_shape, params.layout_rules,
+                                                               None, params.d_assignment)
 
     def get_dataset(params):
         params = ModelParameter(params)
