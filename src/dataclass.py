@@ -50,7 +50,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.learning_rate = 5e-5
         self.storage_dtype = "float32"
         self.calculation_dtype = "float32"
-        self.train_batch_size = 1
+        self.batch_size = 1
         self.current_step = 0
         self.mesh_shape = "x:1,y:1,h:32"
         self.layout = "batch:x,heads:y,height:h"
@@ -141,7 +141,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
                                                self.intermediate_feed_forward_multiplier))]
 
         self.vocab_dim = mtf.Dimension("vocab", self.vocab_size)
-        self.batch_dim = mtf.Dimension("batch", self.train_batch_size)
+        self.batch_dim = mtf.Dimension("batch", self.batch_size)
         self.frame_input_sequence = mtf.Dimension("_sequence", self.time_patch_size + 1)
 
         frame_input_shape = [self.batch_dim, self.frame_input_sequence]

@@ -39,7 +39,7 @@ def main(args: argparse.Namespace) -> None:
 
     # If run mode == sample, set the batch size to one
     if not params.train:
-        params.train_batch_size = 1
+        params.batch_size = 1
         params = ModelParameter(params)
 
     # Fetch appropriate input functions
@@ -97,7 +97,7 @@ def main(args: argparse.Namespace) -> None:
     options.experimental_distribute.auto_shard = True
 
     def get_dataset():
-        return input_fn(params, params.train_batch_size, 0, 1).prefetch(params.buffer_size).with_options(options)
+        return input_fn(params, params.batch_size, 0, 1).prefetch(params.buffer_size).with_options(options)
 
     config = tpu_config.TPUConfig(num_shards=mesh_shape.size,
                                   iterations_per_loop=params.iterations,
@@ -113,7 +113,7 @@ def main(args: argparse.Namespace) -> None:
     estimator = tpu_estimator.TPUEstimator(use_tpu=params.use_tpu,
                                            model_fn=model_fn,
                                            config=config,
-                                           train_batch_size=params.train_batch_size,
+                                           train_batch_size=params.batch_size,
                                            predict_batch_size=1,
                                            params=params.dict())
 
