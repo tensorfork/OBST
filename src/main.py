@@ -80,8 +80,6 @@ def main(args: argparse.Namespace) -> None:
 
     tpu_cluster_resolver = tf.distribute.cluster_resolver.TPUClusterResolver(args.tpu)
 
-    tf.tpu.experimental.initialize_tpu_system(tpu_cluster_resolver)
-
     options = tf.data.Options()
     options.experimental_deterministic = not params.train
     options.experimental_optimization.autotune = True
