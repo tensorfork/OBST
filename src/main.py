@@ -96,7 +96,8 @@ def main(args: argparse.Namespace) -> None:
     options.experimental_threading.private_threadpool_size = 48
     options.experimental_distribute.auto_shard = True
 
-    def get_dataset():
+    def get_dataset(params):
+        params = ModelParameter(params)
         return input_fn(params, params.train_batch_size, 0, 1).prefetch(params.buffer_size).with_options(options)
 
     config = tpu_config.TPUConfig(num_shards=mesh_shape.size,
