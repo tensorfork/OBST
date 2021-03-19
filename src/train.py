@@ -95,7 +95,7 @@ def model_fn(features: typing.Dict[str, tf.Tensor], mode: str, params: ModelPara
 
     # Build mtf mesh object
     params.mesh = mtf.Mesh(graph, "mesh", mtf.utils.BalancedVariablePlacer(
-            [params.context.tpu_host_placement_function(host_id=i) for i in range(params.context.num_hosts)])
+            [params.context.tpu_host_placement_function(host_id=i) for i in range(params.context.num_hosts)]))
 
     # Build mtf_features & seq length dict for getting number of microbatches
     # We need to pack inputs into a dict to pass into serialize_training_step
