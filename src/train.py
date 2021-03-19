@@ -86,7 +86,8 @@ def _import_tensor(params, tensor, shape, name):
     return mtf.import_laid_out_tensor(params.mesh, params.mesh_impl.LaidOutTensor([tensor]), shape, name)
 
 
-def model_fn(features: typing.Dict[str, tf.Tensor], mode: str, params: ModelParameter):
+def model_fn(features: typing.Dict[str, tf.Tensor], mode: str, params: dict):
+    params = ModelParameter(params)
     manual_global_step = tf.get_variable("manual_global_step", [], tf.int64, initializer=tf.zeros_initializer(),
                                          trainable=False,
                                          aggregation=variables.VariableAggregation.ONLY_FIRST_REPLICA)
