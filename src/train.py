@@ -95,143 +95,142 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
     output_shapes = []
     tf.config.optimizer.set_experimental_options(params.tensorflow_optimization_settings)
 
-    def _model_fn(*args):
-        manual_global_step = tf.get_variable("manual_global_step", [], tf.int64, initializer=tf.zeros_initializer(),
-                                             trainable=False,
-                                             aggregation=variables.VariableAggregation.ONLY_FIRST_REPLICA)
-        # Construct mtf graph + mesh from params
-        graph = mtf.Graph()
+    manual_global_step = tf.get_variable("manual_global_step", [], tf.int64, initializer=tf.zeros_initializer(),
+                                         trainable=False,
+                                         aggregation=variables.VariableAggregation.ONLY_FIRST_REPLICA)
+    # Construct mtf graph + mesh from params
+    graph = mtf.Graph()
 
-        # Build mtf mesh object
-        params.mesh = mtf.Mesh(graph, "mesh", mtf.utils.BalancedVariablePlacer(params.cpu_devices))
+    # Build mtf mesh object
+    params.mesh = mtf.Mesh(graph, "mesh", mtf.utils.BalancedVariablePlacer(params.cpu_devices))
 
-        # Build mtf_features & seq length dict for getting number of microbatches
-        # We need to pack inputs into a dict to pass into serialize_training_step
-        # params.mode = mode
+    # Build mtf_features & seq length dict for getting number of microbatches
+    # We need to pack inputs into a dict to pass into serialize_training_step
+    # params.mode = mode
 
-        frame_input = None
-        cat_mask_src = None
-        cat_mask_tag = None
-        token_x_input = None
-        token_y_input = None
-        frame_mask_src = None
-        frame_mask_tag = None
-        token_mask = None
+    frame_input = None
+    cat_mask_src = None
+    cat_mask_tag = None
+    token_x_input = None
+    token_y_input = None
+    frame_mask_src = None
+    frame_mask_tag = None
+    token_mask = None
 
-        if params.use_video:
-            frame_input = _import_tensor(params, args[0], params.frame_input_shape, "frame_input")
-            cat_mask_src = _import_tensor(params, args[1], params.frame_mask_shape, "cat_mask_x")
-            cat_mask_tag = _import_tensor(params, args[2], params.frame_mask_shape, "cat_mask_y")
-            frame_mask_src = _import_tensor(params, args[3], params.frame_mask_shape, "vid_msk_src")
-            frame_mask_tag = _import_tensor(params, args[4], params.frame_mask_shape, "vid_msk_tgt")
+    if params.use_video:
+        frame_input = _import_tensor(params, args[0], params.frame_input_shape, "frame_input")
+        cat_mask_src = _import_tensor(params, args[1], params.frame_mask_shape, "cat_mask_x")
+        cat_mask_tag = _import_tensor(params, args[2], params.frame_mask_shape, "cat_mask_y")
+        frame_mask_src = _import_tensor(params, args[3], params.frame_mask_shape, "vid_msk_src")
+        frame_mask_tag = _import_tensor(params, args[4], params.frame_mask_shape, "vid_msk_tgt")
 
-            if params.use_language:
-                token_x_input = _import_tensor(params, args[5], params.token_dim_shape, "tkn_src")
-                token_y_input = _import_tensor(params, args[6], params.token_dim_shape, "tkn_tgt")
-                token_mask = _import_tensor(params, args[7], params.token_dim_shape, "txt_msk")
+        if params.use_language:
+            token_x_input = _import_tensor(params, args[5], params.token_dim_shape, "tkn_src")
+            token_y_input = _import_tensor(params, args[6], params.token_dim_shape, "tkn_tgt")
+            token_mask = _import_tensor(params, args[7], params.token_dim_shape, "txt_msk")
 
-        else:  # params.use_language
-            token_x_input = _import_tensor(params, args[0], params.token_dim_shape, "tkn_src")
-            token_y_input = _import_tensor(params, args[1], params.token_dim_shape, "tkn_tgt")
+    else:  # params.use_language
+        token_x_input = _import_tensor(params, args[0], params.token_dim_shape, "tkn_src")
+        token_y_input = _import_tensor(params, args[1], params.token_dim_shape, "tkn_tgt")
 
-        loss, video_loss, token_loss, frame_out, token_out = build(params,
-                                                                   frame_input,
-                                                                   cat_mask_src,
-                                                                   cat_mask_tag,
-                                                                   token_x_input,
-                                                                   token_y_input,
-                                                                   frame_mask_src,
-                                                                   frame_mask_tag,
-                                                                   token_mask)
+    loss, video_loss, token_loss, frame_out, token_out = build(params,
+                                                               frame_input,
+                                                               cat_mask_src,
+                                                               cat_mask_tag,
+                                                               token_x_input,
+                                                               token_y_input,
+                                                               frame_mask_src,
+                                                               frame_mask_tag,
+                                                               token_mask)
 
-        update_ops, learning_rate = get_optimizer(loss, params, manual_global_step)
+    update_ops, learning_rate = get_optimizer(loss, params, manual_global_step)
 
-        print('\n')
-        param_count = int(sum(np.prod([d.size for d in variable.shape.dims]) for variable in graph.trainable_variables))
-        var_count = int(sum(np.prod([d.size for d in variable.shape.dims]) for variable in graph.all_variables))
+    print('\n')
+    param_count = int(sum(np.prod([d.size for d in variable.shape.dims]) for variable in graph.trainable_variables))
+    var_count = int(sum(np.prod([d.size for d in variable.shape.dims]) for variable in graph.all_variables))
 
-        constant = '  variables: '
-        variable_mapping = [('Model', param_count - params.embedding_param_count),
-                            ('Embedding', params.embedding_param_count),
-                            ('Untrainable', var_count - param_count),
-                            ('', 0),
-                            ('Total trainable', param_count),
-                            ('Total', var_count)]
-        variable_mapping = [(name, f'{int(count):,}') for name, count in variable_mapping]
-        max_str = max(len(name) for name, _ in variable_mapping)
-        max_int = max(len(count) for _, count in variable_mapping)
-        for name, count in variable_mapping:
-            if not name:
-                print('-' * (max_str + max_int + len(constant)))
-                continue
-            print(f'{name:<{max_str}s}{constant}{count:>{max_int}s}')
+    constant = '  variables: '
+    variable_mapping = [('Model', param_count - params.embedding_param_count),
+                        ('Embedding', params.embedding_param_count),
+                        ('Untrainable', var_count - param_count),
+                        ('', 0),
+                        ('Total trainable', param_count),
+                        ('Total', var_count)]
+    variable_mapping = [(name, f'{int(count):,}') for name, count in variable_mapping]
+    max_str = max(len(name) for name, _ in variable_mapping)
+    max_int = max(len(count) for _, count in variable_mapping)
+    for name, count in variable_mapping:
+        if not name:
+            print('-' * (max_str + max_int + len(constant)))
+            continue
+        print(f'{name:<{max_str}s}{constant}{count:>{max_int}s}')
 
-        print("\nDimensions:")
-        for dim_name in sorted(list(set([item for variable in graph.all_variables
-                                         for item in variable.shape.dimension_names]))):
-            print(dim_name)
-        print('\n')
+    print("\nDimensions:")
+    for dim_name in sorted(list(set([item for variable in graph.all_variables
+                                     for item in variable.shape.dimension_names]))):
+        print(dim_name)
+    print('\n')
 
-        lowering = mtf.Lowering(graph, {params.mesh: params.mesh_impl})
+    lowering = mtf.Lowering(graph, {params.mesh: params.mesh_impl})
 
-        host_call = create_host_call(params.model_path)
-        mtf.utils.remove_summaries()
+    host_call = create_host_call(params.model_path)
+    mtf.utils.remove_summaries()
 
-        # Creates train_op
-        global_step = tf.train.get_or_create_global_step()
+    # Creates train_op
+    global_step = tf.train.get_or_create_global_step()
 
-        tf_update_ops = [lowering.lowered_operation(op) for op in update_ops]
-        step = tf.mod(manual_global_step, tf.constant(params.grad_accumulation, dtype=tf.int64))
-        step = tf.equal(step, tf.constant(0, dtype=tf.int64))
-        step = tf.cast(step, tf.int64)
-        tf_update_ops.append(tf.assign_add(global_step, step))
-        tf_update_ops.append(tf.assign_add(manual_global_step, tf.constant(1, dtype=tf.int64, shape=[])))
+    tf_update_ops = [lowering.lowered_operation(op) for op in update_ops]
+    step = tf.mod(manual_global_step, tf.constant(params.grad_accumulation, dtype=tf.int64))
+    step = tf.equal(step, tf.constant(0, dtype=tf.int64))
+    step = tf.cast(step, tf.int64)
+    tf_update_ops.append(tf.assign_add(global_step, step))
+    tf_update_ops.append(tf.assign_add(manual_global_step, tf.constant(1, dtype=tf.int64, shape=[])))
 
-        train_op = tf.group(tf_update_ops)
+    train_op = tf.group(tf_update_ops)
 
-        tf_loss = lowering.export_to_tf_tensor(loss)
-        tf_loss = tf.cast(tf_loss, tf.float32)
+    tf_loss = lowering.export_to_tf_tensor(loss)
+    tf_loss = tf.cast(tf_loss, tf.float32)
 
-        options = tf.data.Options()
-        options.experimental_deterministic = not params.train
-        options.experimental_optimization.autotune = True
-        options.experimental_optimization.autotune_buffers = True
-        options.experimental_optimization.filter_fusion = True
-        options.experimental_optimization.hoist_random_uniform = True
-        options.experimental_optimization.map_and_batch_fusion = True
-        options.experimental_optimization.map_and_filter_fusion = False
-        options.experimental_optimization.map_fusion = True
-        options.experimental_optimization.map_parallelization = True
-        options.experimental_optimization.map_vectorization.enabled = True
-        options.experimental_optimization.map_vectorization.use_choose_fastest = True
-        options.experimental_optimization.noop_elimination = True
-        options.experimental_optimization.parallel_batch = True
-        options.experimental_optimization.shuffle_and_repeat_fusion = True
-        options.experimental_optimization.apply_default_optimizations = False
-        options.experimental_threading.max_intra_op_parallelism = 1
-        options.experimental_threading.private_threadpool_size = 48
-        options.experimental_distribute.auto_shard = True
+    options = tf.data.Options()
+    options.experimental_deterministic = not params.train
+    options.experimental_optimization.autotune = True
+    options.experimental_optimization.autotune_buffers = True
+    options.experimental_optimization.filter_fusion = True
+    options.experimental_optimization.hoist_random_uniform = True
+    options.experimental_optimization.map_and_batch_fusion = True
+    options.experimental_optimization.map_and_filter_fusion = False
+    options.experimental_optimization.map_fusion = True
+    options.experimental_optimization.map_parallelization = True
+    options.experimental_optimization.map_vectorization.enabled = True
+    options.experimental_optimization.map_vectorization.use_choose_fastest = True
+    options.experimental_optimization.noop_elimination = True
+    options.experimental_optimization.parallel_batch = True
+    options.experimental_optimization.shuffle_and_repeat_fusion = True
+    options.experimental_optimization.apply_default_optimizations = False
+    options.experimental_threading.max_intra_op_parallelism = 1
+    options.experimental_threading.private_threadpool_size = 48
+    options.experimental_distribute.auto_shard = True
 
-        def get_dataset():
-            return input_fn(params, params.train_batch_size, 0, 1).prefetch(params.buffer_size).with_options(options)
+    def get_dataset():
+        return input_fn(params, params.train_batch_size, 0, 1).prefetch(params.buffer_size).with_options(options)
 
-        with mtf.utils.outside_all_rewrites():
-            hooks = [mtf.MtfRestoreHook(lowering)]
-            if params.use_checkpointing:
-                saver = tf.add_to_collection(tf.GraphKeys.SAVERS, tf.train.Saver(tf.global_variables(),
-                                                                                 sharded=True,
-                                                                                 max_to_keep=1,
-                                                                                 defer_build=False,
-                                                                                 save_relative_paths=True))
-                hooks.append(tf.train.CheckpointSaverHook(params.model_path,
-                                                          save_steps=params.steps_per_checkpoint,
-                                                          saver=saver,
-                                                          listeners=[mtf.MtfCheckpointSaverListener(lowering)]))
+    with mtf.utils.outside_all_rewrites():
+        hooks = [mtf.MtfRestoreHook(lowering)]
+        if params.use_checkpointing:
+            saver = tf.add_to_collection(tf.GraphKeys.SAVERS, tf.train.Saver(tf.global_variables(),
+                                                                             sharded=True,
+                                                                             max_to_keep=1,
+                                                                             defer_build=False,
+                                                                             save_relative_paths=True))
+            hooks.append(tf.train.CheckpointSaverHook(params.model_path,
+                                                      save_steps=params.steps_per_checkpoint,
+                                                      saver=saver,
+                                                      listeners=[mtf.MtfCheckpointSaverListener(lowering)]))
 
-            estimator = tpu_estimator.TPUEstimatorSpec(tf.estimator.ModeKeys.TRAIN,
-                                                       loss=tf_loss,
-                                                       host_call=host_call,
-                                                       training_hooks=hooks,
-                                                       prediction_hooks=[mtf.MtfRestoreHook(lowering)],
-                                                       train_op=train_op)
-            estimator.train(input_fn=get_dataset, max_steps=10 ** 9)
+        estimator = tpu_estimator.TPUEstimatorSpec(tf.estimator.ModeKeys.TRAIN,
+                                                   loss=tf_loss,
+                                                   host_call=host_call,
+                                                   training_hooks=hooks,
+                                                   prediction_hooks=[mtf.MtfRestoreHook(lowering)],
+                                                   train_op=train_op)
+    estimator.train(input_fn=get_dataset, max_steps=10 ** 9)
