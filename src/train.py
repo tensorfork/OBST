@@ -102,7 +102,6 @@ def model_fn(features: typing.Dict[str, tf.Tensor], mode: str, params: dict):
     params.mesh = mtf.Mesh(graph, "mesh", mtf.utils.BalancedVariablePlacer(
             [params.context.tpu_host_placement_function(host_id=i) for i in range(params.context.num_hosts)]))
     params.mesh_impl = mesh_impl
-    print(params.mesh)
 
     frame_input = None
     cat_mask_src = None
