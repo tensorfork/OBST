@@ -8,6 +8,8 @@ import typing
 import mesh_tensorflow as mtf
 import numpy as np
 import tensorflow.compat.v1 as tf
+from tensorflow.python.ops.init_ops import Initializer
+from tensorflow.python.ops import random_ops
 
 from .dataclass import BlockConfig, ModelParameter
 from .utils_core import default
@@ -31,8 +33,27 @@ def _get_variable(params: ModelParameter, shape: typing.Union[typing.List[mtf.Di
                             initializer=initializer)
 
 
+class HeInit(Initializer):
+    def __init__(self, params: ModelParameter, feature_dims_used):
+        self.params = params
+        self.feature_dims_used = feature_dims_used
+
+    def __call__(self, shape, dtype=None, partition_info=None):
+        scale_shape = list(shape if partition_info is None else partition_info.full_shape)
+        if self.feature_dims_used and scale_shape.index(self.params.key_dim.size) == -1:
+            fan_in = np.prod(scale_shape[:-2])
+        elif self.feature_dims_used:
+            fan_in = np.prod([d.size for d in self.params.feature_dims])
+        elif len(scale_shape) == 2:
+            fan_in = scale_shape[0]
+        else:
+            raise ValueError(f"Shape: {scale_shape}\nParams: {self.params}\nFeatureDimsUsed: {self.feature_dims_used}")
+        return random_ops.truncated_normal(shape, 0.0, 1.6077447771479307 / np.sqrt(fan_in), dtype or tf.float32,
+                                           seed=None)
+
+
 def _orthogonal_var(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape]) -> mtf.Tensor:
-    return _get_variable(params, shape, tf.random_normal_initializer(stddev=0.02))
+    return _get_variable(params, shape, HeInit(params, all(f in shape for f in params.feature_dims)))  # he normal init
 
 
 def _normal_var(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
@@ -76,6 +97,11 @@ def _all_mean(params: ModelParameter, block_input: mtf.Tensor, name_extras: typi
             * mtf.reduce_mean(block_input, reduced_dim=params.head_dim))
 
 
+def compare_range(params: ModelParameter, dim0: mtf.Dimension, dim1: mtf.Dimension, comparison):
+    return mtf.cast(comparison(mtf.range(params.mesh, dim0, tf.bfloat16), mtf.range(params.mesh, dim1, tf.bfloat16)),
+                    params.variable_dtype.activation_dtype)
+
+
 def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple[str]):
     idx, dim = _get_attention_dim(params, block_input)
     params.attention_idx += 1
@@ -95,18 +121,14 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
         return mtf.einsum([mtf.softplus(qry),
                            anonymize(key, [params.key_dim] + [dim] * (idx in params.masked_attention_dimensions)),
                            anonymize(mtf.softplus(val), params.key_dim)]
-                          + ([mtf.cast(mtf.less(mtf.range(params.mesh, dim, dtype=tf.int32),
-                                                mtf.range(params.mesh, tmp, dtype=tf.int32)),
-                                       params.variable_dtype.activation_dtype)
-                              ] if idx in params.masked_attention_dimensions else []),
+                          + ([compare_range(params, dim, tmp, mtf.less)] if
+                             idx in params.masked_attention_dimensions else []),
                           output_shape=block_input.shape)
 
     lgt = mtf.einsum([qry, key], reduced_dims=[params.key_dim])
 
     if idx in params.masked_attention_dimensions:  # it's auto-regressive
-        lgt += mtf.cast(mtf.less(mtf.range(params.mesh, dim, tf.int32),
-                                 mtf.range(params.mesh, tmp, tf.int32)),
-                        params.variable_dtype.activation_dtype) * -1e12
+        lgt += compare_range(params, dim, tmp, mtf.less) * -1e12
 
     lgt = mtf.exp(lgt - mtf.reduce_max(mtf.stop_gradient(lgt), reduced_dim=tmp))
     return mtf.einsum([lgt, anonymize(val, dim)], block_input.shape) / mtf.reduce_sum(lgt, reduced_dim=tmp)
@@ -132,11 +154,14 @@ def _norm(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.T
         normalized_shape = normalized_shape - [_get_attention_dim(params, block_input).dim]
     if 'group' not in name_extras:
         normalized_shape = normalized_shape - [params.head_dim]
-
-    block_input -= mtf.reduce_mean(block_input, output_shape=normalized_shape)
-    block_input *= mtf.rsqrt(1e-6 + mtf.reduce_mean(mtf.square(block_input), output_shape=normalized_shape))
-    block_input *= _normal_var(params, params.feature_dims, mean=1)
-    block_input += _normal_var(params, params.feature_dims, mean=0)
+    if 'mean' in name_extras:
+        block_input -= mtf.reduce_mean(block_input, output_shape=normalized_shape)
+    if 'std' in name_extras:
+        block_input *= mtf.rsqrt(1e-6 + mtf.reduce_mean(mtf.square(block_input), output_shape=normalized_shape))
+    if 'scale' in name_extras:
+        block_input *= _normal_var(params, params.feature_dims, mean=1)
+    if 'shift' in name_extras:
+        block_input += _normal_var(params, params.feature_dims, mean=0)
     return block_input
 
 
@@ -145,20 +170,24 @@ def _activate(params: ModelParameter, block_input: mtf.Tensor, name_extras: typi
 
 
 def _convolution(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple[str]):
-    convolution_size = 16
-    if len(name_extras) == 0:
-        convolution_size = int(name_extras[0])
     idx, dim = _get_attention_dim(params, block_input)
-    anonymous_block_input = anonymize(block_input, dim)
-    indexed = mtf.Dimension("indexed", convolution_size)
-    one_hot = mtf.range(params.mesh, indexed, params.variable_dtype.activation_dtype)
-    one_hot -= params.convolution_size
-    one_hot += mtf.range(params.mesh, dim, params.variable_dtype.activation_dtype)
-    one_hot = mtf.one_hot(one_hot, dim)
-    output = mtf.einsum([one_hot, anonymous_block_input], block_input.shape + [indexed])
-    output = _linear(params, output, [indexed] + params.feature_dims, params.intermediate)
-    output = activate(output)
-    return _communicating_linear(params, output)
+    convolution_size = 16
+    if len(name_extras) > 0 and name_extras[-1].isdigit():
+        convolution_size = int(name_extras[-1])
+    if "gather" in name_extras:
+        anonymous_block_input = anonymize(block_input, dim)
+        indexed = mtf.Dimension("indexed", convolution_size)
+        one_hot = mtf.range(params.mesh, indexed, params.variable_dtype.activation_dtype)
+        one_hot -= params.convolution_size
+        one_hot += mtf.range(params.mesh, dim, params.variable_dtype.activation_dtype)
+        one_hot = mtf.maximum(one_hot, 0)
+        one_hot = mtf.one_hot(one_hot, dim)
+        output = mtf.einsum([one_hot, anonymous_block_input], block_input.shape + [indexed])
+        output = _linear(params, output, [indexed] + params.feature_dims, params.intermediate)
+        output = activate(output)
+        return _communicating_linear(params, output)
+    out = [mtf.shift(_linear_from_features(params, block_input), i, dim, False) for i in range(convolution_size)]
+    return _communicating_linear(params, activate(mtf.add_n(out)))
 
 
 LAYER_FUNCTIONS = {'feed_forward': _feed_forward,
@@ -290,14 +319,19 @@ class RevGradOp(mtf.Operation):
         yield params[2], dy2 + tensor_to_gradient[x2][2]
 
 
+def default_ones(params, inp):
+    return mtf.cast(default(inp, mtf.ones(params.mesh, [], params.variable_dtype.activation_dtype)),
+                    params.variable_dtype.activation_dtype)
+
+
 def build(params: ModelParameter,
           vid: typing.Optional[mtf.Tensor],
-          cat_mask_src: typing.Optional[mtf.Tensor],
-          cat_mask_tag: typing.Optional[mtf.Tensor],
+          cat_msk_src: typing.Optional[mtf.Tensor],
+          cat_mask_tgt: typing.Optional[mtf.Tensor],
           txt_src: typing.Optional[mtf.Tensor],
-          txt_tag: typing.Optional[mtf.Tensor],
+          txt_tgt: typing.Optional[mtf.Tensor],
           vid_msk_src: typing.Optional[mtf.Tensor],
-          vid_msk_tag: typing.Optional[mtf.Tensor],
+          vid_msk_tgt: typing.Optional[mtf.Tensor],
           txt_msk: typing.Optional[mtf.Tensor],
           ) -> typing.Tuple[mtf.Tensor, mtf.Tensor, mtf.Tensor, mtf.Tensor, mtf.Tensor]:
     """
@@ -306,39 +340,21 @@ def build(params: ModelParameter,
     text source and text target.
     :param params: Instance of ModelParameter for which to build the graph
     :param vid: Optional Video to attend over, length=(context+1)
+    :param cat_msk_src: Optional mask for zero frames
+    :param cat_mask_tgt: Optional mask to remove loss for certain video frames
     :param txt_src: Optional tokenized text source, will be embedded
-    :param txt_tag: Optional tokenized text target, required when source is given
+    :param txt_tgt: Optional tokenized text target, required when source is given
     :param vid_msk_src: Optional mask for zero frames
-    :param vid_msk_tag: Optional mask to remove loss for certain video frames
+    :param vid_msk_tgt: Optional mask to remove loss for certain video frames
     :param txt_msk: Optional mask to remove loss for certain token positions
     :return: (Generated Video, Total Loss, Video Loss, Token Loss)
     """
     with mtf.utils.outside_all_rewrites(), tf.variable_scope(params.model_mode):
-
-        if cat_mask_src is None:
-            cat_mask_src = mtf.ones(params.mesh, [], params.variable_dtype.activation_dtype)
-        else:
-            cat_mask_src = mtf.cast(cat_mask_src, params.variable_dtype.activation_dtype)
-
-        if cat_mask_tag is None:
-            cat_mask_tag = mtf.ones(params.mesh, [], params.variable_dtype.activation_dtype)
-        else:
-            cat_mask_tag = mtf.cast(cat_mask_tag, params.variable_dtype.activation_dtype)
-
-        if txt_msk is None:
-            txt_msk = mtf.ones(params.mesh, [], params.variable_dtype.activation_dtype)
-        else:
-            txt_msk = mtf.cast(txt_msk, params.variable_dtype.activation_dtype)
-
-        if vid_msk_src is None:
-            vid_msk_src = mtf.ones(params.mesh, [], params.variable_dtype.activation_dtype)
-        else:
-            vid_msk_src = mtf.cast(vid_msk_src, params.variable_dtype.activation_dtype)
-
-        if vid_msk_tag is None:
-            vid_msk_tag = mtf.ones(params.mesh, [], params.variable_dtype.activation_dtype)
-        else:
-            vid_msk_tag = mtf.cast(vid_msk_tag, params.variable_dtype.activation_dtype)
+        cat_msk_src = default_ones(params, cat_msk_src)
+        cat_mask_tgt = default_ones(params, cat_mask_tgt)
+        txt_msk = default_ones(params, txt_msk)
+        vid_msk_src = default_ones(params, vid_msk_src)
+        vid_msk_tgt = default_ones(params, vid_msk_tgt)
 
         if vid is not None:
             vid = mtf.cast(vid, params.variable_dtype.activation_dtype)
@@ -348,36 +364,37 @@ def build(params: ModelParameter,
         frame_out: typing.Union[int, mtf.Tensor] = 0
         token_out: typing.Union[int, mtf.Tensor] = 0
 
-        spatial_ctx: mtf.Dimension = txt_tag.shape[-2] if params.use_language else vid.shape[2]
+        spatial_ctx: mtf.Dimension = txt_tgt.shape[-2] if params.use_language else vid.shape[2]
 
-        # Slice and Normalize the Video input add a zero frame memory token.
+        if params.use_video and params.input_dropout > 0:
+            vid = mtf.dropout(vid, rate=params.input_dropout)
         if params.use_video:
             context_dimension = vid.shape[1]
             input_features = vid.shape[-1:]
             tgt = slice(vid, 1, context_dimension.size, context_dimension)
             src = slice(vid, 0, context_dimension.size - 1, context_dimension)
             src = src * vid_msk_src + _embed(params, shape=vid.shape[2:], name_extras=tuple()) * (1 - vid_msk_src)
-            src = src * cat_mask_src + _embed(params, shape=vid.shape[2:], name_extras=tuple()) * (1 - cat_mask_src)
+            src = src * cat_msk_src + _embed(params, shape=vid.shape[2:], name_extras=tuple()) * (1 - cat_msk_src)
             src = _linear_to_features(params, src, input_features)
 
         # Language embedding and initial feed forward.
         if params.use_language:
-            txt_src = _linear_to_features(params,
-                                          mtf.one_hot(txt_src, params.vocab_dim,
-                                                      dtype=params.variable_dtype.activation_dtype),
-                                          [params.vocab_dim])
-            txt_src = _linear(params, txt_src, [txt_tag.shape[-1], params.key_dim], [params.key_dim])
+            txt = _linear_to_features(params,
+                                      mtf.one_hot(txt_src, params.vocab_dim,
+                                                  dtype=params.variable_dtype.activation_dtype),
+                                      [params.vocab_dim])
+        if params.use_language and params.input_dropout > 0:
+            txt = mtf.dropout(txt, rate=params.input_dropout)
+        if params.use_language:
+            txt = _linear(params, txt, [txt_tgt.shape[-1], params.key_dim], [params.key_dim])
 
-        # Connect video and language Input.
         if params.use_video and params.use_language:
-            src = concat([src, txt_src], spatial_ctx)
-
-        # If language only mode, set the language input as src.
+            src = concat([src, txt], spatial_ctx)
         elif not params.use_video:
-            src: mtf.Tensor = txt_src
+            src: mtf.Tensor = txt
 
         if params.use_initial_position_embedding:
-            src = src + _embed(params, src.shape[1:-1], name_extras=tuple())
+            src += _embed(params, src.shape[1:-1], name_extras=tuple())
 
         if params.use_revnet:
             out = (src, None, src, None)
@@ -403,36 +420,24 @@ def build(params: ModelParameter,
         if params.use_revnet:
             out = out[0] + out[2]
 
-        # Language Loss
         if params.use_language:
             token_out = _linear_from_features(params, slice(out, 0, params.language_token_patch, spatial_ctx),
-                                              [txt_tag.shape[-1], params.vocab_dim])
-            cross_entropy = mtf.layers.softmax_cross_entropy_with_logits(token_out, txt_tag, params.vocab_dim,
-                                                                         params.z_loss)
-            token_loss = mtf.reduce_mean(cross_entropy * txt_msk * cat_mask_tag)
-
-        # Video Loss
+                                              [txt_tgt.shape[-1], params.vocab_dim])
         if params.use_video:
             out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)
-            frame_out = mtf.sigmoid(_linear_from_features(params, out, input_features))
-
-            loss_type: str = params.use_video.lower()
-
-            if loss_type in ['mse', 'l1']:
-                video_loss: mtf.Tensor = mtf.abs(frame_out - tgt) * vid_msk_tag * cat_mask_tag
-            elif loss_type in ['bce', 'sigmoid_cross_entropy', 'binary_cross_entropy']:
-                video_loss: mtf.Tensor = mtf.layers.sigmoid_cross_entropy_with_logits(frame_out, tgt)
-
-            else:
-                raise ValueError(f"{loss_type} is NOT a supported name for a video loss.")
-
-            video_loss: mtf.Tensor = mtf.reduce_mean(video_loss * vid_msk_tag * cat_mask_tag)
-
+            frame_out = mtf.sigmoid(_linear_from_features(params, out, vid.shape[-1:]))
+        if params.use_language:
+            target = mtf.one_hot(txt_tgt, params.vocab_dim, dtype=params.variable_dtype.activation_dtype)
+            token_loss = mtf.reduce_sum(mtf.reduce_logsumexp(token_out, params.vocab_dim))
+            token_loss -= mtf.einsum([token_out, target], output_shape=[])
+            token_loss /= txt_tgt.size
+        if params.use_video:
+            video_loss: mtf.Tensor = mtf.reduce_mean(mtf.abs(frame_out - tgt) * vid_msk_tgt * cat_mask_tgt)
 
         params.layer_idx = 0
 
         loss = video_loss + token_loss
-        video_loss = video_loss * vid_msk_tag.size / mtf.reduce_sum(vid_msk_tag)
+        video_loss = video_loss * vid_msk_tgt.size / mtf.reduce_sum(vid_msk_tgt)
         token_loss = token_loss * txt_msk.size / mtf.reduce_sum(txt_msk)
 
         return loss, video_loss, token_loss, frame_out, token_out
