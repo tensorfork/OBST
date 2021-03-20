@@ -167,7 +167,7 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter, manual_step
                     if params.weight_standardisation:
                         val = var.value
                         val -= weight_update
-                        std = mtf.rsqrt(1e-6 + mtf.reduce_mean(mtf.square(var), output_shape=[]))
+                        std = mtf.rsqrt(1e-6 + mtf.reduce_mean(mtf.square(val), output_shape=[]))
 
                         shape = [d.size for d in var.shape.dims]
                         feature_dims_used = all(f in shape for f in params.feature_dims)
