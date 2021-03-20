@@ -43,7 +43,7 @@ class HeInit(Initializer):
         if self.feature_dims_used and scale_shape.index(self.params.key_dim.size) == -1:
             fan_in = np.prod(scale_shape[:-2])
         elif self.feature_dims_used:
-            fan_in = np.prod(scale_shape[:2])
+            fan_in = np.prod([d.size for d in self.params.feature_dims])
         elif len(scale_shape) == 2:
             fan_in = scale_shape[0]
         else:
