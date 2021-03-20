@@ -165,7 +165,10 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter, manual_step
                     if params.grad_accumulation > 1:
                         weight_update *= step
                     if params.weight_standardisation:
-                        var -= weight_update
+                        val = var.value
+                        val -= weight_update
+                        std = mtf.rsqrt(1e-6 + mtf.reduce_mean(mtf.square(var), output_shape=[]))
+
                         shape = [d.size for d in var.shape.dims]
                         feature_dims_used = all(f in shape for f in params.feature_dims)
                         if feature_dims_used and shape.index(params.key_dim.size) == -1:
@@ -174,7 +177,8 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter, manual_step
                             fan_in = np.prod(shape[:2])
                         elif len(shape) == 2:
                             fan_in = shape[0]
-                        update_ops.append(mtf.assign(var, 1.6077447771479307 / np.sqrt(fan_in)))
+                        std *= 1.6077447771479307 / np.sqrt(fan_in)
+                        update_ops.append(mtf.assign(var, val * std))
                     else:
                         update_ops.append(mtf.assign_sub(var, weight_update))
     return params.mesh.graph.trainable_variables[0].graph.combine_assignments(update_ops), tf_learning_rate
