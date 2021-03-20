@@ -8,7 +8,7 @@ import typing
 import mesh_tensorflow as mtf
 import numpy as np
 import tensorflow.compat.v1 as tf
-import tensorflow.python.ops.init_ops as init_ops
+from tensorflow.python.ops.init_ops import Initializer
 from tensorflow.python.ops import random_ops
 
 from .dataclass import BlockConfig, ModelParameter
@@ -33,7 +33,7 @@ def _get_variable(params: ModelParameter, shape: typing.Union[typing.List[mtf.Di
                             initializer=initializer)
 
 
-class HeInit(init_ops.Initializer):
+class HeInit(Initializer):
     def __init__(self, params: ModelParameter, feature_dims_used):
         self.params = params
         self.feature_dims_used = feature_dims_used
