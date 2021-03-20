@@ -48,7 +48,8 @@ class HeInit(Initializer):
             fan_in = scale_shape[0]
         else:
             raise ValueError(f"Shape: {scale_shape}\nParams: {self.params}\nFeatureDimsUsed: {self.feature_dims_used}")
-        return random_ops.truncated_normal(shape, 0.0, 1.6077447771479307 / np.sqrt(fan_in), tf.float32, seed=None)
+        return random_ops.truncated_normal(shape, 0.0, 1.6077447771479307 / np.sqrt(fan_in), dtype or tf.float32,
+                                           seed=None)
 
 
 def _orthogonal_var(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape]) -> mtf.Tensor:
