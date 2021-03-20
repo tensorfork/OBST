@@ -170,13 +170,15 @@ def get_optimizer(loss: mtf.Tensor, params: ModelParameter, manual_step
                         std = mtf.rsqrt(1e-6 + mtf.reduce_mean(mtf.square(val), output_shape=[]))
 
                         shape = [d.size for d in var.shape.dims]
-                        feature_dims_used = all(f in shape for f in params.feature_dims)
+                        feature_dims_used = all(f.size in shape for f in params.feature_dims)
                         if feature_dims_used and shape.index(params.key_dim.size) == -1:
                             fan_in = np.prod(shape[:-2])
                         elif feature_dims_used:
                             fan_in = np.prod(shape[:2])
                         elif len(shape) == 2:
                             fan_in = shape[0]
+                        else:
+                            raise ValueError(f"{val.shape}")
                         std *= 1.6077447771479307 / np.sqrt(fan_in)
                         update_ops.append(mtf.assign(var, val * std))
                     else:
