@@ -499,25 +499,25 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             sess.run(compilation_state)
             elapsed = time.time() - now
             print(f'Compiled in {elapsed:.2f}s')
+
             print("Initializing inputs...")
             sess.run(input_initializers)
+
             print("Initializing summary...")
             summary.initialize(session=sess)
-            print("Enqueueing first batch...")
 
-            for _ in range(params.grad_accumulation):
-                sess.run(enqueue_ops)
+            print("Enqueueing first batch...")
+            sess.run(enqueue_ops)
 
             print(f"Starting training loop. Start step: {params.current_step}")
             for i in range(params.current_step, params.train_steps):
                 if params.debug_train_step:
                     print(f"Current step: {i}\nTraining...")
-                for _ in range(params.grad_accumulation):
-                    sess.run(computation)
+                sess.run(computation)
+
                 if params.debug_train_step:
                     print(f"Enqueueing...")
-                for _ in range(params.grad_accumulation):
-                    sess.run(enqueue_ops)
+                sess.run(enqueue_ops)
 
                 if (i + 1) % params.summary_flush_interval == 0:
                     if params.debug_train_step:
