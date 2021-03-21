@@ -145,7 +145,14 @@ def _feed_forward(params: ModelParameter, block_input: mtf.Tensor, name_extras: 
                         anonymize_dim(params.key_dim, params.key_dim.size * params.group_linear_factor)]
     else:
         intermediate = params.intermediate
-    return _linear_to_features(params, activate(_linear_from_features(params, block_input, intermediate)), intermediate)
+    def from_feat():
+        return _linear_from_features(params, block_input, intermediate)
+    mid = activate(from_feat())
+    if 'glu' in name_extras or 'glu_add' in name_extras:
+        mid *= mtf.sigmoid(from_feat())
+    if 'glu_add' in name_extras:
+        mid += activate(from_feat())
+    return _linear_to_features(params, mid, intermediate)
 
 
 def _norm(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple[str]) -> mtf.Tensor:
