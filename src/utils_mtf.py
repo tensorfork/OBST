@@ -8,6 +8,17 @@ from .utils_core import default
 _NAME_INDEX = [0]
 
 
+def _silu_derivative(op, dy):
+    inp = op.inputs[0]
+    gte = mtf.sigmoid(inp)
+    return gte * (1 + (1 - gte) * inp)
+
+def silu(x):
+    return mtf.cwise(lambda x: tf.sigmoid(x) * x,
+                     [x],
+                     name=random_name("silu"),
+                     grad_fn=_silu_derivative)
+
 def unanonymize(inp: mtf.Tensor, dim: typing.Union[mtf.Dimension, str]) -> mtf.Tensor:
     """
     Inverse of anonymize. Un-replicates tensor across axis by removing the underscore from the name of a dimension of
