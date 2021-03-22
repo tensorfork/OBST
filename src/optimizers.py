@@ -24,7 +24,7 @@ def sum_dim(inp: mtf.Tensor, dims: typing.List[mtf.Dimension]):
 
 def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, manual_step: tf.Tensor,
                   ) -> typing.Tuple[typing.Tuple[mtf.Tensor, typing.List[mtf.Assign], typing.List[mtf.Tensor]],
-                                    tf.Tensor]:
+                                    tf.Tensor, typing.Dict]:
     """
     Creates optimizing and update/training operations.
     :param loss_list: Final scalar loss of the model
@@ -70,6 +70,8 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
 
     for loss_idx in range(1, len(loss_list)):
         shared_operations &= set(loss_list[loss_idx].graph.operations)
+
+    debug_gradients_dict = {}
 
     for loss_idx, loss in enumerate(loss_list):
 
@@ -126,6 +128,12 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
 
                         grad: mtf.Tensor = grad_list[2]
                         var: mtf.Variable = tensor_to_var[inp]
+
+                        if params.debug_gradients:
+                            flat_shape = mtf.Shape([mtf.Dimension('flat_dim', var.size)])
+                            flat_grad = variable(var, f"loss_{loss_idx}", flat_shape)
+                            update_ops.append(mtf.assign(flat_grad, mtf.reshape(grad, new_shape=flat_shape)))
+                            debug_gradients_dict[f"loss_{loss_idx}/{var.name}"] = flat_grad
 
                         if params.use_PCGrad and len(loss_list) > 1:
                             if op in shared_operations:
@@ -227,4 +235,6 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                             update_ops.append(mtf.assign(var, val * std))
                         else:
                             update_ops.append(mtf.assign_sub(var, weight_update))
-    return params.mesh.graph.trainable_variables[0].graph.combine_assignments(update_ops), tf_learning_rate
+
+    return params.mesh.graph.trainable_variables[0].graph.combine_assignments(update_ops),\
+           tf_learning_rate, debug_gradients_dict

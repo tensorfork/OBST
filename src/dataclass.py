@@ -99,6 +99,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.optimizer = 'adam'
         self.use_PCGrad = True
         self.use_revnet = True
+        self.debug_gradients = False
         self.use_initial_position_embedding = False
         self.block_config = [{'layer': ["norm-group-instance-mean-std-shift-scale", "feed_forward-group", "rezero"]},
                              {'layer': ["norm-group-instance-mean-std-shift-scale", "feed_forward-group", "rezero"]},

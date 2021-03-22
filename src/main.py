@@ -38,6 +38,8 @@ def main(args: argparse.Namespace) -> None:
         _params = json.load(f)
     params = ModelParameter(_params)
     params.train = args.run_mode == 'train'
+    params.debug_gradients = args.debug_grad is not None
+
     # Read params of model
 
     json.dump(_params, tf.io.gfile.GFile(f"{params.model_path}/run_config.json", 'w'))

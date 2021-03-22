@@ -50,6 +50,20 @@ def add_summary(tf_loss, value, global_step):
     return tpu.outside_compilation(_host_loss_summary, tf_loss, value, tf.cast(global_step, tf.int32))
 
 
+def add_histogram(tf_loss, value, global_step):
+    """Add all summaries."""
+
+    def _host_loss_summary(local_tf_loss, local_value, local_global_step):
+        """Add summary.scalar in host side."""
+        gs = tf.cast(local_global_step, tf.int64)
+        with tf.control_dependencies([summary.histogram(key, local_value[key], step=gs) for key in local_value.keys()]):
+            return tf.identity(local_tf_loss)
+
+    # Cast the global step to tf.int32, since
+    # outside_compilation does not support tf.int64.
+    return tpu.outside_compilation(_host_loss_summary, tf_loss, value, tf.cast(global_step, tf.int32))
+
+
 def _import_tensor(params, tensor, shape, name):
     return mtf.import_laid_out_tensor(params.mesh, params.mesh_impl.LaidOutTensor([tensor]), shape, name)
 
@@ -208,11 +222,11 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
         if params.train:
             if not params.use_PCGrad:
-                loss_list = loss
+                loss_list = [loss]
             else:
                 loss_list = loss_list[::-1]
 
-            update_ops, learning_rate = get_optimizer(loss_list, params, manual_global_step)
+            update_ops, learning_rate, debug_gradients_dict = get_optimizer(loss_list, params, manual_global_step)
         else:
 
             if params.use_language:
@@ -271,10 +285,20 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             step = tf.equal(step, tf.constant(0, dtype=tf.int64))
             step = tf.cast(step, tf.int64)
 
-            comput_ops = [add_summary(tf_loss=tf.cast(lowering.export_to_tf_tensor(loss), tf.float32),
-                                      value=log_dict, global_step=global_step),
-                          tf.assign_add(global_step, step),
-                          tf.assign_add(manual_global_step, tf.constant(1, dtype=tf.int64, shape=[]))]
+            tf_loss = tf.cast(lowering.export_to_tf_tensor(loss), tf.float32)
+
+            comput_ops = [add_summary(tf_loss=tf_loss, value=log_dict, global_step=global_step)]
+
+            if params.debug_gradients:
+                for grad_key in debug_gradients_dict.keys():
+                    debug_gradients_dict[grad_key] = \
+                        tf.cast(lowering.export_to_tf_tensor(debug_gradients_dict[grad_key]), tf.float32)
+
+                comput_ops.append(add_histogram(tf_loss=tf_loss, value=debug_gradients_dict,
+                                                global_step=global_step))
+
+            comput_ops.extend([tf.assign_add(global_step, step),
+                          tf.assign_add(manual_global_step, tf.constant(1, dtype=tf.int64, shape=[]))])
 
             comput_ops = comput_ops + [lowering.lowered_operation(op) for op in update_ops]
 

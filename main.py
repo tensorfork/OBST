@@ -36,6 +36,8 @@ if __name__ == "__main__":
                         help="Instead of actually training, do a dry run to see if everything works.")
     parser.add_argument("--run_mode", type=str, default="train", help="If the model should train or sample."
                                                                    " Use 'train' or 'sample'.")
+    parser.add_argument("--debug_grad", help="Log the gradients to tensorbord.")
+
     args = parser.parse_args()
 
     if not args.run_mode == 'train' and not args.run_mode == 'sample':
