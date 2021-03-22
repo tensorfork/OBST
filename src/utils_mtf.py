@@ -251,7 +251,7 @@ def activate(fn_name: typing.Union[typing.List[str], str], block_input: mtf.Tens
     if isinstance(fn_name, list):
         fn_name = fn_name[0]
     if fn_name not in ACTIVATIONS:
-        raise ValueError(f"Unknown activation function {fn_name}. Known functions: {list(ACTIVATIONS.keys())}")
+        raise ValueError(f'Unknown activation function "{fn_name}". Known functions: {list(ACTIVATIONS.keys())}')
     return ACTIVATIONS[fn_name](block_input)
 
 
