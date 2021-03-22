@@ -13,21 +13,26 @@ def _silu_derivative(op, dy):
     gte = mtf.sigmoid(inp)
     return gte * (1 + (1 - gte) * inp)
 
+
 def _mish_derivative(op, dy):
     inp = op.inputs[0]
-    gte = mtf.tanh(mtf.softplus(x))
+    gte = mtf.tanh(mtf.softplus(inp))
     return gte + (1 - mtf.square(gte)) * inp * mtf.sigmoid(inp)
+
 
 def silu(x):
     return mtf.cwise(lambda x: tf.sigmoid(x) * x,
                      [x],
                      name=random_name("silu"),
-                     grad_fn=_silu_derivative)
+                     grad_function=_silu_derivative)
+
+
 def mish(x):
     return mtf.cwise(lambda x: tf.tanh(tf.math.softplus(x)) * x,
                      [x],
                      name=random_name("mish"),
-                     grad_fn=_mish_derivative)
+                     grad_function=_mish_derivative)
+
 
 def unanonymize(inp: mtf.Tensor, dim: typing.Union[mtf.Dimension, str]) -> mtf.Tensor:
     """
