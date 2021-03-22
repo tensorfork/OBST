@@ -11,13 +11,13 @@ _NAME_INDEX = [0]
 def _silu_derivative(op, dy):
     inp = op.inputs[0]
     gte = mtf.sigmoid(inp)
-    return gte * (1 + (1 - gte) * inp)
+    return dy * (gte * (1 + (1 - gte) * inp))
 
 
 def _mish_derivative(op, dy):
     inp = op.inputs[0]
     gte = mtf.tanh(mtf.softplus(inp))
-    return gte + (1 - mtf.square(gte)) * inp * mtf.sigmoid(inp)
+    return dy * (gte + (1 - mtf.square(gte)) * inp * mtf.sigmoid(inp))
 
 
 def silu(x):
