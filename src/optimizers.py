@@ -90,12 +90,11 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
             for op in operations[::-1]:
                 grad_outputs = []
                 for out in op.outputs:
-                    grad_list: typing.Tuple[int, int, mtf.Tensor] = tensor_to_gradient.get(out)
-
-                    if grad is None:
+                    if out not in tensor_to_gradient:
                         grad_outputs.append(None)
                         continue
 
+                    grad_list: typing.Tuple[int, int, mtf.Tensor] = tensor_to_gradient[out]
                     grad_outputs.append(grad_list[2])
                     grad_list[0] += 1
 
