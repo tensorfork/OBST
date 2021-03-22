@@ -68,7 +68,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
                                                  "debug_stripper":                True,
                                                  "disable_model_pruning":         False,
                                                  "scoped_allocator_optimization": True,
-                                                 "pin_to_host_optimization":      False,
+                                                 "pin_to_host_optimization":      True,
                                                  "implementation_selector":       True,
                                                  "auto_mixed_precision":          True,
                                                  "disable_meta_optimizer":        False,

@@ -92,16 +92,15 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
             for op in operations[::-1]:
                 grad_outputs = []
                 for out in op.outputs:
-                    grad = tensor_to_gradient.get(out)
-
-                    if grad is None:
+                    if out not in tensor_to_gradient:
                         grad_outputs.append(None)
                         continue
 
-                    grad_outputs.append(grad[2])
-                    grad[0] += 1
+                    grad_list: typing.Tuple[int, int, mtf.Tensor] = tensor_to_gradient[out]
+                    grad_outputs.append(grad_list[2])
+                    grad_list[0] += 1
 
-                    if grad[0] == len(grad[2].operation.inputs):
+                    if grad_list[0] == len(grad_list[2].operation.inputs):
                         del tensor_to_gradient[out]
 
                 if not op.has_gradient or not any(grad_outputs) or not (set(op.inputs) & downstream):
@@ -216,10 +215,10 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                             weight_update += mtf.reduce_mean(var.value)
                         if params.grad_accumulation > 1:
                             weight_update *= step
-                        feature_dims_used = all(f.size in var.shape for f in params.feature_dims)
+                        feature_dims_used = all(f.size in var.shape.dims for f in params.feature_dims)
                         if (params.weight_standardisation and
-                                ((feature_dims_used and len(var.shape) > len(params.feature_dims))
-                                 or (not feature_dims_used and len(var.shape) >= 2))):
+                                ((feature_dims_used and len(var.shape.dims) > len(params.feature_dims))
+                                 or (not feature_dims_used and len(var.shape.dims) >= 2))):
                             val = var.value
                             val -= weight_update
                             std = mtf.rsqrt(1e-6 + mtf.reduce_mean(mtf.square(val), output_shape=[]))
