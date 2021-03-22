@@ -9,9 +9,7 @@ _NAME_INDEX = [0]
 
 
 def _silu_derivative(op, dy):
-    inp = op.inputs[0]
-    gte = mtf.sigmoid(inp)
-    return dy * (gte * (1 + (1 - gte) * inp))
+    return dy * weighted_add(1, op.outputs[0], mtf.sigmoid(op.inputs[0]))
 
 
 def _mish_derivative(op, dy):
@@ -20,18 +18,17 @@ def _mish_derivative(op, dy):
     return dy * (gte + (1 - mtf.square(gte)) * inp * mtf.sigmoid(inp))
 
 
-def silu(x):
-    return mtf.cwise(lambda x: tf.sigmoid(x) * x,
-                     [x],
-                     name=random_name("silu"),
-                     grad_function=_silu_derivative)
-
-
-def mish(x):
-    return mtf.cwise(lambda x: tf.tanh(tf.math.softplus(x)) * x,
-                     [x],
-                     name=random_name("mish"),
-                     grad_function=_mish_derivative)
+ACTIVATIONS = {'relu': mtf.relu,
+               'sigmoid': mtf.sigmoid,
+               'tanh': mtf.tanh,
+               'selu': mtf.selu,
+               'elu': mtf.elu,
+               'softplus': mtf.softplus,
+               'silu': lambda x: mtf.cwise(lambda x: x * tf.sigmoid(x), [x], name=random_name("silu"),
+                                           grad_function=_silu_derivative),
+               'mish': lambda x: mtf.cwise(lambda x: x * tf.tanh(tf.math.softplus(x)), [x], name=random_name("mish"),
+                                           grad_function=_mish_derivative),
+               }
 
 
 def unanonymize(inp: mtf.Tensor, dim: typing.Union[mtf.Dimension, str]) -> mtf.Tensor:
@@ -244,13 +241,18 @@ def replace_dim(inp: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
     return mtf.Shape(out)
 
 
-def activate(block_input: mtf.Tensor) -> mtf.Tensor:
+def activate(fn_name: typing.Union[typing.Tuple[str], str], block_input: mtf.Tensor) -> mtf.Tensor:
     """
     Call activation function on mtf.Tensor.
+    :param fn_name: Name of activation function
     :param block_input: mtf.Tensor
     :return: activated mtf.Tensor
     """
-    return mtf.relu(block_input)
+    if isinstance(fn_name, tuple):
+        fn_name = fn_name[0]
+    if fn_name not in ACTIVATIONS:
+        raise ValueError(f"Unknown activation function {fn_name}. Known functions: {list(ACTIVATIONS.keys())}")
+    return ACTIVATIONS[fn_name](block_input)
 
 
 def weighted_add(left, right, alpha):

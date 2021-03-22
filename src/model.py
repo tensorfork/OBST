@@ -8,8 +8,8 @@ import typing
 import mesh_tensorflow as mtf
 import numpy as np
 import tensorflow.compat.v1 as tf
-from tensorflow.python.ops.init_ops import Initializer
 from tensorflow.python.ops import random_ops
+from tensorflow.python.ops.init_ops import Initializer
 
 from .dataclass import BlockConfig, ModelParameter
 from .utils_core import default
@@ -106,7 +106,7 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
     idx, dim = _get_attention_dim(params, block_input)
     params.attention_idx += 1
     tmp = anonymize_dim(dim)
-    base = activate(_linear_from_features(params, block_input))
+    base = activate(name_extras, _linear_from_features(params, block_input))
 
     key = bias = 0
     if 'embedded' in name_extras or 'context' in name_extras:
@@ -145,13 +145,15 @@ def _feed_forward(params: ModelParameter, block_input: mtf.Tensor, name_extras: 
                         anonymize_dim(params.key_dim, params.key_dim.size * params.group_linear_factor)]
     else:
         intermediate = params.intermediate
-    def from_feat():
+
+    def _from_feat():
         return _linear_from_features(params, block_input, intermediate)
-    mid = activate(from_feat())
+
+    mid = activate(name_extras, _from_feat())
     if 'glu' in name_extras or 'glu_add' in name_extras:
-        mid *= mtf.sigmoid(from_feat())
+        mid *= mtf.sigmoid(_from_feat())
     if 'glu_add' in name_extras:
-        mid += activate(from_feat())
+        mid += activate(name_extras, _from_feat())
     return _linear_to_features(params, mid, intermediate)
 
 
@@ -173,7 +175,7 @@ def _norm(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.T
 
 
 def _activate(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple[str]):
-    return activate(block_input)
+    return activate(name_extras, block_input)
 
 
 def _convolution(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple[str]):
@@ -191,20 +193,21 @@ def _convolution(params: ModelParameter, block_input: mtf.Tensor, name_extras: t
         one_hot = mtf.one_hot(one_hot, dim)
         output = mtf.einsum([one_hot, anonymous_block_input], block_input.shape + [indexed])
         output = _linear(params, output, [indexed] + params.feature_dims, params.intermediate)
-        output = activate(output)
+        output = activate(name_extras, output)
         return _communicating_linear(params, output)
     out = [mtf.shift(_linear_from_features(params, block_input), i, dim, False) for i in range(convolution_size)]
-    return _communicating_linear(params, activate(mtf.add_n(out)))
+    return _communicating_linear(params, activate(name_extras, mtf.add_n(out)))
 
 
 LAYER_FUNCTIONS = {'feed_forward': _feed_forward,
-                   'attention':    _attention,
-                   'norm':         _norm,
-                   'rezero':       _rezero,
-                   'embed':        _embed,
-                   'all_mean':     _all_mean,
-                   'activation':   _activate,
-                   'convolution':  _convolution
+                   'attention': _attention,
+                   'norm': _norm,
+                   'rezero': _rezero,
+                   'embed': _embed,
+                   'all_mean': _all_mean,
+                   'activation': _activate,
+                   'mish'
+                   'convolution': _convolution
                    }
 
 
