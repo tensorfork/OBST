@@ -343,7 +343,7 @@ def build(params: ModelParameter,
           vid_msk_src: typing.Optional[mtf.Tensor],
           vid_msk_tgt: typing.Optional[mtf.Tensor],
           txt_msk: typing.Optional[mtf.Tensor],
-          ) -> typing.Tuple[mtf.Tensor, mtf.Tensor, mtf.Tensor, mtf.Tensor, mtf.Tensor]:
+          ) -> typing.Tuple[mtf.Tensor, typing.List, mtf.Tensor, mtf.Tensor, mtf.Tensor, mtf.Tensor]:
     """
     Build Mesh Tensorflow graph of a model given parameters previously inserted.
     The model slices the video input itself (to save on TPU CPU <--> TPU Core bandwidth), but needs both
@@ -436,13 +436,21 @@ def build(params: ModelParameter,
         if params.use_video:
             out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)
             frame_out = mtf.sigmoid(_linear_from_features(params, out, vid.shape[-1:]))
+
+        loss_list = []
+
         if params.use_language:
             target = mtf.one_hot(txt_tgt, params.vocab_dim, dtype=params.variable_dtype.activation_dtype)
             token_loss = mtf.reduce_sum(mtf.reduce_logsumexp(token_out, params.vocab_dim))
             token_loss -= mtf.einsum([token_out, target], output_shape=[])
             token_loss /= txt_tgt.size
+
+            loss_list.append(token_out)
+
         if params.use_video:
             video_loss: mtf.Tensor = mtf.reduce_mean(mtf.abs(frame_out - tgt) * vid_msk_tgt * cat_mask_tgt)
+
+            loss_list.append(video_loss)
 
         params.layer_idx = 0
 
@@ -450,4 +458,4 @@ def build(params: ModelParameter,
         video_loss = video_loss * vid_msk_tgt.size / mtf.reduce_sum(vid_msk_tgt)
         token_loss = token_loss * txt_msk.size / mtf.reduce_sum(txt_msk)
 
-        return loss, video_loss, token_loss, frame_out, token_out
+        return loss, loss_list, video_loss, token_loss, frame_out, token_out

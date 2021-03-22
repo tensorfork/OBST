@@ -97,12 +97,12 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.debug_train_step = True
         self.model_mode = 'jannet'
         self.optimizer = 'adam'
-        self.video_loss = 'mse'
+        self.use_PCGrad = True
         self.use_revnet = True
         self.use_initial_position_embedding = False
-        self.block_config = [{'layer': ["norm-group-instance", "feed_forward-group", "rezero"]},
-                             {'layer': ["norm-group-instance", "feed_forward-group", "rezero"]},
-                             {'layer': ["norm-group-instance", "attention-embedded", "rezero"]}]
+        self.block_config = [{'layer': ["norm-group-instance-mean-std-shift-scale", "feed_forward-group", "rezero"]},
+                             {'layer': ["norm-group-instance-mean-std-shift-scale", "feed_forward-group", "rezero"]},
+                             {'layer': ["norm-group-instance-mean-std-shift-scale", "attention-embedded", "rezero"]}]
 
         self.mesh: typing.Optional[mtf.Mesh] = None
         self.d_assignment: typing.Optional[DeviceAssignment] = None
