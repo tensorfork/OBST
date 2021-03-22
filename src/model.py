@@ -83,7 +83,7 @@ def _communicating_linear(params: ModelParameter, block_input: mtf.Tensor):
 
 
 def _embed(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
-           name_extras: typing.Tuple[str]) -> mtf.Tensor:
+           name_extras: typing.List[str]) -> mtf.Tensor:
     params.embedding_param_count = params.embedding_param_count + np.prod([s.size for s in shape])
     return _normal_var(params, shape, params.embedding_stddev)
 
@@ -102,7 +102,7 @@ def compare_range(params: ModelParameter, dim0: mtf.Dimension, dim1: mtf.Dimensi
                     params.variable_dtype.activation_dtype)
 
 
-def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple[str]):
+def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.List[str]):
     idx, dim = _get_attention_dim(params, block_input)
     params.attention_idx += 1
     tmp = anonymize_dim(dim)
@@ -134,12 +134,12 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
     return mtf.einsum([lgt, anonymize(val, dim)], block_input.shape) / mtf.reduce_sum(lgt, reduced_dim=tmp)
 
 
-def _rezero(params, block_input: mtf.Tensor, name_extras: typing.Tuple[str]) -> mtf.Tensor:
+def _rezero(params, block_input: mtf.Tensor, name_extras: typing.List[str]) -> mtf.Tensor:
     with tf.variable_scope(random_name()):
         return block_input * _get_variable(params, [], tf.constant_initializer(0))
 
 
-def _feed_forward(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple[str]) -> mtf.Tensor:
+def _feed_forward(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.List[str]) -> mtf.Tensor:
     if 'group' in name_extras:
         intermediate = [params.head_dim,
                         anonymize_dim(params.key_dim, params.key_dim.size * params.group_linear_factor)]
@@ -157,7 +157,7 @@ def _feed_forward(params: ModelParameter, block_input: mtf.Tensor, name_extras: 
     return _linear_to_features(params, mid, intermediate)
 
 
-def _norm(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple[str]) -> mtf.Tensor:
+def _norm(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.List[str]) -> mtf.Tensor:
     normalized_shape = block_input.shape - [params.key_dim]
     if 'instance' not in name_extras:
         normalized_shape = normalized_shape - [_get_attention_dim(params, block_input).dim]
@@ -174,11 +174,11 @@ def _norm(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.T
     return block_input
 
 
-def _activate(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple[str]):
+def _activate(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.List[str]):
     return activate(name_extras, block_input)
 
 
-def _convolution(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple[str]):
+def _convolution(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.List[str]):
     idx, dim = _get_attention_dim(params, block_input)
     convolution_size = 16
     if len(name_extras) > 0 and name_extras[-1].isdigit():
