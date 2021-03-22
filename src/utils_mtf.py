@@ -9,13 +9,13 @@ _NAME_INDEX = [0]
 
 
 def _silu_derivative(op, dy):
-    return dy * weighted_add(1, op.outputs[0], mtf.sigmoid(op.inputs[0]))
+    return [dy * weighted_add(1, op.outputs[0], mtf.sigmoid(op.inputs[0]))]
 
 
 def _mish_derivative(op, dy):
     inp = op.inputs[0]
     gte = mtf.tanh(mtf.softplus(inp))
-    return dy * (gte + (1 - mtf.square(gte)) * inp * mtf.sigmoid(inp))
+    return [dy * (gte + (1 - mtf.square(gte)) * inp * mtf.sigmoid(inp))]
 
 
 ACTIVATIONS = {'relu': mtf.relu,
