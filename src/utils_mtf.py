@@ -16,7 +16,7 @@ def _silu_derivative(op, dy):
 def _mish_derivative(op, dy):
     inp = op.inputs[0]
     gte = mtf.tanh(mtf.softplus(x))
-    return gte + (1 - mtf.square(gte)) * inp * mtf.sigmoid(x)
+    return gte + (1 - mtf.square(gte)) * inp * mtf.sigmoid(inp)
 
 def silu(x):
     return mtf.cwise(lambda x: tf.sigmoid(x) * x,
