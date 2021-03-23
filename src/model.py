@@ -206,7 +206,6 @@ LAYER_FUNCTIONS = {'feed_forward': _feed_forward,
                    'embed': _embed,
                    'all_mean': _all_mean,
                    'activation': _activate,
-                   'mish'
                    'convolution': _convolution
                    }
 
