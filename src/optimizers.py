@@ -216,7 +216,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                             weight_update += mtf.reduce_mean(var.value)
                         if params.grad_accumulation > 1:
                             weight_update *= step
-                        feature_dims_used = all(f.size in var.shape.dims for f in params.feature_dims)
+                        feature_dims_used = all(f in var.shape.dims for f in params.feature_dims)
                         if (params.weight_standardisation and
                                 ((feature_dims_used and len(var.shape.dims) > len(params.feature_dims))
                                  or (not feature_dims_used and len(var.shape.dims) >= 2))):
