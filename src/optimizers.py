@@ -224,8 +224,8 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                             val -= weight_update
                             std = mtf.rsqrt(1e-6 + mtf.reduce_mean(mtf.square(val), output_shape=[]))
 
-                            shape = [d.size for d in var.shape.dims]
-                            if feature_dims_used and shape.index(params.key_dim.size) == -1:
+                            shape = [d for d in var.shape.dims]
+                            if feature_dims_used and shape.index(params.key_dim) == -1:
                                 fan_in = np.prod(shape[:-2])
                             elif feature_dims_used:
                                 fan_in = np.prod(shape[:2])
