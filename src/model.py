@@ -200,13 +200,13 @@ def _convolution(params: ModelParameter, block_input: mtf.Tensor, name_extras: t
 
 
 LAYER_FUNCTIONS = {'feed_forward': _feed_forward,
-                   'attention': _attention,
-                   'norm': _norm,
-                   'rezero': _rezero,
-                   'embed': _embed,
-                   'all_mean': _all_mean,
-                   'activation': _activate,
-                   'convolution': _convolution
+                   'attention':    _attention,
+                   'norm':         _norm,
+                   'rezero':       _rezero,
+                   'embed':        _embed,
+                   'all_mean':     _all_mean,
+                   'activation':   _activate,
+                   'convolution':  _convolution
                    }
 
 
@@ -388,14 +388,13 @@ def build(params: ModelParameter,
 
         # Language embedding and initial feed forward.
         if params.use_language:
-            txt = _linear_to_features(params,
-                                      mtf.one_hot(txt_src, params.vocab_dim,
-                                                  dtype=params.variable_dtype.activation_dtype),
-                                      [params.vocab_dim])
-        if params.use_language and params.input_dropout > 0:
-            txt = mtf.dropout(txt, rate=params.input_dropout)
-        if params.use_language:
-            txt = _linear(params, txt, [txt_tgt.shape[-1], params.key_dim], [params.key_dim])
+            txt = _linear(params,
+                          mtf.one_hot(txt_src, params.vocab_dim,
+                                      dtype=params.variable_dtype.activation_dtype),
+                          [params.vocab_dim], params.intermediate)
+            if params.input_dropout > 0:
+                txt = mtf.dropout(txt, rate=params.input_dropout)
+            txt = _linear_to_features(params, txt, [txt_tgt.shape[-1]] + params.intermediate)
 
         if params.use_video and params.use_language:
             src = concat([src, txt], spatial_ctx)
