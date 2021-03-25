@@ -22,7 +22,6 @@ def sum_dim(inp: mtf.Tensor, dims: typing.List[mtf.Dimension]):
     return mtf.einsum([inp, anonymize(dims, dims)], output_shape=mtf.Shape(dims) + [anonymize_dim(d) for d in dims])
 
 
-
 def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, manual_step: tf.Tensor,
                   ) -> typing.Tuple[typing.Tuple[mtf.Tensor, typing.List[mtf.Assign], typing.List[mtf.Tensor]],
                                     tf.Tensor, typing.Dict]:
@@ -220,8 +219,8 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                         if (params.weight_standardisation and
                                 ((feature_dims_used and len(var.shape.dims) > len(params.feature_dims))
                                  or (not feature_dims_used and len(var.shape.dims) >= 2))):
-                            val = var.value - weight_update
-                            std = mtf.rsqrt(1e-6 + mtf.reduce_mean(mtf.square(val), output_shape=[]))
+                            val: mtf.Tensor = var.value - weight_update
+                            std = mtf.rsqrt(1e-6 + mtf.reduce_sum(mtf.square(val / (val.size ** 0.5)), output_shape=[]))
 
                             shape = [d.size for d in var.shape.dims]
                             if feature_dims_used and var.shape.dims.index(params.key_dim) == -1:
@@ -235,5 +234,5 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                         else:
                             update_ops.append(mtf.assign_sub(var, weight_update))
 
-    return params.mesh.graph.trainable_variables[0].graph.combine_assignments(update_ops),\
+    return params.mesh.graph.trainable_variables[0].graph.combine_assignments(update_ops), \
            tf_learning_rate, debug_gradients_dict
