@@ -220,8 +220,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                         if (params.weight_standardisation and
                                 ((feature_dims_used and len(var.shape.dims) > len(params.feature_dims))
                                  or (not feature_dims_used and len(var.shape.dims) >= 2))):
-                            val = var.value
-                            val -= weight_update
+                            val = var.value - weight_update
                             std = mtf.rsqrt(1e-6 + mtf.reduce_mean(mtf.square(val), output_shape=[]))
 
                             shape = [d.size for d in var.shape.dims]
