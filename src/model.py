@@ -402,7 +402,8 @@ def build(params: ModelParameter,
             src: mtf.Tensor = txt
 
         if params.use_initial_position_embedding:
-            src += _embed(params, src.shape[1:-1], name_extras=tuple())
+            for dim in (src.shape - params.feature_dims).dims[1:]:
+                src += _embed(params, [dim] + params.feature_dims, name_extras=tuple())
 
         if params.use_revnet:
             out = (src, None, src, None)
