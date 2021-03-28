@@ -443,12 +443,10 @@ def build(params: ModelParameter,
             token_loss = mtf.reduce_sum(mtf.reduce_logsumexp(token_out, params.vocab_dim))
             token_loss -= mtf.einsum([token_out, target], output_shape=[])
             token_loss /= txt_tgt.size
-
-            loss_list.append(token_out)
+            loss_list.append(token_loss)
 
         if params.use_video:
             video_loss: mtf.Tensor = mtf.reduce_mean(mtf.abs(frame_out - tgt) * vid_msk_tgt * cat_mask_tgt)
-
             loss_list.append(video_loss)
 
         params.layer_idx = 0
