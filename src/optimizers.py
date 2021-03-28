@@ -141,7 +141,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                                     update_ops.append(mtf.assign(other_grads[loss_idx], grad))
                                     continue
                                 other_grads.insert(0, grad)
-                                g_square = [mtf.einsum([g, g], output_shape=[]) for g in other_grads[1:]]
+                                g_square = [1e-6 + mtf.einsum([g, g], output_shape=[]) for g in other_grads[1:]]
                                 for i in range(len(other_grads)):
                                     grad = other_grads.pop(0)
                                     for g, sq in zip(other_grads, g_square):
