@@ -126,8 +126,9 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
         key = activate(name_extras, key)
     if 'activate_qry' in name_extras:
         qry = activate(name_extras, qry)
+    val_dim = params.key_dim if linear else dim
     key = anonymize(key, dim)
-    val = anonymize(val, params.key_dim if linear else dim)
+    val = anonymize(val, val_dim)
     inputs = [qry, anonymize(key, [params.key_dim] * linear + [dim] * (masked or not linear))]
     mask = compare_range(params, dim, tmp, mtf.greater_equal)
     if linear and masked:
@@ -136,7 +137,7 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
         return mtf.einsum(inputs + [val], output_shape=block_input.shape)
 
     lgt = mtf.einsum(inputs, reduced_dims=[dim if linear else params.key_dim])
-    reduced = anonymize_dim(params.key_dim) if linear else tmp
+    reduced = anonymize_dim(val_dim)
     if not no_norm and masked and not linear:
         lgt += compare_range(params, dim, tmp, mtf.less) * -1e12
     if 'kernel_softmax' in name_extras:
@@ -152,7 +153,7 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
         lgt /= normalization
     out = mtf.einsum([lgt, val] + [mask] * no_norm, block_input.shape)
     if not no_norm and not prenorm:
-        lgt /= normalization
+        out /= normalization
     return out
 
 
