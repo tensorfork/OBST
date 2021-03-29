@@ -13,7 +13,7 @@ from tensorflow.python.ops.init_ops import Initializer
 
 from .dataclass import BlockConfig, ModelParameter
 from .utils_core import default
-from .utils_mtf import activate, anonymize, anonymize_dim, concat, deduplicate, random_name, slice
+from .utils_mtf import ACTIVATIONS, activate, anonymize, anonymize_dim, concat, deduplicate, random_name, slice
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -107,7 +107,11 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
     params.attention_idx += 1
     tmp = anonymize_dim(dim)
     base = activate(name_extras, _linear_from_features(params, block_input))
-
+    linear = 'linear' in name_extras
+    no_norm = 'no_norm' in name_extras
+    masked = idx in params.masked_attention_dimensions
+    prenorm = (dim.size > params.key_dim.size and linear) or (dim.size < params.key_dim.size and not linear)
+    
     key = bias = 0
     if 'embedded' in name_extras or 'context' in name_extras:
         key = _communicating_linear(params, base) * dim.size ** -0.5
@@ -124,24 +128,33 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
     if 'activate_qry' in name_extras:
         qry = activate(name_extras, qry)
     key = anonymize(key, dim)
-    if 'activate_kernel' not in name_extras:
-        if 'linear' in name_extras:
-            inputs = [qry,
-                      anonymize(key, [params.key_dim] + [dim] * (idx in params.masked_attention_dimensions)),
-                      anonymize(val, params.key_dim)]
-        else:
-            inputs = [qry, key, anonymize(val, dim)]
-        if idx in 
-            inputs.append(compare_range(params, dim, tmp, mtf.greater_equal)),
-        return mtf.einsum(inputs, output_shape=block_input.shape)
-
-    lgt = mtf.einsum([qry, key], reduced_dims=[params.key_dim])
-
-    if idx in params.masked_attention_dimensions:  # it's auto-regressive
-        lgt += compare_range(params, dim, tmp, mtf.less) * -1e12
-
-    lgt = mtf.exp(lgt - mtf.reduce_max(mtf.stop_gradient(lgt), reduced_dim=tmp))
-    return mtf.einsum([lgt, anonymize(val, dim)], block_input.shape) / mtf.reduce_sum(lgt, reduced_dim=tmp)
+    val = anonymize(val, params.key_dim if linear else dim)
+    mask = compare_range(params, dim, tmp, mtf.greater_equal)
+    inputs = [qry, anonymize(key, [params.key_dim] * linear + [dim] * (masked or not linear)]
+    if linear and masked:
+        inputs.append(mask)
+    if all(f'kernel_{k}' not in name_extras for k in ['softmax'] + list(ACTIVATIONS.keys())):
+        return mtf.einsum(inputs + [val], output_shape=block_input.shape)
+                             
+    lgt = mtf.einsum(inputs, reduced_dims=[params.key_dim if linear else dim])
+    reduced = anonymize_dim(params.key_dim) if linear else tmp
+    if 'kernel_softmax' in name_extras:
+        lgt = mtf.exp(lgt - mtf.reduce_max(mtf.stop_gradient(lgt), reduced_dim=reduced))
+    else:
+        for e in name_extras:
+            if e.startswith('kernel_'):
+                lgt = ACTIVATIONS[len('kernel_'):](lgt)
+                break
+    if not no_norm and masked and not linear:
+        lgt *= mask
+    if not no_norm:
+        normalization = mtf.reduce_sum(lgt, reduced_dim=reduced)
+    if not no_norm and prenorm:        
+        lgt /= normalization
+    out = mtf.einsum([lgt, val] + [mask] * no_norm, block_input.shape)
+    if not no_norm and not prenorm:        
+        lgt /= normalization
+    return out
 
 
 def _rezero(params, block_input: mtf.Tensor, name_extras: typing.List[str]) -> mtf.Tensor:
