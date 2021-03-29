@@ -136,7 +136,7 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
     if all(f'kernel_{k}' not in name_extras for k in ['softmax'] + list(ACTIVATIONS.keys())):
         return mtf.einsum(inputs + [val], output_shape=block_input.shape)
 
-    lgt = mtf.einsum(inputs, reduced_dims=[params.key_dim if linear else dim])
+    lgt = mtf.einsum(inputs, reduced_dims=[dim if linear else params.key_dim])
     reduced = anonymize_dim(params.key_dim) if linear else tmp
     if not no_norm and masked and not linear:
         lgt += compare_range(params, dim, tmp, mtf.less) * -1e12
