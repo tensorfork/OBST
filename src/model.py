@@ -108,10 +108,10 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
     tmp = anonymize_dim(dim)
     base = activate(name_extras, _linear_from_features(params, block_input))
     linear = 'linear' in name_extras
-    no_norm = 'no_norm' in name_extras
+    no_norm: typing.Final[bool] = 'no_norm' in name_extras
     masked = idx in params.masked_attention_dimensions
     prenorm = (dim.size > params.key_dim.size and linear) or (dim.size < params.key_dim.size and not linear)
-    
+
     key = bias = 0
     if 'embedded' in name_extras or 'context' in name_extras:
         key = _communicating_linear(params, base) * dim.size ** -0.5
@@ -130,12 +130,12 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
     key = anonymize(key, dim)
     val = anonymize(val, params.key_dim if linear else dim)
     mask = compare_range(params, dim, tmp, mtf.greater_equal)
-    inputs = [qry, anonymize(key, [params.key_dim] * linear + [dim] * (masked or not linear)]
+    inputs = [qry, anonymize(key, [params.key_dim] * linear + [dim] * (masked or not linear))]
     if linear and masked:
         inputs.append(mask)
     if all(f'kernel_{k}' not in name_extras for k in ['softmax'] + list(ACTIVATIONS.keys())):
         return mtf.einsum(inputs + [val], output_shape=block_input.shape)
-                             
+
     lgt = mtf.einsum(inputs, reduced_dims=[params.key_dim if linear else dim])
     reduced = anonymize_dim(params.key_dim) if linear else tmp
     if 'kernel_softmax' in name_extras:
@@ -149,10 +149,10 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
         lgt *= mask
     if not no_norm:
         normalization = mtf.reduce_sum(lgt, reduced_dim=reduced)
-    if not no_norm and prenorm:        
+    if not no_norm and prenorm:
         lgt /= normalization
     out = mtf.einsum([lgt, val] + [mask] * no_norm, block_input.shape)
-    if not no_norm and not prenorm:        
+    if not no_norm and not prenorm:
         lgt /= normalization
     return out
 
