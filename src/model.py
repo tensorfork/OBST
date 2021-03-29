@@ -124,13 +124,16 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
     if 'activate_qry' in name_extras:
         qry = activate(name_extras, qry)
     key = anonymize(key, dim)
-    if 'linear' in name_extras:
-        return mtf.einsum([qry,
-                           anonymize(key, [params.key_dim] + [dim] * (idx in params.masked_attention_dimensions)),
-                           anonymize(val, params.key_dim)]
-                          + ([compare_range(params, dim, tmp, mtf.greater_equal)] if
-                             idx in params.masked_attention_dimensions else []),
-                          output_shape=block_input.shape)
+    if 'activate_kernel' not in name_extras:
+        if 'linear' in name_extras:
+            inputs = [qry,
+                      anonymize(key, [params.key_dim] + [dim] * (idx in params.masked_attention_dimensions)),
+                      anonymize(val, params.key_dim)]
+        else:
+            inputs = [qry, key, anonymize(val, dim)]
+        if idx in 
+            inputs.append(compare_range(params, dim, tmp, mtf.greater_equal)),
+        return mtf.einsum(inputs, output_shape=block_input.shape)
 
     lgt = mtf.einsum([qry, key], reduced_dims=[params.key_dim])
 
