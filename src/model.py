@@ -113,10 +113,17 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
         key = _communicating_linear(params, base) * dim.size ** -0.5
     if 'embedded' in name_extras or 'positional' in name_extras:
         bias = _embed(params, [dim] + params.feature_dims, tuple())
-    key = anonymize(key + bias, dim)
+
+    key = key + bias
     val = _communicating_linear(params, base)
     qry = _communicating_linear(params, base)
-
+    if 'activate_val' in name_extras:
+        val = activate(name_extras, val)
+    if 'activate_key' in name_extras:
+        key = activate(name_extras, key)
+    if 'activate_qry' in name_extras:
+        qry = activate(name_extras, qry)
+    key = anonymize(key, dim)
     if 'linear' in name_extras:
         return mtf.einsum([mtf.softplus(qry),
                            anonymize(key, [params.key_dim] + [dim] * (idx in params.masked_attention_dimensions)),
