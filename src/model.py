@@ -142,8 +142,8 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
         lgt = mtf.exp(lgt - mtf.reduce_max(mtf.stop_gradient(lgt), reduced_dim=reduced))
     else:
         for e in name_extras:
-            if e.startswith('kernel_'):
-                lgt = ACTIVATIONS[len('kernel_'):](lgt)
+            if e.startswith('kernel_') and e[len('kernel_'):] in ACTIVATIONS:
+                lgt = ACTIVATIONS[e[len('kernel_'):]](lgt)
                 break
     if not no_norm and masked and not linear:
         lgt *= mask
