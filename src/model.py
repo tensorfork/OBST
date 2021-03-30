@@ -98,7 +98,7 @@ def _all_mean(params: ModelParameter, block_input: mtf.Tensor, name_extras: typi
 
 
 def compare_range(params: ModelParameter, dim0: mtf.Dimension, dim1: mtf.Dimension, comparison):
-    with tf.variable_scope(f"compare{dim0}_{dim1}"):
+    with tf.variable_scope(f"compare{dim0.name}_{dim1.name}"):
         return cast(comparison(mtf_range(params.mesh, dim0, tf.bfloat16),
                                mtf_range(params.mesh, dim1, tf.bfloat16)),
                     params.variable_dtype.activation_dtype)
