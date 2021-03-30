@@ -380,8 +380,9 @@ def activate(name_extras: typing.Union[typing.List[str], str], block_input: mtf.
             continue
         with tf.variable_scope(fn_name):
             return ACTIVATIONS[fn_name](block_input)
-    print(f'No activation function found for "{name_extras}". Known functions: {list(ACTIVATIONS.keys())}')
-
+    print(f'No activation function found for "{name_extras}". Falling back to identity. '
+          f'Known functions: {list(ACTIVATIONS.keys())}')
+    return block_input
 
 def weighted_add(left, right, alpha):
     return left * alpha + right * (1 - alpha)
