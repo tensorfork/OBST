@@ -118,7 +118,7 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
     if 'embedded' in name_extras or 'context' in name_extras:
         key = _communicating_linear(params, base) * dim.size ** -0.5
     if 'embedded' in name_extras or 'positional' in name_extras:
-        key += _embed(params, [dim] + params.feature_dims, tuple())
+        key += _embed(params, [dim] + params.feature_dims)
     val = _communicating_linear(params, base)
     qry = _communicating_linear(params, base)
     if 'activate_val' in name_extras:
