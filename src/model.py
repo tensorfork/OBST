@@ -425,33 +425,35 @@ def build(params: ModelParameter,
         elif not params.use_video:
             src: mtf.Tensor = txt
 
-        if params.use_initial_position_embedding:
-            for dim in (src.shape - params.feature_dims).dims[1:]:
-                src += _embed(params, [dim] + params.feature_dims)
+        with tf.variable_scope('body'):
 
-        if params.use_revnet:
-            out = (src, None, src, None)
+            if params.use_initial_position_embedding:
+                for dim in (src.shape - params.feature_dims).dims[1:]:
+                    src += _embed(params, [dim] + params.feature_dims)
 
-            def _layer_builder(block_input: typing.Tuple[mtf.Tensor, mtf.Tensor, mtf.Tensor, mtf.Tensor],
-                               block_config: BlockConfig, index: int):
-                x1, x1_backwards, x2, x2_backwards = block_input
-                if x1_backwards is None:
-                    x1_backwards = zeros_like(x1)
-                if x2_backwards is None:
-                    x2_backwards = zeros_like(x2)
-                return RevGradOp(params, block_config, x1, x1_backwards, x2, x2_backwards, index).outputs
-        else:
-            out = src
+            if params.use_revnet:
+                out = (src, None, src, None)
 
-            def _layer_builder(block_input: mtf.Tensor, block_config: BlockConfig, index: int):
-                return mtf.recompute_grad(lambda x: _block_part_fn(params, block_config, x, index), [block_input])
+                def _layer_builder(block_input: typing.Tuple[mtf.Tensor, mtf.Tensor, mtf.Tensor, mtf.Tensor],
+                                   block_config: BlockConfig, index: int):
+                    x1, x1_backwards, x2, x2_backwards = block_input
+                    if x1_backwards is None:
+                        x1_backwards = zeros_like(x1)
+                    if x2_backwards is None:
+                        x2_backwards = zeros_like(x2)
+                    return RevGradOp(params, block_config, x1, x1_backwards, x2, x2_backwards, index).outputs
+            else:
+                out = src
 
-        for i in range(params.n_blocks):
-            for block_part in params.block_config:
-                out = _layer_builder(out, block_part, i)
+                def _layer_builder(block_input: mtf.Tensor, block_config: BlockConfig, index: int):
+                    return mtf.recompute_grad(lambda x: _block_part_fn(params, block_config, x, index), [block_input])
 
-        if params.use_revnet:
-            out = out[0] + out[2]
+            for i in range(params.n_blocks):
+                for block_part in params.block_config:
+                    out = _layer_builder(out, block_part, i)
+
+            if params.use_revnet:
+                out = out[0] + out[2]
 
         if params.use_language:
             token_out = _linear_from_features(params, slice(out, 0, params.language_token_patch, spatial_ctx),
@@ -470,7 +472,7 @@ def build(params: ModelParameter,
             loss_list.append(token_loss)
 
         if params.use_video:
-            video_loss: mtf.Tensor = reduce_mean(abs(frame_out - tgt) * vid_msk_tgt * cat_mask_tgt)
+            video_loss: mtf.Tensor = reduce_mean(mtf.abs(frame_out - tgt) * vid_msk_tgt * cat_mask_tgt)
             loss_list.append(video_loss)
 
         params.layer_idx = 0

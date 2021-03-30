@@ -67,11 +67,6 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
         return mtf.get_variable(var.mesh, f"{var.name}/{params.optimizer}/{name}", shape,
                                 initializer=tf.zeros_initializer(), trainable=False, dtype=params.variable_dtype)
 
-    shared_operations = set(loss_list[0].graph.operations)
-
-    for loss_idx in range(1, len(loss_list)):
-        shared_operations &= set(loss_list[loss_idx].graph.operations)
-
     debug_gradients_dict = {}
 
     for loss_idx, loss in enumerate(loss_list):
@@ -136,7 +131,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                             debug_gradients_dict[f"loss_{loss_idx}/{var.name}"] = flat_grad
 
                         if params.use_PCGrad and len(loss_list) > 1:
-                            if op in shared_operations:
+                            if 'body' in op.name:
                                 other_grads = [variable(var, f"grad_{i}", var.shape) for i in range(len(loss_list) - 1)]
                                 if loss_idx < len(loss_list) - 1:
                                     update_ops.append(mtf.assign(other_grads[loss_idx], grad))
