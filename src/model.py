@@ -55,7 +55,7 @@ def _kaiming_var(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dim
         fan_in = sizes[0]
     else:
         raise ValueError(f"Shape: {shape}\nParams: {params}\nFeatureDimsUsed: {feature_dims_used}")
-    std = 1.6077447771479307 / np.sqrt(fan_in)
+    std = 1.6077447771479307 / fan_in ** 0.5 / params.n_blocks ** 0.5
     return scoped("kaiming_var", _get_variable, params, shape, HeInit(std))
 
 
@@ -423,7 +423,7 @@ def build(params: ModelParameter,
             src: mtf.Tensor = txt
 
         with tf.variable_scope('body'):
-
+            list.index()
             if params.use_initial_position_embedding:
                 for dim in (src.shape - params.feature_dims).dims[1:]:
                     src += _embed(params, [dim] + params.feature_dims)
