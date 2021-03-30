@@ -114,49 +114,46 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
     masked = idx in params.masked_attention_dimensions
     prenorm = (dim.size > params.key_dim.size and linear) or (dim.size < params.key_dim.size and not linear)
 
-    with tf.variable_scope("qkv"):
-        key = 0
-        if 'embedded' in name_extras or 'context' in name_extras:
-            key = _communicating_linear(params, base) * dim.size ** -0.5
-        if 'embedded' in name_extras or 'positional' in name_extras:
-            key += _embed(params, [dim] + params.feature_dims, tuple())
-        val = _communicating_linear(params, base)
-        qry = _communicating_linear(params, base)
-        if 'activate_val' in name_extras:
-            val = activate(name_extras, val)
-        if 'activate_key' in name_extras:
-            key = activate(name_extras, key)
-        if 'activate_qry' in name_extras:
-            qry = activate(name_extras, qry)
-        val_dim = params.key_dim if linear else dim
-        key = anonymize(key, dim)
-        val = anonymize(val, val_dim)
-        inputs = [qry, anonymize(key, [params.key_dim] * linear + [dim] * (masked or not linear))]
-        mask = compare_range(params, dim, tmp, greater_equal)
+    key = 0
+    if 'embedded' in name_extras or 'context' in name_extras:
+        key = _communicating_linear(params, base) * dim.size ** -0.5
+    if 'embedded' in name_extras or 'positional' in name_extras:
+        key += _embed(params, [dim] + params.feature_dims, tuple())
+    val = _communicating_linear(params, base)
+    qry = _communicating_linear(params, base)
+    if 'activate_val' in name_extras:
+        val = activate(name_extras, val)
+    if 'activate_key' in name_extras:
+        key = activate(name_extras, key)
+    if 'activate_qry' in name_extras:
+        qry = activate(name_extras, qry)
+    val_dim = params.key_dim if linear else dim
+    key = anonymize(key, dim)
+    val = anonymize(val, val_dim)
+    inputs = [qry, anonymize(key, [params.key_dim] * linear + [dim] * (masked or not linear))]
+    mask = compare_range(params, dim, tmp, greater_equal)
     if linear and masked:
         inputs.append(mask)
-    with tf.variable_scope("to_kernel"):
-        if all(f'kernel_{k}' not in name_extras for k in ['softmax'] + list(ACTIVATIONS.keys())):
-            return einsum(inputs + [val], output_shape=block_input.shape)
-        lgt = einsum(inputs, reduced_dims=[dim if linear else params.key_dim])
-        reduced = anonymize_dim(val_dim)
-        if not no_norm and masked and not linear:
-            lgt += compare_range(params, dim, tmp, less) * -1e12
-        if 'kernel_softmax' in name_extras:
-            lgt = exp(lgt - reduce_max(mtf.stop_gradient(lgt), reduced_dim=reduced))
-        else:
-            for e in name_extras:
-                if e.startswith('kernel_') and e[len('kernel_'):] in ACTIVATIONS:
-                    lgt = ACTIVATIONS[e[len('kernel_'):]](lgt)
-                    break
-    with tf.variable_scope("from_kernel"):
-        if not no_norm:
-            normalization = reduce_sum(lgt, reduced_dim=reduced)
-        if not no_norm and prenorm:
-            lgt /= normalization
-        out = einsum([lgt, val] + [mask] * no_norm, block_input.shape)
-        if not no_norm and not prenorm:
-            out /= normalization
+    if all(f'kernel_{k}' not in name_extras for k in ['softmax'] + list(ACTIVATIONS.keys())):
+        return einsum(inputs + [val], output_shape=block_input.shape)
+    lgt = einsum(inputs, reduced_dims=[dim if linear else params.key_dim])
+    reduced = anonymize_dim(val_dim)
+    if not no_norm and masked and not linear:
+        lgt += compare_range(params, dim, tmp, less) * -1e12
+    if 'kernel_softmax' in name_extras:
+        lgt = exp(lgt - reduce_max(mtf.stop_gradient(lgt), reduced_dim=reduced))
+    else:
+        for e in name_extras:
+            if e.startswith('kernel_') and e[len('kernel_'):] in ACTIVATIONS:
+                lgt = ACTIVATIONS[e[len('kernel_'):]](lgt)
+                break
+    if not no_norm:
+        normalization = reduce_sum(lgt, reduced_dim=reduced)
+    if not no_norm and prenorm:
+        lgt /= normalization
+    out = einsum([lgt, val] + [mask] * no_norm, block_input.shape)
+    if not no_norm and not prenorm:
+        out /= normalization
     return out
 
 
