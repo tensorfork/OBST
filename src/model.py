@@ -233,14 +233,16 @@ LAYER_FUNCTIONS = {'feed_forward': _feed_forward,
 
 
 def _block_part_fn(params: ModelParameter, block_part_config: BlockConfig, block_input: mtf.Tensor,
-                   index: int) -> mtf.Tensor:
+                   index: int, name_prefix: str = 'block') -> mtf.Tensor:
     out = block_input
-    with tf.variable_scope(random_name(f"block{index}_")):
+    with tf.variable_scope(random_name(f"{name_prefix}{index}_")):
         for layer in block_part_config.layer:
             name, *extras = layer.split('-')
             out = scoped(name, LAYER_FUNCTIONS[name], params, out, extras)
-        if not params.use_revnet and block_part_config.skip:
+
+        if not block_part_config.use_revnet and block_part_config.skip:
             out += block_input
+
     return out
 
 
@@ -408,7 +410,11 @@ def build(params: ModelParameter,
             src = slice(vid, 0, context_dimension.size - 1, context_dimension)
             src = src * vid_msk_src + _embed(params, shape=vid.shape[2:]) * (1 - vid_msk_src)
             src = src * cat_msk_src + _embed(params, shape=vid.shape[2:]) * (1 - cat_msk_src)
+
             src = _linear_to_features(params, src, input_features)
+
+            for config_idx, config in enumerate(params.input_block_config):
+                src = _block_part_fn(params, config, src, config_idx, name_prefix='video_input_')
 
         # Language embedding and initial feed forward.
         if params.use_language:
@@ -418,7 +424,11 @@ def build(params: ModelParameter,
                           [params.vocab_dim], params.intermediate)
             if params.input_dropout > 0:
                 txt = dropout(txt, rate=params.input_dropout)
+
             txt = _linear_to_features(params, txt, [txt_tgt.shape[-1]] + params.intermediate)
+
+            for config_idx, config in enumerate(params.input_block_config):
+                txt = _block_part_fn(params, config, txt, config_idx, name_prefix='video_input_')
 
         if params.use_video and params.use_language:
             src = concat([src, txt], spatial_ctx)
@@ -456,11 +466,20 @@ def build(params: ModelParameter,
                 out = out[0] + out[2]
 
         if params.use_language:
-            token_out = _linear_from_features(params, slice(out, 0, params.language_token_patch, spatial_ctx),
-                                              [txt_tgt.shape[-1], params.vocab_dim])
+            token_out = slice(out, 0, params.language_token_patch, spatial_ctx)
+
+            for config_idx, config in enumerate(params.output_block_config):
+                token_out = _block_part_fn(params, config, token_out, config_idx, name_prefix='language_output_')
+
+            token_out = _linear_from_features(params, token_out, [txt_tgt.shape[-1], params.vocab_dim])
+
         if params.use_video:
-            out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)
-            frame_out = sigmoid(_linear_from_features(params, out, vid.shape[-1:]))
+            frame_out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)
+
+            for config_idx, config in enumerate(params.output_block_config):
+                frame_out = _block_part_fn(params, config, frame_out, config_idx, name_prefix='video_output_')
+
+            frame_out = sigmoid(_linear_from_features(params, frame_out, vid.shape[-1:]))
 
         loss_list = []
 
