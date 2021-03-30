@@ -13,8 +13,8 @@ from tensorflow.python.ops.init_ops import Initializer
 
 from .dataclass import BlockConfig, ModelParameter
 from .utils_core import default
-from .utils_mtf import (ACTIVATIONS, activate, add_n, anonymize, anonymize_dim, cast, concat, deduplicate, dropout,
-                        einsum, exp, greater_equal, less, maximum, mtf_range, one_hot, ones, random_name,
+from .utils_mtf import (ACTIVATIONS, SHAPE, activate, add_n, anonymize, anonymize_dim, cast, concat, deduplicate,
+                        dropout, einsum, exp, greater_equal, less, maximum, mtf_range, one_hot, ones, random_name,
                         reduce_logsumexp, reduce_max, reduce_mean, reduce_sum, rsqrt, scoped, shift, sigmoid, slice,
                         square, zeros_like)
 
@@ -30,39 +30,36 @@ def _get_attention_dim(params: ModelParameter, block_input: typing.Union[mtf.Ten
     return ATTENTION_DIM(idx, dim)
 
 
-def _get_variable(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
-                  initializer: typing.Callable) -> mtf.Tensor:
+def _get_variable(params: ModelParameter, shape: SHAPE, initializer: typing.Callable) -> mtf.Tensor:
     with tf.variable_scope(random_name("get_variable")):
         return mtf.get_variable(params.mesh, random_name("get_variable"), deduplicate(shape),
                                 dtype=params.variable_dtype, initializer=initializer)
 
 
 class HeInit(Initializer):
-    def __init__(self, params: ModelParameter, feature_dims_used):
-        self.params = params
-        self.feature_dims_used = feature_dims_used
+    def __init__(self, std):
+        self.std = std
 
     def __call__(self, shape, dtype=None, partition_info=None):
-        scale_shape = list(shape if partition_info is None else partition_info.full_shape)
-        if self.feature_dims_used and scale_shape.index(self.params.key_dim.size) == -1:
-            fan_in = np.prod(scale_shape[:-2])
-        elif self.feature_dims_used:
-            fan_in = np.prod([d.size for d in self.params.feature_dims])
-        elif len(scale_shape) == 2:
-            fan_in = scale_shape[0]
-        else:
-            raise ValueError(f"Shape: {scale_shape}\nParams: {self.params}\nFeatureDimsUsed: {self.feature_dims_used}")
-        return random_ops.truncated_normal(shape, 0.0, 1.6077447771479307 / np.sqrt(fan_in), dtype or tf.float32,
-                                           seed=None)
+        return random_ops.truncated_normal(shape, 0.0, self.std, dtype or tf.float32, seed=None)
 
 
 def _kaiming_var(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape]) -> mtf.Tensor:
-    return scoped("kaiming_var", _get_variable, params, shape,
-                  HeInit(params, all(f in shape for f in params.feature_dims)))
+    feature_dims_used = all(f in shape for f in params.feature_dims)
+    sizes = [d.size for d in shape]
+    if feature_dims_used and shape.index(params.key_dim) == len(sizes) - 1:
+        fan_in = np.prod(sizes[:-2])
+    elif feature_dims_used:
+        fan_in = np.prod([d.size for d in params.feature_dims])
+    elif len(sizes) == 2:
+        fan_in = sizes[0]
+    else:
+        raise ValueError(f"Shape: {shape}\nParams: {params}\nFeatureDimsUsed: {feature_dims_used}")
+    std = 1.6077447771479307 / fan_in ** 0.5 / params.n_blocks ** 0.5
+    return scoped("kaiming_var", _get_variable, params, shape, HeInit(std))
 
 
-def _normal_var(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
-                stddev: float = 0.02, mean: float = 0.) -> mtf.Tensor:
+def _normal_var(params: ModelParameter, shape: SHAPE, stddev: float = 0.02, mean: float = 0.) -> mtf.Tensor:
     return scoped("normal_var", _get_variable, params, shape, tf.random_normal_initializer(stddev=stddev, mean=mean))
 
 
@@ -86,7 +83,7 @@ def _communicating_linear(params: ModelParameter, block_input: mtf.Tensor):
     return _linear_to_features(params, block_input, params.intermediate)
 
 
-def _embed(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape]) -> mtf.Tensor:
+def _embed(params: ModelParameter, shape: SHAPE) -> mtf.Tensor:
     params.embedding_param_count = params.embedding_param_count + np.prod([s.size for s in shape])
     return _normal_var(params, shape, params.embedding_stddev)
 
@@ -436,7 +433,6 @@ def build(params: ModelParameter,
             src: mtf.Tensor = txt
 
         with tf.variable_scope('body'):
-
             if params.use_initial_position_embedding:
                 for dim in (src.shape - params.feature_dims).dims[1:]:
                     src += _embed(params, [dim] + params.feature_dims)

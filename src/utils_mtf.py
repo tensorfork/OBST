@@ -366,20 +366,23 @@ def replace_dim(inp: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
     return mtf.Shape(out)
 
 
-def activate(fn_name: typing.Union[typing.List[str], str], block_input: mtf.Tensor) -> mtf.Tensor:
+def activate(name_extras: typing.Union[typing.List[str], str], block_input: mtf.Tensor) -> mtf.Tensor:
     """
     Call activation function on mtf.Tensor.
     :param fn_name: Name of activation function
     :param block_input: mtf.Tensor
     :return: activated mtf.Tensor
     """
-    if isinstance(fn_name, list):
-        fn_name = fn_name[0]
-    if fn_name not in ACTIVATIONS:
-        raise ValueError(f'Unknown activation function "{fn_name}". Known functions: {list(ACTIVATIONS.keys())}')
-    with tf.variable_scope(fn_name):
-        return ACTIVATIONS[fn_name](block_input)
-
+    if not isinstance(name_extras, str):
+        name_extras = [name_extras]
+    for fn_name in name_extras:
+        if fn_name not in ACTIVATIONS:
+            continue
+        with tf.variable_scope(fn_name):
+            return ACTIVATIONS[fn_name](block_input)
+    print(f'No activation function found for "{name_extras}". Falling back to identity. '
+          f'Known functions: {list(ACTIVATIONS.keys())}')
+    return block_input
 
 def weighted_add(left, right, alpha):
     return left * alpha + right * (1 - alpha)

@@ -219,13 +219,13 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                             std = rsqrt(1e-6 + reduce_sum(square(val / (val.size ** 0.5)), output_shape=[]))
 
                             shape = [d.size for d in var.shape.dims]
-                            if feature_dims_used and var.shape.dims.index(params.key_dim) == -1:
+                            if feature_dims_used and var.shape.dims.index(params.key_dim) == var.shape.ndims - 1:
                                 fan_in = np.prod(shape[:-2])
                             elif feature_dims_used:
                                 fan_in = np.prod(shape[:2])
                             else:
                                 fan_in = shape[0]
-                            std *= 1.6077447771479307 / np.sqrt(fan_in)
+                            std *= 1.6077447771479307 / fan_in ** 0.5 / params.n_blocks ** 0.5
                             update_ops.append(mtf.assign(var, val * std))
                         else:
                             update_ops.append(mtf.assign_sub(var, weight_update))

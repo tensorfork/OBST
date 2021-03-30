@@ -542,7 +542,8 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             print(f"Starting training loop. Start step: {params.current_step}")
             for i in range(params.current_step, params.train_steps):
                 for e_i in range(params.grad_accumulation):
-                    print(f"Current global step: {i}   accumulation step: {e_i}")
+                    if params.debug_train_step:
+                        print(f"Current global step: {i}   accumulation step: {e_i}")
                     sess.run(computation)
 
                     if params.debug_train_step:
