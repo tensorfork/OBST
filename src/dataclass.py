@@ -94,7 +94,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.group_linear_factor = 4
         self.embedding_stddev = 0.004
         self.summary_flush_interval = 1024
-        self.debug_train_step = True
+        self.debug_train_step = False
         self.model_mode = 'jannet'
         self.optimizer = 'adam'
         self.use_PCGrad = True
