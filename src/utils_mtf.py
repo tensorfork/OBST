@@ -324,7 +324,11 @@ def anonymize(inp: mtf.Tensor,
             continue
         shape = [anonymize_dim(d) if cdim == d.name else d for d in shape]
     if shape != inp.shape.dims:
-        with tf.variable_scope(f"anonymize_{dim}"):
+        if isinstance(dim, mtf.Dimension):
+            name = dim.name
+        else:
+            name = '-'.join(d.name for d in dim)
+        with tf.variable_scope(f"anonymize_{name}"):
             return mtf.reshape(inp, shape)
     return inp
 
