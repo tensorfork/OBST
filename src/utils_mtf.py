@@ -18,17 +18,137 @@ def _mish_derivative(op, dy):
     return [dy * (gte + (1 - mtf.square(gte)) * inp * mtf.sigmoid(inp))]
 
 
-ACTIVATIONS = {'relu': mtf.relu,
-               'sigmoid': mtf.sigmoid,
-               'tanh': mtf.tanh,
-               'selu': mtf.selu,
-               'elu': mtf.elu,
+ACTIVATIONS = {'relu':     mtf.relu,
+               'sigmoid':  mtf.sigmoid,
+               'tanh':     mtf.tanh,
+               'selu':     mtf.selu,
+               'elu':      mtf.elu,
                'softplus': mtf.softplus,
-               'silu': lambda x: mtf.cwise(lambda x: x * tf.sigmoid(x), [x], name=random_name("silu"),
-                                           grad_function=_silu_derivative),
-               'mish': lambda x: mtf.cwise(lambda x: x * tf.tanh(tf.math.softplus(x)), [x], name=random_name("mish"),
-                                           grad_function=_mish_derivative),
+               'silu':     lambda x: mtf.cwise(lambda x: x * tf.sigmoid(x), [x], name=random_name("silu"),
+                                               grad_function=_silu_derivative),
+               'mish':     lambda x: mtf.cwise(lambda x: x * tf.tanh(tf.math.softplus(x)), [x],
+                                               name=random_name("mish"),
+                                               grad_function=_mish_derivative),
                }
+DIM = typing.Union[mtf.Dimension, str]
+DIM_LIST = typing.List[mtf.Dimension]
+SHAPE = typing.Union[mtf.Shape, DIM_LIST]
+TENSORS = typing.List[mtf.Tensor]
+OPT_SHAPE = typing.Optional[SHAPE]
+OPT_DIMS = typing.Optional[DIM_LIST]
+
+
+def scoped(name: str, fn: typing.Callable, *args):
+    with tf.variable_scope(random_name(name)):
+        return fn(*args)
+
+
+def einsum(xs: TENSORS, output_shape: OPT_SHAPE = None, reduced_dims: OPT_DIMS = None):
+    return scoped("einsum", mtf.einsum, xs, output_shape, reduced_dims)
+
+
+def one_hot(indices: mtf.Tensor, output_dim: mtf.Dimension, on_value: float = 1.0, off_value: float = 0.0,
+            dtype: tf.dtypes = tf.float32):
+    return scoped("one_hot", mtf.one_hot, indices, output_dim, on_value, off_value, dtype)
+
+
+def reduce_mean(tensor: mtf.Tensor, output_shape: OPT_SHAPE = None, reduced_dim: OPT_DIMS = None):
+    return scoped("reduce_mean", mtf.reduce_mean, tensor, None, output_shape, reduced_dim)
+
+
+def reduce_sum(tensor: mtf.Tensor, output_shape: OPT_SHAPE = None, reduced_dim: OPT_DIMS = None):
+    return scoped("reduce_sum", mtf.reduce_sum, tensor, None, output_shape, reduced_dim)
+
+
+def reduce_max(tensor: mtf.Tensor, output_shape: OPT_SHAPE = None, reduced_dim: OPT_DIMS = None):
+    return scoped("reduce_max", mtf.reduce_max, tensor, None, output_shape, reduced_dim)
+
+
+def reduce_logsumexp(tensor: mtf.Tensor, reduced_dim: OPT_DIMS = None):
+    return scoped("reduce_logsumexp", mtf.reduce_logsumexp, tensor, reduced_dim)
+
+
+def greater_equal(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None):
+    return scoped("greater_equal", mtf.greater_equal, x1, x2, output_shape)
+
+
+def greater(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None):
+    return scoped("greater", mtf.greater, x1, x2, output_shape)
+
+
+def less(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None):
+    return scoped("less", mtf.less, x1, x2, output_shape)
+
+
+def equal(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None):
+    return scoped("equal", mtf.equal, x1, x2, output_shape)
+
+
+def mod(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None):
+    return scoped("mod", mtf.mod, x1, x2, output_shape)
+
+
+def mtf_range(mesh: mtf.Mesh, dim: DIM, dtype: tf.dtypes):
+    return scoped("range", mtf.range, mesh, dim, dtype)
+
+
+def cast(tensor: mtf.Tensor, dtype: tf.dtypes):
+    return scoped("cast", mtf.cast, tensor, dtype)
+
+
+def exp(tensor: mtf.Tensor):
+    return scoped("exp", mtf.exp, tensor)
+
+
+def sigmoid(tensor: mtf.Tensor):
+    return scoped("sigmoid", mtf.sigmoid, tensor)
+
+
+def sqrt(tensor: mtf.Tensor):
+    return scoped("sqrt", mtf.sqrt, tensor)
+
+
+def rsqrt(tensor: mtf.Tensor):
+    return scoped("rsqrt", mtf.rsqrt, tensor)
+
+
+def square(tensor: mtf.Tensor):
+    return scoped("square", mtf.square, tensor)
+
+
+def shift(tensor: mtf.Tensor, offset: int, dim: DIM, wrap: bool):
+    return scoped("shift", mtf.shift, tensor, offset, dim, wrap)
+
+
+def maximum(x1: mtf.Tensor, x2: typing.Union[mtf.Tensor, int, float], output_shape: OPT_SHAPE = None):
+    return scoped("maximum", mtf.maximum, x1, x2, output_shape)
+
+
+def minimum(x1: mtf.Tensor, x2: typing.Union[mtf.Tensor, int, float], output_shape: OPT_SHAPE = None):
+    return scoped("minimum", mtf.minimum, x1, x2, output_shape)
+
+
+def add_n(*xs: typing.Union[typing.List[TENSORS], TENSORS]):
+    if len(xs) == 1 and not isinstance(xs[0], mtf.Tensor):
+        xs = xs[0]
+    return scoped("add_n", mtf.add_n, xs)
+
+
+def ones(mesh: mtf.Mesh, shape: typing.Union, dtype: tf.dtypes):
+    return scoped("ones", mtf.ones, mesh, shape, dtype)
+
+
+def zeros(mesh: mtf.Mesh, shape: typing.Union, dtype: tf.dtypes):
+    return scoped("zeros", mtf.zeros, mesh, shape, dtype)
+
+
+def zeros_like(tensor: mtf.Tensor):
+    return scoped("zeros_like", mtf.zeros_like, tensor)
+
+
+def dropout(tensor: mtf.Tensor, keep_prob: typing.Optional[float] = None, rate: typing.Optional[float] = None,
+            noise_shape: OPT_SHAPE = None):
+    return scoped("dropout", mtf.dropout, tensor, keep_prob, rate, noise_shape)
 
 
 def unanonymize(inp: mtf.Tensor, dim: typing.Union[mtf.Dimension, str]) -> mtf.Tensor:
@@ -76,7 +196,7 @@ def unanonymize_dim(dim: typing.Union[mtf.Dimension, str], new_size: typing.Opti
     return new_dim(dim, new_size, name)
 
 
-def anonymize_dim(dim: typing.Union[mtf.Dimension, str], new_size: typing.Optional[int] = None):
+def anonymize_dim(dim: DIM, new_size: typing.Optional[int] = None):
     """
     Anonymize mtf.Dimension by adding a leading underscore, if it does not exist. Optionally, the size can be changed at
     the same time.
@@ -176,7 +296,7 @@ def check_for_dim(inp: typing.Union[typing.List[mtf.Dimension], mtf.Shape, mtf.T
     return any(dim_name(dim) == cdim.name for cdim in (inp.shape if isinstance(inp, mtf.Tensor) else inp))
 
 
-def deduplicate(inp: typing.Iterable) -> typing.Iterable:
+def deduplicate(inp: SHAPE) -> SHAPE:
     """
     Remove duplicates from any iterable while retaining the order of elements.
     :param inp: iterable to deduplicate
@@ -204,7 +324,12 @@ def anonymize(inp: mtf.Tensor,
             continue
         shape = [anonymize_dim(d) if cdim == d.name else d for d in shape]
     if shape != inp.shape.dims:
-        return mtf.reshape(inp, shape)
+        if isinstance(dim, mtf.Dimension):
+            name = dim.name
+        else:
+            name = '-'.join(d.name for d in dim)
+        with tf.variable_scope(f"anonymize_{name}"):
+            return mtf.reshape(inp, shape)
     return inp
 
 
@@ -252,7 +377,8 @@ def activate(fn_name: typing.Union[typing.List[str], str], block_input: mtf.Tens
         fn_name = fn_name[0]
     if fn_name not in ACTIVATIONS:
         raise ValueError(f'Unknown activation function "{fn_name}". Known functions: {list(ACTIVATIONS.keys())}')
-    return ACTIVATIONS[fn_name](block_input)
+    with tf.variable_scope(fn_name):
+        return ACTIVATIONS[fn_name](block_input)
 
 
 def weighted_add(left, right, alpha):

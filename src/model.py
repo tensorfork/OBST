@@ -13,7 +13,10 @@ from tensorflow.python.ops.init_ops import Initializer
 
 from .dataclass import BlockConfig, ModelParameter
 from .utils_core import default
-from .utils_mtf import activate, anonymize, anonymize_dim, concat, deduplicate, random_name, slice
+from .utils_mtf import (ACTIVATIONS, activate, add_n, anonymize, anonymize_dim, cast, concat, deduplicate, dropout,
+                        einsum, exp, greater_equal, less, maximum, mtf_range, one_hot, ones, random_name,
+                        reduce_logsumexp, reduce_max, reduce_mean, reduce_sum, rsqrt, scoped, shift, sigmoid, slice,
+                        square, zeros_like)
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -29,8 +32,9 @@ def _get_attention_dim(params: ModelParameter, block_input: typing.Union[mtf.Ten
 
 def _get_variable(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
                   initializer: typing.Callable) -> mtf.Tensor:
-    return mtf.get_variable(params.mesh, random_name(), deduplicate(shape), dtype=params.variable_dtype,
-                            initializer=initializer)
+    with tf.variable_scope(random_name("get_variable")):
+        return mtf.get_variable(params.mesh, random_name("get_variable"), deduplicate(shape),
+                                dtype=params.variable_dtype, initializer=initializer)
 
 
 class HeInit(Initializer):
@@ -52,20 +56,20 @@ class HeInit(Initializer):
                                            seed=None)
 
 
-def _orthogonal_var(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape]) -> mtf.Tensor:
-    return _get_variable(params, shape, HeInit(params, all(f in shape for f in params.feature_dims)))  # he normal init
+def _kaiming_var(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape]) -> mtf.Tensor:
+    return scoped("kaiming_var", _get_variable, params, shape,
+                  HeInit(params, all(f in shape for f in params.feature_dims)))
 
 
 def _normal_var(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
                 stddev: float = 0.02, mean: float = 0.) -> mtf.Tensor:
-    return _get_variable(params, shape, tf.random_normal_initializer(stddev=stddev, mean=mean))
+    return scoped("normal_var", _get_variable, params, shape, tf.random_normal_initializer(stddev=stddev, mean=mean))
 
 
 def _linear(params: ModelParameter, block_input: mtf.Tensor, old: typing.List[mtf.Dimension],
             new: typing.List[mtf.Dimension]) -> mtf.Tensor:
-    with tf.variable_scope(random_name()):
-        return mtf.einsum([block_input, _orthogonal_var(params, old + new)],
-                          deduplicate((block_input.shape - old).dims + new))
+    return einsum([block_input, _kaiming_var(params, old + new)],
+                  deduplicate((block_input.shape - old).dims + new))
 
 
 def _linear_to_features(params: ModelParameter, block_input: mtf.Tensor,
@@ -82,23 +86,21 @@ def _communicating_linear(params: ModelParameter, block_input: mtf.Tensor):
     return _linear_to_features(params, block_input, params.intermediate)
 
 
-def _embed(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
-           name_extras: typing.List[str]) -> mtf.Tensor:
+def _embed(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape]) -> mtf.Tensor:
     params.embedding_param_count = params.embedding_param_count + np.prod([s.size for s in shape])
     return _normal_var(params, shape, params.embedding_stddev)
 
 
 def _all_mean(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple):
     # maybe use einsum instead of mean
-    return (mtf.one_hot(mtf.import_fully_replicated(params.mesh,
-                                                    tf.constant(params.attention_idx, dtype=tf.float32, shape=[]), [],
-                                                    str(params.attention_idx)),
-                        params.head_dim)
-            * mtf.reduce_mean(block_input, reduced_dim=params.head_dim))
+    return one_hot(mtf.Constant(params.mesh, _get_attention_dim(params, block_input).index, [], tf.float32).outputs[0],
+                   params.head_dim) * reduce_mean(block_input, reduced_dim=params.head_dim)
 
 
 def compare_range(params: ModelParameter, dim0: mtf.Dimension, dim1: mtf.Dimension, comparison):
-    return mtf.cast(comparison(mtf.range(params.mesh, dim0, tf.bfloat16), mtf.range(params.mesh, dim1, tf.bfloat16)),
+    with tf.variable_scope(f"compare{dim0.name}_{dim1.name}"):
+        return cast(comparison(mtf_range(params.mesh, dim0, tf.bfloat16),
+                               mtf_range(params.mesh, dim1, tf.bfloat16)),
                     params.variable_dtype.activation_dtype)
 
 
@@ -107,36 +109,56 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
     params.attention_idx += 1
     tmp = anonymize_dim(dim)
     base = activate(name_extras, _linear_from_features(params, block_input))
+    linear = 'linear' in name_extras
+    no_norm: typing.Final[bool] = 'no_norm' in name_extras
+    masked = idx in params.masked_attention_dimensions
+    prenorm = (dim.size > params.key_dim.size and linear) or (dim.size < params.key_dim.size and not linear)
 
-    key = bias = 0
+    key = 0
     if 'embedded' in name_extras or 'context' in name_extras:
         key = _communicating_linear(params, base) * dim.size ** -0.5
     if 'embedded' in name_extras or 'positional' in name_extras:
-        bias = _embed(params, [dim] + params.feature_dims, tuple())
-    key = anonymize(key + bias, dim)
+        key += _embed(params, [dim] + params.feature_dims)
     val = _communicating_linear(params, base)
     qry = _communicating_linear(params, base)
-
-    if 'linear' in name_extras:
-        return mtf.einsum([mtf.softplus(qry),
-                           anonymize(key, [params.key_dim] + [dim] * (idx in params.masked_attention_dimensions)),
-                           anonymize(mtf.softplus(val), params.key_dim)]
-                          + ([compare_range(params, dim, tmp, mtf.less)] if
-                             idx in params.masked_attention_dimensions else []),
-                          output_shape=block_input.shape)
-
-    lgt = mtf.einsum([qry, key], reduced_dims=[params.key_dim])
-
-    if idx in params.masked_attention_dimensions:  # it's auto-regressive
-        lgt += compare_range(params, dim, tmp, mtf.less) * -1e12
-
-    lgt = mtf.exp(lgt - mtf.reduce_max(mtf.stop_gradient(lgt), reduced_dim=tmp))
-    return mtf.einsum([lgt, anonymize(val, dim)], block_input.shape) / mtf.reduce_sum(lgt, reduced_dim=tmp)
+    if 'activate_val' in name_extras:
+        val = activate(name_extras, val)
+    if 'activate_key' in name_extras:
+        key = activate(name_extras, key)
+    if 'activate_qry' in name_extras:
+        qry = activate(name_extras, qry)
+    val_dim = params.key_dim if linear else dim
+    key = anonymize(key, dim)
+    val = anonymize(val, val_dim)
+    inputs = [qry, anonymize(key, [params.key_dim] * linear + [dim] * (masked or not linear))]
+    mask = compare_range(params, dim, tmp, greater_equal)
+    if linear and masked:
+        inputs.append(mask)
+    if all(f'kernel_{k}' not in name_extras for k in ['softmax'] + list(ACTIVATIONS.keys())):
+        return einsum(inputs + [val], output_shape=block_input.shape)
+    lgt = einsum(inputs, reduced_dims=[dim if linear else params.key_dim])
+    reduced = anonymize_dim(val_dim)
+    if not no_norm and masked and not linear:
+        lgt += compare_range(params, dim, tmp, less) * -1e12
+    if 'kernel_softmax' in name_extras:
+        lgt = exp(lgt - reduce_max(mtf.stop_gradient(lgt), reduced_dim=reduced))
+    else:
+        for e in name_extras:
+            if e.startswith('kernel_') and e[len('kernel_'):] in ACTIVATIONS:
+                lgt = ACTIVATIONS[e[len('kernel_'):]](lgt)
+                break
+    if not no_norm:
+        normalization = reduce_sum(lgt, reduced_dim=reduced)
+    if not no_norm and prenorm:
+        lgt /= normalization
+    out = einsum([lgt, val] + [mask] * no_norm, block_input.shape)
+    if not no_norm and not prenorm:
+        out /= normalization
+    return out
 
 
 def _rezero(params, block_input: mtf.Tensor, name_extras: typing.List[str]) -> mtf.Tensor:
-    with tf.variable_scope(random_name()):
-        return block_input * _get_variable(params, [], tf.constant_initializer(0))
+    return block_input * _get_variable(params, [], tf.constant_initializer(0))
 
 
 def _feed_forward(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.List[str]) -> mtf.Tensor:
@@ -151,7 +173,7 @@ def _feed_forward(params: ModelParameter, block_input: mtf.Tensor, name_extras: 
 
     mid = activate(name_extras, _from_feat())
     if 'glu' in name_extras or 'glu_add' in name_extras:
-        mid *= mtf.sigmoid(_from_feat())
+        mid *= sigmoid(_from_feat())
     if 'glu_add' in name_extras:
         mid += activate(name_extras, _from_feat())
     return _linear_to_features(params, mid, intermediate)
@@ -164,9 +186,9 @@ def _norm(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.L
     if 'group' not in name_extras:
         normalized_shape = normalized_shape - [params.head_dim]
     if 'mean' in name_extras:
-        block_input -= mtf.reduce_mean(block_input, output_shape=normalized_shape)
+        block_input -= reduce_mean(block_input, output_shape=normalized_shape)
     if 'std' in name_extras:
-        block_input *= mtf.rsqrt(1e-6 + mtf.reduce_mean(mtf.square(block_input), output_shape=normalized_shape))
+        block_input *= rsqrt(1e-6 + reduce_mean(square(block_input), output_shape=normalized_shape))
     if 'scale' in name_extras:
         block_input *= _normal_var(params, params.feature_dims, mean=1)
     if 'shift' in name_extras:
@@ -186,17 +208,17 @@ def _convolution(params: ModelParameter, block_input: mtf.Tensor, name_extras: t
     if "gather" in name_extras:
         anonymous_block_input = anonymize(block_input, dim)
         indexed = mtf.Dimension("indexed", convolution_size)
-        one_hot = mtf.range(params.mesh, indexed, params.variable_dtype.activation_dtype)
+        one_hot = mtf_range(params.mesh, indexed, params.variable_dtype.activation_dtype)
         one_hot -= params.convolution_size
-        one_hot += mtf.range(params.mesh, dim, params.variable_dtype.activation_dtype)
-        one_hot = mtf.maximum(one_hot, 0)
-        one_hot = mtf.one_hot(one_hot, dim)
-        output = mtf.einsum([one_hot, anonymous_block_input], block_input.shape + [indexed])
+        one_hot += mtf_range(params.mesh, dim, params.variable_dtype.activation_dtype)
+        one_hot = maximum(one_hot, 0)
+        one_hot = one_hot(one_hot, dim)
+        output = einsum([one_hot, anonymous_block_input], block_input.shape + [indexed])
         output = _linear(params, output, [indexed] + params.feature_dims, params.intermediate)
         output = activate(name_extras, output)
         return _communicating_linear(params, output)
-    out = [mtf.shift(_linear_from_features(params, block_input), i, dim, False) for i in range(convolution_size)]
-    return _communicating_linear(params, activate(name_extras, mtf.add_n(out)))
+    out = [shift(_linear_from_features(params, block_input), i, dim, False) for i in range(convolution_size)]
+    return _communicating_linear(params, activate(name_extras, add_n(out)))
 
 
 LAYER_FUNCTIONS = {'feed_forward': _feed_forward,
@@ -210,13 +232,15 @@ LAYER_FUNCTIONS = {'feed_forward': _feed_forward,
                    }
 
 
-def _block_part_fn(params: ModelParameter, block_part_config: BlockConfig, block_input: mtf.Tensor) -> mtf.Tensor:
+def _block_part_fn(params: ModelParameter, block_part_config: BlockConfig, block_input: mtf.Tensor,
+                   index: int) -> mtf.Tensor:
     out = block_input
-    for layer in block_part_config.layer:
-        name, *extras = layer.split('-')
-        out = LAYER_FUNCTIONS[name](params, out, extras)
-    if not params.use_revnet and block_part_config.skip:
-        out += block_input
+    with tf.variable_scope(random_name(f"block{index}_")):
+        for layer in block_part_config.layer:
+            name, *extras = layer.split('-')
+            out = scoped(name, LAYER_FUNCTIONS[name], params, out, extras)
+        if not params.use_revnet and block_part_config.skip:
+            out += block_input
     return out
 
 
@@ -226,10 +250,10 @@ class RevGradOp(mtf.Operation):
     See comments on custom_gradient() below.
     """
 
-    def __init__(self, params, block_config, x1, x1_backwards, x2, x2_backwards):
+    def __init__(self, params, block_config, x1, x1_backwards, x2, x2_backwards, index):
         graph: mtf.Graph = x1.graph
         prev_ops = len(graph.operations)
-        y1 = x1 + _block_part_fn(params, block_config, x2)
+        y1 = x1 + _block_part_fn(params, block_config, x2, index)
         fn_outputs = [x2, x2_backwards, y1, x1_backwards]
         forward_operations = graph.operations[prev_ops:]
         new_outputs = set()
@@ -329,8 +353,8 @@ class RevGradOp(mtf.Operation):
 
 
 def default_ones(params, inp):
-    return mtf.cast(default(inp, mtf.ones(params.mesh, [], params.variable_dtype.activation_dtype)),
-                    params.variable_dtype.activation_dtype)
+    return cast(default(inp, ones(params.mesh, [], params.variable_dtype.activation_dtype)),
+                params.variable_dtype.activation_dtype)
 
 
 def build(params: ModelParameter,
@@ -376,24 +400,24 @@ def build(params: ModelParameter,
         spatial_ctx: mtf.Dimension = txt_tgt.shape[-2] if params.use_language else vid.shape[2]
 
         if params.use_video and params.input_dropout > 0:
-            vid = mtf.dropout(vid, rate=params.input_dropout)
+            vid = dropout(vid, rate=params.input_dropout)
         if params.use_video:
             context_dimension = vid.shape[1]
             input_features = vid.shape[-1:]
             tgt = slice(vid, 1, context_dimension.size, context_dimension)
             src = slice(vid, 0, context_dimension.size - 1, context_dimension)
-            src = src * vid_msk_src + _embed(params, shape=vid.shape[2:], name_extras=tuple()) * (1 - vid_msk_src)
-            src = src * cat_msk_src + _embed(params, shape=vid.shape[2:], name_extras=tuple()) * (1 - cat_msk_src)
+            src = src * vid_msk_src + _embed(params, shape=vid.shape[2:]) * (1 - vid_msk_src)
+            src = src * cat_msk_src + _embed(params, shape=vid.shape[2:]) * (1 - cat_msk_src)
             src = _linear_to_features(params, src, input_features)
 
         # Language embedding and initial feed forward.
         if params.use_language:
             txt = _linear(params,
-                          mtf.one_hot(txt_src, params.vocab_dim,
-                                      dtype=params.variable_dtype.activation_dtype),
+                          one_hot(txt_src, params.vocab_dim,
+                                  dtype=params.variable_dtype.activation_dtype),
                           [params.vocab_dim], params.intermediate)
             if params.input_dropout > 0:
-                txt = mtf.dropout(txt, rate=params.input_dropout)
+                txt = dropout(txt, rate=params.input_dropout)
             txt = _linear_to_features(params, txt, [txt_tgt.shape[-1]] + params.intermediate)
 
         if params.use_video and params.use_language:
@@ -403,28 +427,28 @@ def build(params: ModelParameter,
 
         if params.use_initial_position_embedding:
             for dim in (src.shape - params.feature_dims).dims[1:]:
-                src += _embed(params, [dim] + params.feature_dims, name_extras=tuple())
+                src += _embed(params, [dim] + params.feature_dims)
 
         if params.use_revnet:
             out = (src, None, src, None)
 
             def _layer_builder(block_input: typing.Tuple[mtf.Tensor, mtf.Tensor, mtf.Tensor, mtf.Tensor],
-                               block_config: BlockConfig):
+                               block_config: BlockConfig, index: int):
                 x1, x1_backwards, x2, x2_backwards = block_input
                 if x1_backwards is None:
-                    x1_backwards = mtf.zeros_like(x1)
+                    x1_backwards = zeros_like(x1)
                 if x2_backwards is None:
-                    x2_backwards = mtf.zeros_like(x2)
-                return RevGradOp(params, block_config, x1, x1_backwards, x2, x2_backwards).outputs
+                    x2_backwards = zeros_like(x2)
+                return RevGradOp(params, block_config, x1, x1_backwards, x2, x2_backwards, index).outputs
         else:
             out = src
 
-            def _layer_builder(block_input: mtf.Tensor, block_config: BlockConfig):
-                return mtf.recompute_grad(lambda x: _block_part_fn(params, block_config, x), [block_input])
+            def _layer_builder(block_input: mtf.Tensor, block_config: BlockConfig, index: int):
+                return mtf.recompute_grad(lambda x: _block_part_fn(params, block_config, x, index), [block_input])
 
-        for _ in range(params.n_blocks):
+        for i in range(params.n_blocks):
             for block_part in params.block_config:
-                out = _layer_builder(out, block_part)
+                out = _layer_builder(out, block_part, i)
 
         if params.use_revnet:
             out = out[0] + out[2]
@@ -434,25 +458,25 @@ def build(params: ModelParameter,
                                               [txt_tgt.shape[-1], params.vocab_dim])
         if params.use_video:
             out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)
-            frame_out = mtf.sigmoid(_linear_from_features(params, out, vid.shape[-1:]))
+            frame_out = sigmoid(_linear_from_features(params, out, vid.shape[-1:]))
 
         loss_list = []
 
         if params.use_language:
-            target = mtf.one_hot(txt_tgt, params.vocab_dim, dtype=params.variable_dtype.activation_dtype)
-            token_loss = mtf.reduce_sum(mtf.reduce_logsumexp(token_out, params.vocab_dim))
-            token_loss -= mtf.einsum([token_out, target], output_shape=[])
+            target = one_hot(txt_tgt, params.vocab_dim, dtype=params.variable_dtype.activation_dtype)
+            token_loss = reduce_sum(reduce_logsumexp(token_out, params.vocab_dim))
+            token_loss -= einsum([token_out, target], output_shape=[])
             token_loss /= txt_tgt.size
             loss_list.append(token_loss)
 
         if params.use_video:
-            video_loss: mtf.Tensor = mtf.reduce_mean(mtf.abs(frame_out - tgt) * vid_msk_tgt * cat_mask_tgt)
+            video_loss: mtf.Tensor = reduce_mean(abs(frame_out - tgt) * vid_msk_tgt * cat_mask_tgt)
             loss_list.append(video_loss)
 
         params.layer_idx = 0
 
         loss = video_loss + token_loss
-        video_loss = video_loss * vid_msk_tgt.size / mtf.reduce_sum(vid_msk_tgt)
-        token_loss = token_loss * txt_msk.size / mtf.reduce_sum(txt_msk)
+        video_loss = video_loss * vid_msk_tgt.size / reduce_sum(vid_msk_tgt)
+        token_loss = token_loss * txt_msk.size / reduce_sum(txt_msk)
 
         return loss, loss_list, video_loss, token_loss, frame_out, token_out
