@@ -423,7 +423,6 @@ def build(params: ModelParameter,
             src: mtf.Tensor = txt
 
         with tf.variable_scope('body'):
-            list.index()
             if params.use_initial_position_embedding:
                 for dim in (src.shape - params.feature_dims).dims[1:]:
                     src += _embed(params, [dim] + params.feature_dims)
