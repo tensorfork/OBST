@@ -15,8 +15,8 @@ from .dataclass import BlockConfig, ModelParameter
 from .utils_core import default
 from .utils_mtf import (ACTIVATIONS, activate, add_n, anonymize, anonymize_dim, cast, concat, deduplicate, dropout,
                         einsum, exp, greater_equal, less, maximum, mtf_range, one_hot, ones, random_name,
-                        reduce_logsumexp, reduce_max, reduce_mean, reduce_sum, rsqrt, shift, sigmoid, slice, square,
-                        zeros_like)
+                        reduce_logsumexp, reduce_max, reduce_mean, reduce_sum, rsqrt, scoped, shift, sigmoid, slice,
+                        square, zeros_like)
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -56,20 +56,20 @@ class HeInit(Initializer):
                                            seed=None)
 
 
-def _orthogonal_var(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape]) -> mtf.Tensor:
-    return _get_variable(params, shape, HeInit(params, all(f in shape for f in params.feature_dims)))  # he normal init
+def _kaiming_var(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape]) -> mtf.Tensor:
+    return scoped("kaiming_var", _get_variable, params, shape,
+                  HeInit(params, all(f in shape for f in params.feature_dims)))
 
 
 def _normal_var(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
                 stddev: float = 0.02, mean: float = 0.) -> mtf.Tensor:
-    return _get_variable(params, shape, tf.random_normal_initializer(stddev=stddev, mean=mean))
+    return scoped("normal_var", _get_variable, params, shape, tf.random_normal_initializer(stddev=stddev, mean=mean))
 
 
 def _linear(params: ModelParameter, block_input: mtf.Tensor, old: typing.List[mtf.Dimension],
             new: typing.List[mtf.Dimension]) -> mtf.Tensor:
-    with tf.variable_scope(random_name("linear")):
-        return einsum([block_input, _orthogonal_var(params, old + new)],
-                      deduplicate((block_input.shape - old).dims + new))
+    return einsum([block_input, _kaiming_var(params, old + new)],
+                  deduplicate((block_input.shape - old).dims + new))
 
 
 def _linear_to_features(params: ModelParameter, block_input: mtf.Tensor,
@@ -161,8 +161,7 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
 
 
 def _rezero(params, block_input: mtf.Tensor, name_extras: typing.List[str]) -> mtf.Tensor:
-    with tf.variable_scope(random_name()):
-        return block_input * _get_variable(params, [], tf.constant_initializer(0))
+    return block_input * _get_variable(params, [], tf.constant_initializer(0))
 
 
 def _feed_forward(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.List[str]) -> mtf.Tensor:
@@ -175,14 +174,11 @@ def _feed_forward(params: ModelParameter, block_input: mtf.Tensor, name_extras: 
     def _from_feat():
         return _linear_from_features(params, block_input, intermediate)
 
-    with tf.variable_scope("in"):
-        mid = activate(name_extras, _from_feat())
+    mid = activate(name_extras, _from_feat())
     if 'glu' in name_extras or 'glu_add' in name_extras:
-        with tf.variable_scope("glu"):
-            mid *= sigmoid(_from_feat())
+        mid *= sigmoid(_from_feat())
     if 'glu_add' in name_extras:
-        with tf.variable_scope("glu_add"):
-            mid += activate(name_extras, _from_feat())
+        mid += activate(name_extras, _from_feat())
     return _linear_to_features(params, mid, intermediate)
 
 
@@ -192,16 +188,14 @@ def _norm(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.L
         normalized_shape = normalized_shape - [_get_attention_dim(params, block_input).dim]
     if 'group' not in name_extras:
         normalized_shape = normalized_shape - [params.head_dim]
-    with tf.variable_scope("in"):
-        if 'mean' in name_extras:
-            block_input -= reduce_mean(block_input, output_shape=normalized_shape)
-        if 'std' in name_extras:
-            block_input *= rsqrt(1e-6 + reduce_mean(square(block_input), output_shape=normalized_shape))
-    with tf.variable_scope("out"):
-        if 'scale' in name_extras:
-            block_input *= _normal_var(params, params.feature_dims, mean=1)
-        if 'shift' in name_extras:
-            block_input += _normal_var(params, params.feature_dims, mean=0)
+    if 'mean' in name_extras:
+        block_input -= reduce_mean(block_input, output_shape=normalized_shape)
+    if 'std' in name_extras:
+        block_input *= rsqrt(1e-6 + reduce_mean(square(block_input), output_shape=normalized_shape))
+    if 'scale' in name_extras:
+        block_input *= _normal_var(params, params.feature_dims, mean=1)
+    if 'shift' in name_extras:
+        block_input += _normal_var(params, params.feature_dims, mean=0)
     return block_input
 
 
@@ -247,8 +241,7 @@ def _block_part_fn(params: ModelParameter, block_part_config: BlockConfig, block
     with tf.variable_scope(random_name(f"block{index}_")):
         for layer in block_part_config.layer:
             name, *extras = layer.split('-')
-            with tf.variable_scope(random_name(name)):
-                out = LAYER_FUNCTIONS[name](params, out, extras)
+            out = scoped(name, LAYER_FUNCTIONS[name], params, out, extras)
         if not params.use_revnet and block_part_config.skip:
             out += block_input
     return out
