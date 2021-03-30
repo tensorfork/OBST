@@ -88,7 +88,7 @@ def mod(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None):
     return _scoped("mod", mtf.mod, x1, x2, output_shape)
 
 
-def range(mesh: mtf.Mesh, dim: DIM, dtype: tf.dtypes):
+def mtf_range(mesh: mtf.Mesh, dim: DIM, dtype: tf.dtypes):
     return _scoped("range", mtf.range, mesh, dim, dtype)
 
 
