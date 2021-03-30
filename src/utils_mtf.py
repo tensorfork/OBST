@@ -134,11 +134,11 @@ def add_n(*xs: typing.Union[typing.List[TENSORS], TENSORS]):
     return scoped("add_n", mtf.add_n, xs)
 
 
-def ones(mesh: mtf.Mesh, shape: typing.Union, dtype: tf.dtypes):
+def ones(mesh: mtf.Mesh, shape: SHAPE, dtype: tf.dtypes):
     return scoped("ones", mtf.ones, mesh, shape, dtype)
 
 
-def zeros(mesh: mtf.Mesh, shape: typing.Union, dtype: tf.dtypes):
+def zeros(mesh: mtf.Mesh, shape: SHAPE, dtype: tf.dtypes):
     return scoped("zeros", mtf.zeros, mesh, shape, dtype)
 
 
@@ -327,7 +327,7 @@ def anonymize(inp: mtf.Tensor,
         if isinstance(dim, mtf.Dimension):
             name = dim.name
         else:
-            name = '-'.join(d.name for d in dim)
+            name = '-'.join(dim_name(d) for d in dim)
         with tf.variable_scope(f"anonymize_{name}"):
             return mtf.reshape(inp, shape)
     return inp
