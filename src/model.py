@@ -505,7 +505,8 @@ def build(params: ModelParameter,
                                 output_shape=[])
 
         if params.use_video:
-            video_loss: mtf.Tensor = reduce_mean(mtf.abs(frame_out - tgt) * vid_msk_tgt * cat_mask_tgt)
+            video_loss: mtf.Tensor = einsum([mtf.abs(frame_out - tgt), vid_msk_tgt, cat_mask_tgt,
+                                             constant_scalar(params, frame_out.size)], output_shape=[])
             loss_list.append(video_loss)
             video_loss = einsum([video_loss, constant_scalar(params, vid_msk_tgt.size), 1 / reduce_sum(vid_msk_tgt)],
                                 output_shape=[])
