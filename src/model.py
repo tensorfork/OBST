@@ -40,7 +40,7 @@ def _get_variable(params: ModelParameter, shape: SHAPE, initializer: typing.Call
 class OrthogonalInit(Initializer):
     def __init__(self, params: ModelParameter, shape: SHAPE):
         self.params = params
-        self.sizes = sizes = [d.size for d in self.shape]
+        self.sizes = sizes = [d.size for d in shape]
         self.seed = random.randint(0, 2 ** 32)
         feature_dims_used = all(f in shape for f in params.feature_dims)
         if feature_dims_used and shape.index(params.key_dim) == len(sizes) - 1:
