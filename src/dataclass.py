@@ -9,11 +9,12 @@ from tensorflow.python.tpu.device_assignment import DeviceAssignment
 
 
 class BlockConfig:
-    def __init__(self, config):
+    def __init__(self, config, use_revnet=True):
         if isinstance(config, BlockConfig):
             config = config.__dict__
         self.layer = []
         self.skip = False
+        self.use_revnet = use_revnet
         self.__dict__.update(config)
 
 
@@ -101,10 +102,16 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.use_revnet = True
         self.debug_gradients = False
         self.use_initial_position_embedding = False
-        self.block_config = [{'layer': ["norm-group-instance-mean-std-shift-scale", "feed_forward-relu-group",
+        self.block_config = [{'layer': ["norm-group-instance-mean-std-shift-scale",
+                                        "feed_forward-relu-group",
                                         "rezero"]},
+
                              {'layer': ["norm-group-instance-mean-std-shift-scale",
-                                        "attention-relu-embedded-kernel_softmax", "rezero"]}]
+                                        "attention-relu-embedded-kernel_softmax",
+                                        "rezero"]}]
+
+        self.input_block_config = []
+        self.output_block_config = []
 
         self.mesh: typing.Optional[mtf.Mesh] = None
         self.d_assignment: typing.Optional[DeviceAssignment] = None
@@ -127,7 +134,9 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         if isinstance(self.calculation_dtype, str):
             self.calculation_dtype = getattr(tf, self.calculation_dtype)
         self.variable_dtype = mtf.VariableDType(self.storage_dtype, self.calculation_dtype, self.calculation_dtype)
-        self.block_config = [BlockConfig(conf) for conf in self.block_config]
+        self.block_config = [BlockConfig(conf, use_revnet=self.use_revnet) for conf in self.block_config]
+        self.input_block_config = [BlockConfig(conf, use_revnet=False) for conf in self.input_block_config]
+        self.output_block_config = [BlockConfig(conf, use_revnet=False) for conf in self.output_block_config]
         self.time_patch_size = self.n_ctx // self.time_patch
         self.frame_height_patch = self.frame_height // self.patch_size
         self.frame_width_patch = self.frame_width // self.patch_size

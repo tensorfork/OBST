@@ -373,7 +373,7 @@ def activate(name_extras: typing.Union[typing.List[str], str], block_input: mtf.
     :param block_input: mtf.Tensor
     :return: activated mtf.Tensor
     """
-    if not isinstance(name_extras, str):
+    if isinstance(name_extras, str):
         name_extras = [name_extras]
     for fn_name in name_extras:
         if fn_name not in ACTIVATIONS:
