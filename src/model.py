@@ -39,8 +39,11 @@ def _get_variable(params: ModelParameter, shape: SHAPE, initializer: typing.Call
 
 class OrthogonalInit(Initializer):
     def __init__(self, params: ModelParameter, shape: SHAPE):
+        self.params = params
+        self.shape = shape
+        self.pnum = 0
         self.seed = random.randint(0, 2 ** 32)
-        self.sizes = sizes = [d.size for d in shape]
+        sizes = [d.size for d in shape]
         feature_dims_used = all(f in shape for f in params.feature_dims)
         if feature_dims_used and shape.index(params.key_dim) == len(sizes) - 1:
             fan_in = np.prod(sizes[:-2])
@@ -50,20 +53,22 @@ class OrthogonalInit(Initializer):
             fan_in = sizes[0]
         else:
             raise ValueError(f"Shape: {shape}\nParams: {params}\nFeatureDimsUsed: {feature_dims_used}")
-        fan_out = np.prod(self.sizes) // fan_in
+        fan_out = np.prod(sizes) // fan_in
         self.transpose = transpose = fan_out > fan_in
         self.shape = (fan_out, fan_in) if transpose else (fan_in, fan_out)
-        self.index = 0
 
     def __call__(self, shape, dtype=None, partition_info=None):
         q, r = gen_linalg_ops.qr(random_ops.random_normal(self.shape, dtype=tf.float32, seed=self.seed))
         q *= math_ops.sign(array_ops.diag_part(r))
         if self.transpose:
             q = array_ops.matrix_transpose(q)
-        out = array_ops.reshape(q, self.sizes)
-        if shape != self.sizes:
-            out = tf.slice(out, [s * self.index for s in shape], shape)
-            self.index += 1
+        sizes = [d.size for d in self.shape]
+        out = array_ops.reshape(q, sizes)
+        if shape != sizes:
+            out = tf.slice(out,
+                           self.params.mesh_impl.slice_begin(self.shape, self.pnum),
+                           self.params.mesh_impl.slice_size(self.shape))
+            self.pnum += 1
         return tf.cast(out, dtype)
 
 
