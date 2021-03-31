@@ -87,6 +87,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.iterations = 2500
         self.initial_autoregressive_position = 128
         self.use_autoregressive_sampling = False
+        self.weight_centralisation = True
         self.shuffle_input_filenames = True
         self.num_of_sample = 10
         self.z_loss = 0.1
@@ -104,11 +105,13 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.use_initial_position_embedding = False
         self.block_config = [{'layer': ["norm-group-instance-mean-std-shift-scale",
                                         "feed_forward-relu-group",
-                                        "rezero"]},
+                                        "rezero"]
+                              },
 
                              {'layer': ["norm-group-instance-mean-std-shift-scale",
                                         "attention-relu-embedded-kernel_softmax",
-                                        "rezero"]}]
+                                        "rezero"]
+                              }]
 
         self.input_block_config = []
         self.output_block_config = []
@@ -128,6 +131,9 @@ class ModelParameter(typing.Dict[str, typing.Any]):
 
         if not self.use_language and not self.use_video:
             raise ValueError("Language and video mode are disabled. No model can be built.")
+        if self.weight_standardisation and not self.weight_centralisation:
+            print("Can't standardise weights without centralizing them first. Enabling it.")
+            self.weight_centralisation = True
 
         if isinstance(self.storage_dtype, str):
             self.storage_dtype = getattr(tf, self.storage_dtype)
