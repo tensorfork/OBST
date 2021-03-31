@@ -225,7 +225,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                                 fan_in = np.prod(shape[:2])
                             else:
                                 fan_in = shape[0]
-                            fan = max(fan_in, fan_in / np.prod(shape))
+                            fan = min(fan_in, fan_in / np.prod(shape))
                             std *= (fan - 1) ** 0.5 / fan
                             update_ops.append(mtf.assign(var, val * std))
                         else:
