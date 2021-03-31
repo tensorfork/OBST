@@ -55,10 +55,10 @@ class OrthogonalInit(Initializer):
             raise ValueError(f"Shape: {shape}\nParams: {params}\nFeatureDimsUsed: {feature_dims_used}")
         fan_out = np.prod(sizes) // fan_in
         self.transpose = transpose = fan_out > fan_in
-        self.shape = (fan_out, fan_in) if transpose else (fan_in, fan_out)
+        self.flat_shape = (fan_out, fan_in) if transpose else (fan_in, fan_out)
 
     def __call__(self, shape, dtype=None, partition_info=None):
-        q, r = gen_linalg_ops.qr(random_ops.random_normal(self.shape, dtype=tf.float32, seed=self.seed))
+        q, r = gen_linalg_ops.qr(random_ops.random_normal(self.flat_shape, dtype=tf.float32, seed=self.seed))
         q *= math_ops.sign(array_ops.diag_part(r))
         if self.transpose:
             q = array_ops.matrix_transpose(q)
