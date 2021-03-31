@@ -12,7 +12,7 @@ import tensorflow.compat.v1 as tf
 from .dataclass import ModelParameter
 from .model import RevGradOp
 from .utils_mtf import (add_n, anonymize, anonymize_dim, cast, einsum, equal, greater, minimum, mod, reduce_max,
-                        reduce_mean, reduce_sum, rsqrt, sqrt, square, weighted_add)
+                        reduce_mean, reduce_sum, rsqrt, sqrt, square, weighted_add, constant_scalar)
 
 
 def import_float(imported):
@@ -75,7 +75,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
         operations = loss.graph.operations
         xs = [x.outputs[0] for x in params.mesh.graph.trainable_variables]
         tensor_to_var = dict(zip(xs, params.mesh.graph.trainable_variables))
-        loss_grad = mtf.Constant(loss.mesh, 1.0, loss.shape, loss.dtype).outputs[0]
+        loss_grad = constant_scalar(params, 1.0)
         downstream = set(xs)
 
         for op in operations:

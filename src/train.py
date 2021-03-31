@@ -223,8 +223,6 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         if params.train:
             if not params.use_PCGrad:
                 loss_list = [loss]
-            else:
-                loss_list = loss_list[::-1]
 
             update_ops, learning_rate, debug_gradients_dict = get_optimizer(loss_list, params, manual_global_step)
         else:

@@ -14,10 +14,10 @@ from tensorflow.python.ops.init_ops import Initializer
 
 from .dataclass import BlockConfig, ModelParameter
 from .utils_core import default
-from .utils_mtf import (ACTIVATIONS, SHAPE, activate, add_n, anonymize, anonymize_dim, cast, concat, deduplicate,
-                        dropout, einsum, exp, greater_equal, less, maximum, mtf_range, one_hot, ones, random_name,
-                        reduce_logsumexp, reduce_max, reduce_mean, reduce_sum, rsqrt, scoped, shift, sigmoid, slice,
-                        square, zeros_like)
+from .utils_mtf import (ACTIVATIONS, SHAPE, activate, add_n, anonymize, anonymize_dim, cast, concat, constant_scalar,
+                        deduplicate, dropout, einsum, exp, greater_equal, less, log, maximum, mtf_range, one_hot, ones,
+                        random_name, reduce_max, reduce_mean, reduce_sum, rsqrt, scoped, shift, sigmoid, slice, square,
+                        zeros_like, reciprocal)
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -102,8 +102,10 @@ def _embed(params: ModelParameter, shape: SHAPE) -> mtf.Tensor:
 
 def _all_mean(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple):
     # maybe use einsum instead of mean
-    return one_hot(mtf.Constant(params.mesh, _get_attention_dim(params, block_input).index, [], tf.float32).outputs[0],
-                   params.head_dim) * reduce_mean(block_input, reduced_dim=params.head_dim)
+    return einsum([block_input,
+                   one_hot(constant_scalar(params, _get_attention_dim(params, block_input).index / block_input.size),
+                           params.head_dim)],
+                  reduced_dims=[params.head_dim])
 
 
 def compare_range(params: ModelParameter, dim0: mtf.Dimension, dim1: mtf.Dimension, comparison):
@@ -121,7 +123,6 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
     linear = 'linear' in name_extras
     no_norm: typing.Final[bool] = 'no_norm' in name_extras
     masked = idx in params.masked_attention_dimensions
-    prenorm = (dim.size > params.key_dim.size and linear) or (dim.size < params.key_dim.size and not linear)
 
     key = 0
     if 'embedded' in name_extras or 'context' in name_extras:
@@ -156,13 +157,10 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
             if e.startswith('kernel_') and e[len('kernel_'):] in ACTIVATIONS:
                 lgt = ACTIVATIONS[e[len('kernel_'):]](lgt)
                 break
+    norm = []
     if not no_norm:
-        normalization = reduce_sum(lgt, reduced_dim=reduced)
-    if not no_norm and prenorm:
-        lgt /= normalization
-    out = einsum([lgt, val] + [mask] * no_norm, block_input.shape)
-    if not no_norm and not prenorm:
-        out /= normalization
+        norm = [reciprocal(reduce_sum(lgt, reduced_dim=reduced))]
+    out = einsum([lgt, val] + [mask] * no_norm + norm, block_input.shape)
     return out
 
 
@@ -196,10 +194,14 @@ def _norm(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.L
         normalized_shape = normalized_shape - [params.head_dim]
     if 'mean' in name_extras:
         block_input -= reduce_mean(block_input, output_shape=normalized_shape)
+    scale = []
     if 'std' in name_extras:
-        block_input *= rsqrt(1e-6 + reduce_mean(square(block_input), output_shape=normalized_shape))
+        scale.append(rsqrt(1e-6 + einsum([block_input, block_input, constant_scalar(params, 1 / block_input.size)],
+                                         output_shape=normalized_shape)))
     if 'scale' in name_extras:
-        block_input *= _normal_var(params, params.feature_dims, mean=1)
+        scale.append(_normal_var(params, params.feature_dims, mean=1))
+    if scale:
+        block_input = mtf.einsum(scale, output_shape=block_input.shape)
     if 'shift' in name_extras:
         block_input += _normal_var(params, params.feature_dims, mean=0)
     return block_input
@@ -423,7 +425,7 @@ def build(params: ModelParameter,
             src = _linear_to_features(params, src, input_features)
 
             for config_idx, config in enumerate(params.input_block_config):
-                src = _block_part_fn(params, config, src, config_idx, name_prefix='video_input_')
+                src = _block_part_fn(params, config, src, config_idx, name_prefix='vid_inp')
 
         # Language embedding and initial feed forward.
         if params.use_language:
@@ -437,7 +439,7 @@ def build(params: ModelParameter,
             txt = _linear_to_features(params, txt, [txt_tgt.shape[-1]] + params.intermediate)
 
             for config_idx, config in enumerate(params.input_block_config):
-                txt = _block_part_fn(params, config, txt, config_idx, name_prefix='video_input_')
+                txt = _block_part_fn(params, config, txt, config_idx, name_prefix='vid_inp')
 
         if params.use_video and params.use_language:
             src = concat([src, txt], spatial_ctx)
@@ -477,7 +479,7 @@ def build(params: ModelParameter,
             token_out = slice(out, 0, params.language_token_patch, spatial_ctx)
 
             for config_idx, config in enumerate(params.output_block_config):
-                token_out = _block_part_fn(params, config, token_out, config_idx, name_prefix='language_output_')
+                token_out = _block_part_fn(params, config, token_out, config_idx, name_prefix='lang_out')
 
             token_out = _linear_from_features(params, token_out, [txt_tgt.shape[-1], params.vocab_dim])
 
@@ -485,27 +487,29 @@ def build(params: ModelParameter,
             frame_out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)
 
             for config_idx, config in enumerate(params.output_block_config):
-                frame_out = _block_part_fn(params, config, frame_out, config_idx, name_prefix='video_output_')
+                frame_out = _block_part_fn(params, config, frame_out, config_idx, name_prefix='vid_out')
 
             frame_out = sigmoid(_linear_from_features(params, frame_out, vid.shape[-1:]))
 
         loss_list = []
-
         if params.use_language:
             target = one_hot(txt_tgt, params.vocab_dim, dtype=params.variable_dtype.activation_dtype)
-            token_loss = reduce_sum(reduce_logsumexp(token_out, params.vocab_dim))
-            token_loss -= einsum([token_out, target], output_shape=[])
-            token_loss /= txt_tgt.size
+            max_logit = reduce_max(mtf.stop_gradient(token_out), reduced_dim=params.vocab_dim)
+            token_loss = reduce_sum(log(reduce_sum(exp(- max_logit - constant_scalar(params, np.log(txt_tgt.size)) +
+                                                       token_out), reduced_dim=params.vocab_dim)))
+            token_loss -= einsum([token_out, target, constant_scalar(params, 1 / txt_tgt.size)], output_shape=[])
             loss_list.append(token_loss)
+            token_loss += einsum([max_logit, constant_scalar(params, params.vocab_dim.size / txt_tgt.shape)],
+                                 output_shape=[])
+            token_loss = einsum([token_loss, constant_scalar(params, txt_msk.size), 1 / reduce_sum(vid_msk_tgt)],
+                                output_shape=[])
 
         if params.use_video:
             video_loss: mtf.Tensor = reduce_mean(mtf.abs(frame_out - tgt) * vid_msk_tgt * cat_mask_tgt)
             loss_list.append(video_loss)
+            video_loss = einsum([video_loss, constant_scalar(params, vid_msk_tgt.size), 1 / reduce_sum(vid_msk_tgt)],
+                                output_shape=[])
 
         params.layer_idx = 0
 
-        loss = video_loss + token_loss
-        video_loss = video_loss * vid_msk_tgt.size / reduce_sum(vid_msk_tgt)
-        token_loss = token_loss * txt_msk.size / reduce_sum(txt_msk)
-
-        return loss, loss_list, video_loss, token_loss, frame_out, token_out
+        return add_n(loss_list), loss_list, video_loss, token_loss, frame_out, token_out

@@ -3,6 +3,7 @@ import typing
 import mesh_tensorflow as mtf
 import tensorflow.compat.v1 as tf
 
+from .dataclass import ModelParameter
 from .utils_core import default
 
 _NAME_INDEX = [0]
@@ -68,6 +69,14 @@ def reduce_logsumexp(tensor: mtf.Tensor, reduced_dim: OPT_DIMS = None):
     return scoped("reduce_logsumexp", mtf.reduce_logsumexp, tensor, reduced_dim)
 
 
+def constant(params: ModelParameter, value: typing.Union[int, float], shape: OPT_SHAPE = None):
+    return scoped("constant", mtf.constant, params.mesh, value, shape, params.variable_dtype.activation_dtype)
+
+
+def constant_scalar(params: ModelParameter, value: typing.Union[int, float]):
+    return scoped("constant_scalar", mtf.constant, params.mesh, value, [], params.variable_dtype.activation_dtype)
+
+
 def greater_equal(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None):
     return scoped("greater_equal", mtf.greater_equal, x1, x2, output_shape)
 
@@ -98,6 +107,14 @@ def cast(tensor: mtf.Tensor, dtype: tf.dtypes):
 
 def exp(tensor: mtf.Tensor):
     return scoped("exp", mtf.exp, tensor)
+
+
+def reciprocal(tensor: mtf.Tensor):
+    return scoped("reciprocal", mtf.reciprocal, tensor)
+
+
+def log(tensor: mtf.Tensor):
+    return scoped("log", mtf.log, tensor)
 
 
 def sigmoid(tensor: mtf.Tensor):
@@ -383,6 +400,7 @@ def activate(name_extras: typing.Union[typing.List[str], str], block_input: mtf.
     print(f'No activation function found for "{name_extras}". Falling back to identity. '
           f'Known functions: {list(ACTIVATIONS.keys())}')
     return block_input
+
 
 def weighted_add(left, right, alpha):
     return left * alpha + right * (1 - alpha)
