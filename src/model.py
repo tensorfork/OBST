@@ -16,8 +16,8 @@ from .dataclass import BlockConfig, ModelParameter
 from .utils_core import default
 from .utils_mtf import (ACTIVATIONS, SHAPE, activate, add_n, anonymize, anonymize_dim, cast, concat, constant_scalar,
                         deduplicate, dropout, einsum, exp, greater_equal, less, log, maximum, mtf_range, one_hot, ones,
-                        random_name, reduce_max, reduce_mean, reduce_sum, rsqrt, scoped, shift, sigmoid, slice, square,
-                        zeros_like, reciprocal)
+                        random_name, reciprocal, reduce_max, reduce_mean, reduce_sum, rsqrt, scoped, shift, sigmoid,
+                        slice, zeros_like)
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
