@@ -40,10 +40,8 @@ def _get_variable(params: ModelParameter, shape: SHAPE, initializer: typing.Call
 class OrthogonalInit(Initializer):
     def __init__(self, params: ModelParameter, shape: SHAPE):
         self.params = params
-        self.shape = shape
-        self.pnum = 0
+        self.sizes = sizes = [d.size for d in self.shape]
         self.seed = random.randint(0, 2 ** 32)
-        sizes = [d.size for d in shape]
         feature_dims_used = all(f in shape for f in params.feature_dims)
         if feature_dims_used and shape.index(params.key_dim) == len(sizes) - 1:
             fan_in = np.prod(sizes[:-2])
@@ -55,21 +53,14 @@ class OrthogonalInit(Initializer):
             raise ValueError(f"Shape: {shape}\nParams: {params}\nFeatureDimsUsed: {feature_dims_used}")
         fan_out = np.prod(sizes) // fan_in
         self.transpose = transpose = fan_out > fan_in
-        self.flat_shape = (fan_out, fan_in) if transpose else (fan_in, fan_out)
+        self.shape = (fan_out, fan_in) if transpose else (fan_in, fan_out)
 
     def __call__(self, shape, dtype=None, partition_info=None):
-        q, r = gen_linalg_ops.qr(random_ops.random_normal(self.flat_shape, dtype=tf.float32, seed=self.seed))
+        q, r = gen_linalg_ops.qr(random_ops.random_normal(self.shape, dtype=tf.float32, seed=self.seed))
         q *= math_ops.sign(array_ops.diag_part(r))
         if self.transpose:
             q = array_ops.matrix_transpose(q)
-        sizes = [d.size for d in self.shape]
-        out = array_ops.reshape(q, sizes)
-        if shape != sizes:
-            out = tf.slice(out,
-                           self.params.mesh_impl.slice_begin(self.shape, self.pnum),
-                           self.params.mesh_impl.slice_size(self.shape))
-            self.pnum += 1
-        return tf.cast(out, dtype)
+        return tf.cast(array_ops.reshape(q, self.sizes), dtype)
 
 
 def _orthogonal_var(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape]) -> mtf.Tensor:
@@ -82,7 +73,7 @@ def _normal_var(params: ModelParameter, shape: SHAPE, stddev: float = 0.02, mean
 
 def _linear(params: ModelParameter, block_input: mtf.Tensor, old: typing.List[mtf.Dimension],
             new: typing.List[mtf.Dimension]) -> mtf.Tensor:
-    return einsum([block_input, _orthogonal_var(params, old + new)],
+    return einsum([block_input, _orthogonal_var(params, deduplicate(old + new))],
                   deduplicate((block_input.shape - old).dims + new))
 
 
@@ -504,7 +495,7 @@ def build(params: ModelParameter,
                                                        token_out), reduced_dim=params.vocab_dim)))
             token_loss -= einsum([token_out, target, constant_scalar(params, 1 / txt_tgt.size)], output_shape=[])
             loss_list.append(token_loss)
-            token_loss += einsum([max_logit, constant_scalar(params, params.vocab_dim.size / txt_tgt.shape)],
+            token_loss += einsum([max_logit, constant_scalar(params, params.vocab_dim.size / txt_tgt.size)],
                                  output_shape=[])
             token_loss = einsum([token_loss, constant_scalar(params, txt_msk.size), 1 / reduce_sum(vid_msk_tgt)],
                                 output_shape=[])
