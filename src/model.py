@@ -64,16 +64,18 @@ class OrthogonalInit(Initializer):
 
 
 def _orthogonal_var(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape]) -> mtf.Tensor:
+    shape = deduplicate(shape)
     return scoped("orthogonal_var", _get_variable, params, shape, OrthogonalInit(params, shape))
 
 
 def _normal_var(params: ModelParameter, shape: SHAPE, stddev: float = 0.02, mean: float = 0.) -> mtf.Tensor:
+    shape = deduplicate(shape)
     return scoped("normal_var", _get_variable, params, shape, tf.random_normal_initializer(stddev=stddev, mean=mean))
 
 
 def _linear(params: ModelParameter, block_input: mtf.Tensor, old: typing.List[mtf.Dimension],
             new: typing.List[mtf.Dimension]) -> mtf.Tensor:
-    return einsum([block_input, _orthogonal_var(params, deduplicate(old + new))],
+    return einsum([block_input, _orthogonal_var(params, old + new)],
                   deduplicate((block_input.shape - old).dims + new))
 
 
