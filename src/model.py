@@ -3,12 +3,13 @@ Contains all necessary functions to build a model graph
 TODO(Lucas): Write docstrings for all functions
 """
 
+import random
 import typing
 
 import mesh_tensorflow as mtf
 import numpy as np
 import tensorflow.compat.v1 as tf
-from tensorflow.python.ops import random_ops
+from tensorflow.python.ops import array_ops, gen_linalg_ops, math_ops, random_ops
 from tensorflow.python.ops.init_ops import Initializer
 
 from .dataclass import BlockConfig, ModelParameter
@@ -36,27 +37,38 @@ def _get_variable(params: ModelParameter, shape: SHAPE, initializer: typing.Call
                                 dtype=params.variable_dtype, initializer=initializer)
 
 
-class HeInit(Initializer):
-    def __init__(self, std):
-        self.std = std
+class OrthogonalInit(Initializer):
+    def __init__(self, params: ModelParameter, shape: SHAPE):
+        self.seed = random.randint(0, 2 ** 32)
+        self.sizes = sizes = [d.size for d in shape]
+        feature_dims_used = all(f in shape for f in params.feature_dims)
+        if feature_dims_used and shape.index(params.key_dim) == len(sizes) - 1:
+            fan_in = np.prod(sizes[:-2])
+        elif feature_dims_used:
+            fan_in = np.prod([d.size for d in params.feature_dims])
+        elif len(sizes) == 2:
+            fan_in = sizes[0]
+        else:
+            raise ValueError(f"Shape: {shape}\nParams: {params}\nFeatureDimsUsed: {feature_dims_used}")
+        fan_out = np.prod(self.sizes) // fan_in
+        self.transpose = transpose = fan_out > fan_in
+        self.shape = (fan_in, fan_out) if transpose else (fan_out, fan_in)
+        self.index = 0
 
     def __call__(self, shape, dtype=None, partition_info=None):
-        return random_ops.truncated_normal(shape, 0.0, self.std, dtype or tf.float32, seed=None)
+        q, r = gen_linalg_ops.qr(random_ops.random_normal(self.shape, dtype=tf.float32, seed=self.seed))
+        q *= math_ops.sign(array_ops.diag_part(r))
+        if self.transpose:
+            q = array_ops.matrix_transpose(q)
+        out = array_ops.reshape(q, self.sizes)
+        if shape != self.sizes:
+            out = tf.slice(out, [s * self.index for s in shape], shape)
+            self.index += 1
+        return tf.cast(out, dtype)
 
 
-def _kaiming_var(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape]) -> mtf.Tensor:
-    feature_dims_used = all(f in shape for f in params.feature_dims)
-    sizes = [d.size for d in shape]
-    if feature_dims_used and shape.index(params.key_dim) == len(sizes) - 1:
-        fan_in = np.prod(sizes[:-2])
-    elif feature_dims_used:
-        fan_in = np.prod([d.size for d in params.feature_dims])
-    elif len(sizes) == 2:
-        fan_in = sizes[0]
-    else:
-        raise ValueError(f"Shape: {shape}\nParams: {params}\nFeatureDimsUsed: {feature_dims_used}")
-    std = 1.6077447771479307 / fan_in ** 0.5 / params.n_blocks ** 0.5
-    return scoped("kaiming_var", _get_variable, params, shape, HeInit(std))
+def _orthogonal_var(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape]) -> mtf.Tensor:
+    return scoped("orthogonal_var", _get_variable, params, shape, OrthogonalInit(params, shape))
 
 
 def _normal_var(params: ModelParameter, shape: SHAPE, stddev: float = 0.02, mean: float = 0.) -> mtf.Tensor:
@@ -65,7 +77,7 @@ def _normal_var(params: ModelParameter, shape: SHAPE, stddev: float = 0.02, mean
 
 def _linear(params: ModelParameter, block_input: mtf.Tensor, old: typing.List[mtf.Dimension],
             new: typing.List[mtf.Dimension]) -> mtf.Tensor:
-    return einsum([block_input, _kaiming_var(params, old + new)],
+    return einsum([block_input, _orthogonal_var(params, old + new)],
                   deduplicate((block_input.shape - old).dims + new))
 
 
