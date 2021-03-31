@@ -43,7 +43,8 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.concat_token = 4
         self.n_ctx = 32
         self.n_head = 8
-        self.n_embd = 256
+        self.n_embd: typing.Optional[int] = None
+        self.n_emdb_per_head: typing.Optional[int] = None
         self.n_blocks = 16
         self.buffer_size = 4
         self.shuffle_buffer = 256
@@ -134,7 +135,12 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         if self.weight_standardisation and not self.weight_centralisation:
             print("Can't standardise weights without centralizing them first. Enabling it.")
             self.weight_centralisation = True
-
+        if self.n_embd is None and self.n_emdb_per_head is None:
+            raise ValueError("Either n_embd or n_embd_per_head has to be specified")
+        if self.n_embd is None:
+            self.n_embd = self.n_emdb_per_head * self.n_head
+        if self.n_emdb_per_head is None:
+            self.n_emdb_per_head = self.n_embd // self.n_head
         if isinstance(self.storage_dtype, str):
             self.storage_dtype = getattr(tf, self.storage_dtype)
         if isinstance(self.calculation_dtype, str):
