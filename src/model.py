@@ -52,7 +52,7 @@ class OrthogonalInit(Initializer):
             raise ValueError(f"Shape: {shape}\nParams: {params}\nFeatureDimsUsed: {feature_dims_used}")
         fan_out = np.prod(self.sizes) // fan_in
         self.transpose = transpose = fan_out > fan_in
-        self.shape = (fan_in, fan_out) if transpose else (fan_out, fan_in)
+        self.shape = (fan_out, fan_in) if transpose else (fan_in, fan_out)
         self.index = 0
 
     def __call__(self, shape, dtype=None, partition_info=None):
