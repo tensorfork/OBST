@@ -119,7 +119,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             token_y_input = _import_tensor(params, args[1], params.token_dim_shape, "tkn_tgt")
 
         if params.train or not params.use_autoregressive_sampling:
-            loss, loss_list, accuracy, video_loss, token_loss, frame_out, token_out = build(params,
+            loss, loss_list, video_loss, accuracy, token_loss, frame_out, token_out = build(params,
                                                                                             frame_input,
                                                                                             cat_mask_src,
                                                                                             cat_mask_tag,
@@ -276,7 +276,6 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             log_dict = {'learning_rate': tf.cast(learning_rate, tf.float32)}
             if params.use_video:
                 log_dict['video_loss'] = tf.cast(lowering.export_to_tf_tensor(video_loss), tf.float32)
-
             if params.use_language:
                 log_dict['token_loss'] = tf.cast(lowering.export_to_tf_tensor(token_loss), tf.float32)
             if accuracy is not None:
