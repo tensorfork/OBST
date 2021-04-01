@@ -520,7 +520,8 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                                      maximum_shapes=None)
     color_print(params, f"Built computation in {time.time() - start_time:.1f}s")
     ckpt_loader_hook = CheckpointLoaderHook(params.model_path)
-
+    color_print(params, "Connecting to TPU...")
+    start_time = time.time()
     if params.train:
         # if params.write_summary:
         flush_summary = summary.flush()
@@ -529,6 +530,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                hooks=[ckpt_loader_hook,
                                                       tf.train.StepCounterHook(every_n_steps=10)] + hooks,
                                                config=session_config) as sess:
+            color_print(params, f"Connected after {time.time()-start_time:.1f}s")
             color_print(params, 'Compiling computation...')
             now = time.time()
             sess.run(compilation_state)
@@ -577,6 +579,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         with tf.train.MonitoredSession(session_creator=tf.train.ChiefSessionCreator(master=cluster_resolver.master(),
                                                                                     config=session_config),
                                        hooks=[ckpt_loader_hook, hooks[0]]) as sess:
+            color_print(params, f"Connected after {time.time()-start_time:.1f}s")
             sess.run(input_initializers)
             # error probably here -> it didnt run init
             infeed_thread = threading.Thread(target=_thread_fn, args=(sess,))
