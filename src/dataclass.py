@@ -149,10 +149,11 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             self.calculation_dtype = getattr(tf, self.calculation_dtype)
         split_batch = self.batch_splits > 1
         split_heads = self.head_splits > 1
-        if split_heads and isinstance(self.head_splits, int) and self.vocab_size > 256:
-            full_partition_size = self.head_splits * 128
-            self.vocab_size += full_partition_size - self.vocab_size % full_partition_size
-        elif self.vocab_size % 256 > 0:
+        # if split_heads and isinstance(self.head_splits, int) and self.vocab_size > 256:
+        #    full_partition_size = self.head_splits * 128
+        #    self.vocab_size += full_partition_size - self.vocab_size % full_partition_size
+        #    self.vocab_size /= self.n_head
+        if self.vocab_size % 256 > 0:  # elif
             self.vocab_size += 256 - self.vocab_size % 256
         self.mesh_shape = f"b:{self.batch_splits:.0f}" * split_batch + f"h:{self.head_splits:.0f}" * split_heads
         self.layout = "batch:b" * split_batch + "heads:h" * split_heads

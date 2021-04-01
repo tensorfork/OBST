@@ -119,15 +119,15 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             token_y_input = _import_tensor(params, args[1], params.token_dim_shape, "tkn_tgt")
 
         if params.train or not params.use_autoregressive_sampling:
-            loss, loss_list, video_loss, token_loss, frame_out, token_out = build(params,
-                                                                                  frame_input,
-                                                                                  cat_mask_src,
-                                                                                  cat_mask_tag,
-                                                                                  token_x_input,
-                                                                                  token_y_input,
-                                                                                  frame_mask_src,
-                                                                                  frame_mask_tag,
-                                                                                  token_mask)
+            loss, loss_list, accuracy, video_loss, token_loss, frame_out, token_out = build(params,
+                                                                                            frame_input,
+                                                                                            cat_mask_src,
+                                                                                            cat_mask_tag,
+                                                                                            token_x_input,
+                                                                                            token_y_input,
+                                                                                            frame_mask_src,
+                                                                                            frame_mask_tag,
+                                                                                            token_mask)
         else:
             if params.use_video:
                 tkn_per_frame = mtf.Dimension("language_token_per_frame",
@@ -138,15 +138,15 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 def body_fn(position, token_x_input, token_y_input, frame_input,
                             frame_mask_src, frame_mask_tag, token_mask, *states):
 
-                    _, _, _, _, frame_out, token_out = build(params,
-                                                             frame_input,
-                                                             mtf.ones(params.mesh, [], tf.float32),
-                                                             mtf.ones(params.mesh, [], tf.float32),
-                                                             token_x_input,
-                                                             token_y_input,
-                                                             frame_mask_src,
-                                                             frame_mask_tag,
-                                                             token_mask)
+                    _, _, _, _, _, frame_out, token_out = build(params,
+                                                                frame_input,
+                                                                mtf.ones(params.mesh, [], tf.float32),
+                                                                mtf.ones(params.mesh, [], tf.float32),
+                                                                token_x_input,
+                                                                token_y_input,
+                                                                frame_mask_src,
+                                                                frame_mask_tag,
+                                                                token_mask)
 
                     frame_input = weighted_add(pad(frame_out, params.sequence_dim, (0, 1)), frame_input,
                                                mtf.one_hot(position, params.frame_input_sequence, dtype=tf.float32))
@@ -190,15 +190,15 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 steps = params.sequence_dim.size
 
                 def body_fn(position, token_x, token_y, *states):
-                    _, _, _, _, _, token_out = build(params,
-                                                     mtf.ones(params.mesh, [], tf.float32),
-                                                     mtf.ones(params.mesh, [], tf.float32),
-                                                     mtf.ones(params.mesh, [], tf.float32),
-                                                     token_x,
-                                                     token_y,
-                                                     mtf.ones(params.mesh, [], tf.float32),
-                                                     mtf.ones(params.mesh, [], tf.float32),
-                                                     mtf.ones(params.mesh, [], tf.float32))
+                    _, _, _, _, _, _, token_out = build(params,
+                                                        mtf.ones(params.mesh, [], tf.float32),
+                                                        mtf.ones(params.mesh, [], tf.float32),
+                                                        mtf.ones(params.mesh, [], tf.float32),
+                                                        token_x,
+                                                        token_y,
+                                                        mtf.ones(params.mesh, [], tf.float32),
+                                                        mtf.ones(params.mesh, [], tf.float32),
+                                                        mtf.ones(params.mesh, [], tf.float32))
                     return (position + 1,
                             weighted_add(mtf.argmax(token_out, reduced_dim=params.vocab_dim), token_x,
                                          mtf.one_hot(position, output_dim=params.sequence_dim, dtype=tf.int32)),
@@ -279,6 +279,8 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
             if params.use_language:
                 log_dict['token_loss'] = tf.cast(lowering.export_to_tf_tensor(token_loss), tf.float32)
+            if accuracy is not None:
+                log_dict['accuracy'] = tf.cast(lowering.export_to_tf_tensor(accuracy), tf.float32)
 
             global_step = tf.train.get_or_create_global_step()
 
@@ -530,7 +532,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                hooks=[ckpt_loader_hook,
                                                       tf.train.StepCounterHook(every_n_steps=10)] + hooks,
                                                config=session_config) as sess:
-            color_print(params, f"Connected after {time.time()-start_time:.1f}s")
+            color_print(params, f"Connected after {time.time() - start_time:.1f}s")
             color_print(params, 'Compiling computation...')
             now = time.time()
             sess.run(compilation_state)
@@ -579,7 +581,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         with tf.train.MonitoredSession(session_creator=tf.train.ChiefSessionCreator(master=cluster_resolver.master(),
                                                                                     config=session_config),
                                        hooks=[ckpt_loader_hook, hooks[0]]) as sess:
-            color_print(params, f"Connected after {time.time()-start_time:.1f}s")
+            color_print(params, f"Connected after {time.time() - start_time:.1f}s")
             sess.run(input_initializers)
             # error probably here -> it didnt run init
             infeed_thread = threading.Thread(target=_thread_fn, args=(sess,))

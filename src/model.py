@@ -378,7 +378,8 @@ def build(params: ModelParameter,
           vid_msk_src: typing.Optional[mtf.Tensor],
           vid_msk_tgt: typing.Optional[mtf.Tensor],
           txt_msk: typing.Optional[mtf.Tensor],
-          ) -> typing.Tuple[mtf.Tensor, typing.List, mtf.Tensor, mtf.Tensor, mtf.Tensor, mtf.Tensor]:
+          ) -> typing.Tuple[mtf.Tensor, typing.List, mtf.Tensor, typing.Optional[mtf.Tensor],
+                            mtf.Tensor, mtf.Tensor, mtf.Tensor]:
     """
     Build Mesh Tensorflow graph of a model given parameters previously inserted.
     The model slices the video input itself (to save on TPU CPU <--> TPU Core bandwidth), but needs both
@@ -398,7 +399,6 @@ def build(params: ModelParameter,
         cat_msk_src = default_ones(params, cat_msk_src)
         cat_mask_tgt = default_ones(params, cat_mask_tgt)
         vid_msk_src = default_ones(params, vid_msk_src)
-
         if vid is not None:
             vid = mtf.cast(vid, params.variable_dtype.activation_dtype)
 
@@ -489,15 +489,17 @@ def build(params: ModelParameter,
             frame_out = sigmoid(_linear_from_features(params, frame_out, vid.shape[-1:]))
 
         loss_list = []
+        accuracy = None
         if params.use_language:
             target = one_hot(txt_tgt, params.vocab_dim, dtype=params.variable_dtype.activation_dtype)
-            token_loss = reduce_sum(reduce_logsumexp(token_out, params.vocab_dim))
+            token_loss = reduce_sum(reduce_logsumexp(token_out, reduced_dim=params.vocab_dim), output_shape=[])
             token_loss -= einsum([token_out, target], output_shape=[])
             token_loss /= txt_tgt.size
             loss_list.append(token_loss)
             if txt_msk is not None:
                 token_loss = einsum([token_loss, constant_scalar(params, txt_msk.size), 1 / reduce_sum(txt_msk)],
                                     output_shape=[])
+            accuracy = cast(reduce_sum(mtf.argmax(token_out, params.vocab_dim) == txt_tgt), tf.float32) / txt_tgt.size
 
         if params.use_video:
             video_loss: mtf.Tensor = einsum([mtf.abs(frame_out - tgt), vid_msk_tgt, cat_mask_tgt,
@@ -510,4 +512,4 @@ def build(params: ModelParameter,
 
         params.layer_idx = 0
 
-        return add_n(loss_list), loss_list, video_loss, token_loss, frame_out, token_out
+        return add_n(loss_list), loss_list, video_loss, accuracy, token_loss, frame_out, token_out
