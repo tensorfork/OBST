@@ -499,7 +499,7 @@ def build(params: ModelParameter,
             if txt_msk is not None:
                 token_loss = einsum([token_loss, constant_scalar(params, txt_msk.size), 1 / reduce_sum(txt_msk)],
                                     output_shape=[])
-            accuracy = cast(reduce_sum(mtf.argmax(token_out, params.vocab_dim) == txt_tgt), tf.float32) / txt_tgt.size
+            accuracy = reduce_mean(cast(mtf.argmax(token_out, params.vocab_dim) == txt_tgt, tf.float32))
 
         if params.use_video:
             video_loss: mtf.Tensor = einsum([mtf.abs(frame_out - tgt), vid_msk_tgt, cat_mask_tgt,
