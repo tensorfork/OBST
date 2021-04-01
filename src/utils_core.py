@@ -28,4 +28,4 @@ def chunks(lst: typing.List, n: int):
 
 
 def color_print(params: ModelParameter, string):
-    print(f"{params.own_color}{string}{params.other_color}")
+    print(f"{params.own_color}{string}{params.other_color}", flush=True)
