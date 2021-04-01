@@ -121,7 +121,6 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
     linear = 'linear' in name_extras
     no_norm: typing.Final[bool] = 'no_norm' in name_extras
     masked = idx in params.masked_attention_dimensions
-    norm = mask = []
 
     key = 0
     if 'embedded' in name_extras or 'context' in name_extras:
@@ -156,11 +155,11 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
                 lgt = ACTIVATIONS[e[len('kernel_'):]](lgt)
                 break
     if masked and no_norm and not linear:
-        mask = [mtf.broadcast(compare_range(params, dim, tmp, greater_equal), lgt.shape)]
+        lgt *= compare_range(params, dim, tmp, greater_equal)
+    inputs = [lgt, val]
     if not no_norm:
-        norm = [mtf.broadcast(mtf.reciprocal(reduce_sum(lgt, reduced_dim=reduced)),
-                              val.shape if lgt.size > val.size else lgt.shape)]
-    out = einsum([lgt, val] + norm + mask, block_input.shape)
+        inputs[lgt.size > block_input.size] /= reduce_sum(lgt, reduced_dim=reduced)
+    out = einsum(inputs, block_input.shape)
     return out
 
 
