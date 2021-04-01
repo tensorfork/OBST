@@ -19,8 +19,8 @@ from tensorflow.python.tpu.ops import tpu_ops
 from .dataclass import ModelParameter
 from .model import build
 from .optimizers import get_optimizer
+from .utils_core import color_print
 from .utils_mtf import pad, to_float, weighted_add
-from .utils_core import  color_print
 
 
 class CheckpointLoaderHook(tf.estimator.SessionRunHook):
@@ -335,6 +335,8 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             hooks.append(mtf.MtfRestoreHook(lowering))
             return tpu_ops.outfeed_enqueue_tuple(predictions)
 
+    color_print(params, f"Assigning datasets to TPU CPUs...")
+    start_time = time.time()
     num_cores = params.mesh_impl.device_assignment.num_replicas
 
     ordered_ordinals = []
@@ -508,6 +510,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 placement_function=_placement_function_impl)
 
     input_initializers = [ds.initializer for ds in ds_iterator]
+    color_print(params, f"Assigned in {time.time() - start_time:.1f}s")
 
     compilation_state, computation = tpu.split_compile_and_replicate(_model_fn,
                                                                      [[]] * params.num_cores,
