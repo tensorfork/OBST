@@ -90,6 +90,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.use_autoregressive_sampling = False
         self.weight_centralisation = True
         self.shuffle_input_filenames = True
+        self.calc_accuracy = False
         self.num_of_sample = 10
         self.gradient_clip = -1
         self.group_linear_factor = 2
