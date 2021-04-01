@@ -194,7 +194,8 @@ def _norm(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.L
         block_input -= reduce_mean(block_input, output_shape=normalized_shape)
     scale = []
     if 'std' in name_extras:
-        scale.append(rsqrt(1e-6 + einsum([block_input, block_input, constant_scalar(params, 1 / block_input.size)],
+        scale.append(rsqrt(1e-6 + einsum([block_input, block_input,
+                                          constant_scalar(params, normalized_shape.size / block_input.size)],
                                          output_shape=normalized_shape)))
     if 'scale' in name_extras:
         scale.append(_normal_var(params, params.feature_dims, mean=1))
@@ -489,7 +490,6 @@ def build(params: ModelParameter,
 
         loss_list = []
         if params.use_language:
-
             target = one_hot(txt_tgt, params.vocab_dim, dtype=params.variable_dtype.activation_dtype)
             token_loss = reduce_sum(reduce_logsumexp(token_out, params.vocab_dim))
             token_loss -= einsum([token_out, target], output_shape=[])
