@@ -397,9 +397,7 @@ def build(params: ModelParameter,
     with mtf.utils.outside_all_rewrites(), tf.variable_scope(params.model_mode):
         cat_msk_src = default_ones(params, cat_msk_src)
         cat_mask_tgt = default_ones(params, cat_mask_tgt)
-        txt_msk = default_ones(params, txt_msk)
         vid_msk_src = default_ones(params, vid_msk_src)
-        vid_msk_tgt = default_ones(params, vid_msk_tgt)
 
         if vid is not None:
             vid = mtf.cast(vid, params.variable_dtype.activation_dtype)
@@ -492,23 +490,27 @@ def build(params: ModelParameter,
 
         loss_list = []
         if params.use_language:
+            size_scalar = constant_scalar(params, 1 / txt_tgt.size)
             target = one_hot(txt_tgt, params.vocab_dim, dtype=params.variable_dtype.activation_dtype)
             max_logit = reduce_max(mtf.stop_gradient(token_out), reduced_dim=params.vocab_dim)
-            token_loss = reduce_sum(log(reduce_sum(exp(- max_logit - constant_scalar(params, np.log(txt_tgt.size)) +
-                                                       token_out), reduced_dim=params.vocab_dim)))
-            token_loss -= einsum([token_out, target, constant_scalar(params, 1 / token_out.size)], output_shape=[])
+            token_loss = einsum([log(reduce_sum(exp(token_out - max_logit), reduced_dim=params.vocab_dim)),
+                                 size_scalar], output_shape=[])
+            token_loss -= einsum([token_out, target, size_scalar], output_shape=[])
             loss_list.append(token_loss)
             token_loss += einsum([max_logit, constant_scalar(params, params.vocab_dim.size / txt_tgt.size)],
                                  output_shape=[])
-            token_loss = einsum([token_loss, constant_scalar(params, txt_msk.size), 1 / reduce_sum(vid_msk_tgt)],
-                                output_shape=[])
+            if txt_msk is not None:
+                token_loss = einsum([token_loss, constant_scalar(params, txt_msk.size), 1 / reduce_sum(txt_msk)],
+                                    output_shape=[])
 
         if params.use_video:
             video_loss: mtf.Tensor = einsum([mtf.abs(frame_out - tgt), vid_msk_tgt, cat_mask_tgt,
                                              constant_scalar(params, frame_out.size)], output_shape=[])
             loss_list.append(video_loss)
-            video_loss = einsum([video_loss, constant_scalar(params, vid_msk_tgt.size), 1 / reduce_sum(vid_msk_tgt)],
-                                output_shape=[])
+            if vid_msk_tgt is not None:
+                video_loss = einsum([video_loss, constant_scalar(params, vid_msk_tgt.size),
+                                     1 / reduce_sum(vid_msk_tgt)],
+                                    output_shape=[])
 
         params.layer_idx = 0
 
