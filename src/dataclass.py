@@ -91,7 +91,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.weight_centralisation = True
         self.shuffle_input_filenames = True
         self.num_of_sample = 10
-        self.gradient_clip = 0.01
+        self.gradient_clip = -1
         self.group_linear_factor = 2
         self.embedding_stddev = 0.004
         self.summary_flush_interval = 1024
