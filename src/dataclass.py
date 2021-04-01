@@ -104,6 +104,8 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.use_revnet = True
         self.debug_gradients = False
         self.use_initial_position_embedding = False
+        self.own_color = "\x1b[38;2;128;255;128m"
+        self.other_color = "\x1b[38;2;192;192;192m"
         self.block_config = [{'layer': ["norm-group-instance-mean-std-shift-scale",
                                         "feed_forward-relu-group",
                                         "rezero"]

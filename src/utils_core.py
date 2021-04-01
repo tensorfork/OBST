@@ -3,6 +3,8 @@ Generic utility functions that are called frequently across modules.
 """
 import typing
 
+from .dataclass import ModelParameter
+
 
 def default(value: typing.Any, default_value: typing.Any) -> typing.Any:
     """
@@ -23,3 +25,7 @@ def chunks(lst: typing.List, n: int):
     """
     for i in range(0, len(lst), n):
         yield lst[i:i + n]
+
+
+def color_print(params: ModelParameter, string):
+    print(f"{params.own_color}{string}{params.other_color}")

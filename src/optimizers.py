@@ -1,7 +1,6 @@
 """
 Stores custom optimizer classes as well as a custom optimizer creation utility as a handy wrapper
 b"""
-from __future__ import absolute_import, division, print_function
 
 import typing
 
@@ -11,8 +10,8 @@ import tensorflow.compat.v1 as tf
 
 from .dataclass import ModelParameter
 from .model import RevGradOp
-from .utils_mtf import (add_n, anonymize, anonymize_dim, cast, einsum, equal, greater, minimum, mod, reduce_max,
-                        reduce_mean, reduce_sum, rsqrt, sqrt, square, weighted_add, constant_scalar)
+from .utils_mtf import (add_n, anonymize, anonymize_dim, cast, constant_scalar, einsum, equal, greater, minimum, mod,
+                        reduce_max, reduce_mean, reduce_sum, rsqrt, sqrt, square, weighted_add)
 
 
 def import_float(imported):

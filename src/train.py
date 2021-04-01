@@ -20,6 +20,7 @@ from .dataclass import ModelParameter
 from .model import build
 from .optimizers import get_optimizer
 from .utils_mtf import pad, to_float, weighted_add
+from .utils_core import  color_print
 
 
 class CheckpointLoaderHook(tf.estimator.SessionRunHook):
@@ -99,7 +100,8 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         frame_mask_src = None
         frame_mask_tag = None
         token_mask = None
-
+        start_time = time.time()
+        color_print(params, "Building mesh tensorflow graph...")
         if params.use_video:
             frame_input = _import_tensor(params, args[0], params.frame_input_shape, "frame_input")
             cat_mask_src = _import_tensor(params, args[1], params.frame_mask_shape, "cat_mask_x")
@@ -231,8 +233,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 token_out = mtf.anonymize(token_out)
             if params.use_video:
                 frame_out = mtf.anonymize(frame_out)
-
-        print('\n')
+        color_print(params, f"Built in {time.time() - start_time:.1f}s")
         param_count = int(sum(np.prod([d.size for d in variable.shape.dims]) for variable in graph.trainable_variables))
         var_count = int(sum(np.prod([d.size for d in variable.shape.dims]) for variable in graph.all_variables))
 
@@ -248,14 +249,14 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         max_int = max(len(count) for _, count in variable_mapping)
         for name, count in variable_mapping:
             if not name:
-                print('-' * (max_str + max_int + len(constant)))
+                color_print(params, '-' * (max_str + max_int + len(constant)))
                 continue
-            print(f'{name:<{max_str}s}{constant}{count:>{max_int}s}')
+            color_print(params, f'{name:<{max_str}s}{constant}{count:>{max_int}s}')
 
-        print("\nDimensions:")
+        color_print(params, "\nDimensions:")
         for dim_name in sorted(list(set([item for variable in graph.all_variables
                                          for item in variable.shape.dimension_names]))):
-            print(dim_name)
+            color_print(params, dim_name)
         print('\n')
 
         model_size = {'model_variables':           int(param_count - params.embedding_param_count),
@@ -267,8 +268,10 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
         json.dump(model_size, tf.io.gfile.GFile(f"{params.model_path}/model_size.info", 'w'))
 
+        color_print(params, "Lowering mesh tensorflow to tensorflow...")
+        start_time = time.time()
         lowering = mtf.Lowering(graph, {params.mesh: params.mesh_impl})
-
+        color_print(params, f"Lowered in {time.time() - start_time:.1f}s")
         if params.train:
             log_dict = {'learning_rate': tf.cast(learning_rate, tf.float32)}
             if params.use_video:
@@ -296,7 +299,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                 global_step=global_step))
 
             comput_ops.extend([tf.assign_add(global_step, step),
-                          tf.assign_add(manual_global_step, tf.constant(1, dtype=tf.int64, shape=[]))])
+                               tf.assign_add(manual_global_step, tf.constant(1, dtype=tf.int64, shape=[]))])
 
             comput_ops = comput_ops + [lowering.lowered_operation(op) for op in update_ops]
 
@@ -522,35 +525,35 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                hooks=[ckpt_loader_hook,
                                                       tf.train.StepCounterHook(every_n_steps=10)] + hooks,
                                                config=session_config) as sess:
-            print('Compiling computation...')
+            color_print(params, 'Compiling computation...')
             now = time.time()
             sess.run(compilation_state)
             elapsed = time.time() - now
-            print(f'Compiled in {elapsed:.2f}s')
+            color_print(params, f'Compiled in {elapsed:.1f}s')
 
-            print("Initializing inputs...")
+            color_print(params, "Initializing inputs...")
             sess.run(input_initializers)
 
-            print("Initializing summary...")
+            color_print(params, "Initializing summary...")
             summary.initialize(session=sess)
 
-            print("Enqueueing first batch...")
+            color_print(params, "Enqueueing first batch...")
             sess.run(enqueue_ops)
 
-            print(f"Starting training loop. Start step: {params.current_step}")
+            color_print(params, f"Starting training loop. Start step: {params.current_step}")
             for i in range(params.current_step, params.train_steps):
                 for e_i in range(params.grad_accumulation):
                     if params.debug_train_step:
-                        print(f"Current global step: {i}   accumulation step: {e_i}")
+                        color_print(params, f"Current global step: {i}   accumulation step: {e_i}")
                     sess.run(computation)
 
                     if params.debug_train_step:
-                        print(f"Enqueueing...")
+                        color_print(params, f"Enqueueing...")
                     sess.run(enqueue_ops)
 
                 if (i + 1) % params.summary_flush_interval == 0:
                     if params.debug_train_step:
-                        print(f"Flushing summary...")
+                        color_print(params, f"Flushing summary...")
                     sess.run(flush_summary)
 
                 # for fn in callback_fns:
