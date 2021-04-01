@@ -159,8 +159,7 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
     inputs = [lgt, val]
     if not no_norm:
         inputs[lgt.size > block_input.size] /= reduce_sum(lgt, reduced_dim=reduced)
-    out = einsum(inputs, block_input.shape)
-    return out
+    return einsum(inputs, block_input.shape)
 
 
 def _rezero(params, block_input: mtf.Tensor, name_extras: typing.List[str]) -> mtf.Tensor:
