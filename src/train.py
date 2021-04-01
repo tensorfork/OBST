@@ -272,8 +272,6 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         start_time = time.time()
         lowering = mtf.Lowering(graph, {params.mesh: params.mesh_impl})
         color_print(params, f"Lowered in {time.time() - start_time:.1f}s")
-        color_print(params, "Adding TensorFlow glue...")
-        start_time = time.time()
         if params.train:
             log_dict = {'learning_rate': tf.cast(learning_rate, tf.float32)}
             if params.use_video:
@@ -336,11 +334,8 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             output_shapes.extend([pred.shape for pred in predictions])
             hooks.append(mtf.MtfRestoreHook(lowering))
             ret = tpu_ops.outfeed_enqueue_tuple(predictions)
-        color_print(params, f"Gluing took {time.time()-start_time:.1f}s")
         return ret
 
-    color_print(params, f"Assigning datasets to TPU CPUs...")
-    start_time = time.time()
     num_cores = params.mesh_impl.device_assignment.num_replicas
 
     ordered_ordinals = []
@@ -514,14 +509,16 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 placement_function=_placement_function_impl)
 
     input_initializers = [ds.initializer for ds in ds_iterator]
-    color_print(params, f"Assigned in {time.time() - start_time:.1f}s")
 
+    print("Building split TensorFlow computation...")
+    start_time = time.time()
     compilation_state, computation = tpu.split_compile_and_replicate(_model_fn,
                                                                      [[]] * params.num_cores,
                                                                      infeed_queue,
                                                                      params.d_assignment,
                                                                      None,
                                                                      maximum_shapes=None)
+    print(f"Built computation in {time.time() - start_time:.1f}s")
     ckpt_loader_hook = CheckpointLoaderHook(params.model_path)
 
     if params.train:
