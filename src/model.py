@@ -200,7 +200,7 @@ def _norm(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.L
     if 'scale' in name_extras:
         scale.append(_normal_var(params, params.feature_dims, mean=1))
     if scale:
-        block_input = mtf.einsum(scale, output_shape=block_input.shape)
+        block_input = mtf.einsum([block_input] + scale, output_shape=block_input.shape)
     if 'shift' in name_extras:
         block_input += _normal_var(params, params.feature_dims, mean=0)
     return block_input
