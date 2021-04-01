@@ -49,7 +49,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.buffer_size = 4
         self.shuffle_buffer = 256
         self.interleaved_datasets = 256
-        self.token_patch_size = 4
+        self.token_patch_size = 1
         self.learning_rate = 5e-5
         self.storage_dtype = "float32"
         self.calculation_dtype = "float32"
@@ -91,7 +91,6 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.weight_centralisation = True
         self.shuffle_input_filenames = True
         self.num_of_sample = 10
-        self.z_loss = 0.1
         self.gradient_clip = 0.01
         self.group_linear_factor = 2
         self.embedding_stddev = 0.004
