@@ -272,6 +272,8 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         start_time = time.time()
         lowering = mtf.Lowering(graph, {params.mesh: params.mesh_impl})
         color_print(params, f"Lowered in {time.time() - start_time:.1f}s")
+        color_print(params, "Adding TensorFlow glue...")
+        start_time = time.time()
         if params.train:
             log_dict = {'learning_rate': tf.cast(learning_rate, tf.float32)}
             if params.use_video:
@@ -317,7 +319,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                               saver=saver,
                                                               listeners=[mtf.MtfCheckpointSaverListener(lowering)]))
 
-                return tf.group(comput_ops)
+                ret = tf.group(comput_ops)
 
         else:  # train == 'sample'
             predictions = {}
@@ -333,7 +335,9 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             predictions = [val if val.dtype == tf.float32 else tf.cast(val, tf.float32) for val in predictions.values()]
             output_shapes.extend([pred.shape for pred in predictions])
             hooks.append(mtf.MtfRestoreHook(lowering))
-            return tpu_ops.outfeed_enqueue_tuple(predictions)
+            ret = tpu_ops.outfeed_enqueue_tuple(predictions)
+        color_print(params, f"Gluing took {time.time()-start_time:.1f}s")
+        return ret
 
     color_print(params, f"Assigning datasets to TPU CPUs...")
     start_time = time.time()
