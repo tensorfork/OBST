@@ -16,7 +16,7 @@ from .dataclass import BlockConfig, ModelParameter
 from .utils_core import default
 from .utils_mtf import (ACTIVATIONS, SHAPE, activate, add_n, anonymize, anonymize_dim, cast, concat, constant_scalar,
                         deduplicate, dropout, einsum, exp, greater_equal, less, log, maximum, mtf_range, one_hot, ones,
-                        random_name, reciprocal, reduce_max, reduce_mean, reduce_sum, rsqrt, scoped, shift, sigmoid,
+                        random_name, reduce_max, reduce_mean, reduce_sum, rsqrt, scoped, shift, sigmoid,
                         slice, zeros_like)
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
@@ -121,6 +121,7 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
     linear = 'linear' in name_extras
     no_norm: typing.Final[bool] = 'no_norm' in name_extras
     masked = idx in params.masked_attention_dimensions
+    norm = mask = []
 
     key = 0
     if 'embedded' in name_extras or 'context' in name_extras:
@@ -139,14 +140,13 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
     key = anonymize(key, dim)
     val = anonymize(val, val_dim)
     inputs = [qry, anonymize(key, [params.key_dim] * linear + [dim] * (masked or not linear))]
-    mask = compare_range(params, dim, tmp, greater_equal)
-    if linear and masked:
-        inputs.append(mask)
+    if masked and linear:
+        inputs.append(compare_range(params, dim, tmp, greater_equal))
     if all(f'kernel_{k}' not in name_extras for k in ['softmax'] + list(ACTIVATIONS.keys())):
         return einsum(inputs + [val], output_shape=block_input.shape)
     lgt = einsum(inputs, reduced_dims=[dim if linear else params.key_dim])
     reduced = anonymize_dim(val_dim)
-    if not no_norm and masked and not linear:
+    if masked and not no_norm and not linear:
         lgt += compare_range(params, dim, tmp, less) * -1e12
     if 'kernel_softmax' in name_extras:
         lgt = exp(lgt - reduce_max(mtf.stop_gradient(lgt), reduced_dim=reduced))
@@ -155,10 +155,12 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
             if e.startswith('kernel_') and e[len('kernel_'):] in ACTIVATIONS:
                 lgt = ACTIVATIONS[e[len('kernel_'):]](lgt)
                 break
-    norm = []
-    if not no_norm:
-        norm = [reciprocal(reduce_sum(lgt, reduced_dim=reduced))]
-    out = einsum([lgt, val] + [mask] * no_norm + norm, block_input.shape)
+    if masked and no_norm and not linear:
+        mask = [mtf.broadcast(compare_range(params, dim, tmp, greater_equal), lgt.shape)]
+    if no_norm:
+        norm = [mtf.broadcast(mtf.reciprocal(reduce_sum(lgt, reduced_dim=reduced)),
+                              val.shape if lgt.size > val.size else lgt.shape)]
+    out = einsum([lgt, val] + norm + mask, block_input.shape)
     return out
 
 
@@ -495,7 +497,7 @@ def build(params: ModelParameter,
             max_logit = reduce_max(mtf.stop_gradient(token_out), reduced_dim=params.vocab_dim)
             token_loss = reduce_sum(log(reduce_sum(exp(- max_logit - constant_scalar(params, np.log(txt_tgt.size)) +
                                                        token_out), reduced_dim=params.vocab_dim)))
-            token_loss -= einsum([token_out, target, constant_scalar(params, 1 / txt_tgt.size)], output_shape=[])
+            token_loss -= einsum([token_out, target, constant_scalar(params, 1 / token_out.size)], output_shape=[])
             loss_list.append(token_loss)
             token_loss += einsum([max_logit, constant_scalar(params, params.vocab_dim.size / txt_tgt.size)],
                                  output_shape=[])
