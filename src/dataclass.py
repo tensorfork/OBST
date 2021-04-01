@@ -93,8 +93,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.num_of_sample = 10
         self.z_loss = 0.1
         self.gradient_clip = 0.01
-        self.intermediate_feed_forward_multiplier = 1
-        self.group_linear_factor = 4
+        self.group_linear_factor = 2
         self.embedding_stddev = 0.004
         self.summary_flush_interval = 1024
         self.debug_train_step = False
@@ -104,6 +103,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.use_revnet = True
         self.debug_gradients = False
         self.use_initial_position_embedding = False
+        self.intermediate_feed_forward_multiplier = None
         self.own_color = "\x1b[32;1m"
         self.other_color = "\x1b[0m"
         self.block_config = [{'layer': ["norm-group-instance-mean-std-shift-scale",
@@ -147,6 +147,8 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             self.storage_dtype = getattr(tf, self.storage_dtype)
         if isinstance(self.calculation_dtype, str):
             self.calculation_dtype = getattr(tf, self.calculation_dtype)
+        if self.intermediate_feed_forward_multiplier is None:
+            self.intermediate_feed_forward_multiplier = self.group_linear_factor / self.head_splits
         split_batch = self.batch_splits > 1
         split_heads = self.head_splits > 1
         # if split_heads and isinstance(self.head_splits, int) and self.vocab_size > 256:
