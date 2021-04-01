@@ -15,9 +15,9 @@ from tensorflow.python.ops.init_ops import Initializer
 from .dataclass import BlockConfig, ModelParameter
 from .utils_core import default
 from .utils_mtf import (ACTIVATIONS, SHAPE, activate, add_n, anonymize, anonymize_dim, cast, concat, constant_scalar,
-                        deduplicate, dropout, einsum, exp, greater_equal, less, log, maximum, mtf_range, one_hot, ones,
-                        random_name, reduce_max, reduce_mean, reduce_sum, rsqrt, scoped, shift, sigmoid,
-                        slice, zeros_like)
+                        deduplicate, dropout, einsum, exp, greater_equal, less, maximum, mtf_range, one_hot, ones,
+                        random_name, reduce_logsumexp, reduce_max, reduce_mean, reduce_sum, rsqrt, scoped, shift,
+                        sigmoid, slice, zeros_like)
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -490,15 +490,12 @@ def build(params: ModelParameter,
 
         loss_list = []
         if params.use_language:
-            size_scalar = constant_scalar(params, 1 / txt_tgt.size)
+
             target = one_hot(txt_tgt, params.vocab_dim, dtype=params.variable_dtype.activation_dtype)
-            max_logit = reduce_max(mtf.stop_gradient(token_out), reduced_dim=params.vocab_dim)
-            token_loss = einsum([log(reduce_sum(exp(token_out - max_logit), reduced_dim=params.vocab_dim)),
-                                 size_scalar], output_shape=[])
-            token_loss -= einsum([token_out, target, size_scalar], output_shape=[])
+            token_loss = reduce_sum(reduce_logsumexp(token_out, params.vocab_dim))
+            token_loss -= einsum([token_out, target], output_shape=[])
+            token_loss /= txt_tgt.size
             loss_list.append(token_loss)
-            token_loss += einsum([max_logit, constant_scalar(params, params.vocab_dim.size / txt_tgt.size)],
-                                 output_shape=[])
             if txt_msk is not None:
                 token_loss = einsum([token_loss, constant_scalar(params, txt_msk.size), 1 / reduce_sum(txt_msk)],
                                     output_shape=[])
