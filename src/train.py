@@ -101,7 +101,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         frame_mask_tag = None
         token_mask = None
         start_time = time.time()
-        color_print(params, "Building mesh tensorflow graph...")
+        color_print(params, "Building Mesh-TensorFlow graph...")
         if params.use_video:
             frame_input = _import_tensor(params, args[0], params.frame_input_shape, "frame_input")
             cat_mask_src = _import_tensor(params, args[1], params.frame_mask_shape, "cat_mask_x")
@@ -268,7 +268,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
         json.dump(model_size, tf.io.gfile.GFile(f"{params.model_path}/model_size.info", 'w'))
 
-        color_print(params, "Lowering mesh tensorflow to tensorflow...")
+        color_print(params, "Lowering graph to TensorFlow...")
         start_time = time.time()
         lowering = mtf.Lowering(graph, {params.mesh: params.mesh_impl})
         color_print(params, f"Lowered in {time.time() - start_time:.1f}s")
