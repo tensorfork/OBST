@@ -55,8 +55,8 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.calculation_dtype = "float32"
         self.train_batch_size = 1
         self.current_step = 0
-        self.mesh_shape = "x:1,y:1,h:32"
-        self.layout = "batch:x,heads:y,height:h"
+        self.batch_splits = 1
+        self.head_splits = 32.
         self.prefix = "datasets/full_hd_video"
         self.model_path = "gs://text-datasets/video-transformer/ctx=32-layer=64-heads=8-feat=256"
         self.tensorflow_optimization_settings = {"layout_optimizer":              True,
@@ -147,6 +147,15 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             self.storage_dtype = getattr(tf, self.storage_dtype)
         if isinstance(self.calculation_dtype, str):
             self.calculation_dtype = getattr(tf, self.calculation_dtype)
+        split_batch = self.batch_splits > 1
+        split_heads = self.head_splits > 1
+        if split_heads and isinstance(self.head_splits, int) and self.vocab_size > 256:
+            full_partition_size = self.head_splits * 128
+            self.vocab_size += full_partition_size - self.vocab_size % full_partition_size
+        elif self.vocab_size % 256 > 0:
+            self.vocab_size += 256 - self.vocab_size % 256
+        self.mesh_shape = f"b:{self.batch_splits:.0f}" * split_batch + f"h:{self.head_splits:.0f}" * split_heads
+        self.layout = "batch:b" * split_batch + "heads:h" * split_heads
         self.variable_dtype = mtf.VariableDType(self.storage_dtype, self.calculation_dtype, self.calculation_dtype)
         self.block_config = [BlockConfig(conf, use_revnet=self.use_revnet) for conf in self.block_config]
         self.input_block_config = [BlockConfig(conf, use_revnet=False) for conf in self.input_block_config]
