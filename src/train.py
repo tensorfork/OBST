@@ -510,7 +510,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
     input_initializers = [ds.initializer for ds in ds_iterator]
 
-    print("Building split TensorFlow computation...")
+    color_print(params, "Building split TensorFlow computation...")
     start_time = time.time()
     compilation_state, computation = tpu.split_compile_and_replicate(_model_fn,
                                                                      [[]] * params.num_cores,
@@ -518,7 +518,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                                      params.d_assignment,
                                                                      None,
                                                                      maximum_shapes=None)
-    print(f"Built computation in {time.time() - start_time:.1f}s")
+    color_print(params, f"Built computation in {time.time() - start_time:.1f}s")
     ckpt_loader_hook = CheckpointLoaderHook(params.model_path)
 
     if params.train:
