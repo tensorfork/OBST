@@ -409,6 +409,17 @@ def build(params: ModelParameter,
 
         spatial_ctx: mtf.Dimension = txt_tgt.shape[-2] if params.use_language else vid.shape[2]
 
+        if vid_msk_tgt is not None:
+            vid_msk_tgt = mtf.cast(vid_msk_tgt, params.calculation_dtype)
+        if vid_msk_src is not None:
+            vid_msk_src = mtf.cast(vid_msk_src, params.calculation_dtype)
+        if txt_msk is not None:
+            txt_msk = mtf.cast(txt_msk, params.calculation_dtype)
+        if cat_msk_src is not None:
+            cat_msk_src = mtf.cast(cat_msk_src, params.calculation_dtype)
+        if cat_mask_tgt is not None:
+            cat_mask_tgt = mtf.cast(cat_mask_tgt, params.calculation_dtype)
+
         if params.use_video and params.input_dropout > 0:
             vid = dropout(vid, rate=params.input_dropout)
         if params.use_video:
@@ -497,7 +508,7 @@ def build(params: ModelParameter,
             token_loss /= txt_tgt.size
             loss_list.append(token_loss)
             if txt_msk is not None:
-                token_loss = einsum([token_loss, constant_scalar(params, txt_msk.size), 1 / reduce_sum(txt_msk)],
+                token_loss = einsum([token_loss, constant_scalar(params, txt_msk.size), 1 / mtf.cast(reduce_sum(txt_msk), params.storage_dtype)],
                                     output_shape=[])
             accuracy = reduce_mean(cast(mtf.equal(mtf.argmax(token_out, params.vocab_dim), txt_tgt), tf.float32),
                                    output_shape=[])
