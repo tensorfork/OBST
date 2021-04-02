@@ -372,7 +372,7 @@ def default_ones(params, inp):
 def build(params: ModelParameter,
           vid: typing.Optional[mtf.Tensor],
           cat_msk_src: typing.Optional[mtf.Tensor],
-          cat_mask_tgt: typing.Optional[mtf.Tensor],
+          cat_msk_tgt: typing.Optional[mtf.Tensor],
           txt_src: typing.Optional[mtf.Tensor],
           txt_tgt: typing.Optional[mtf.Tensor],
           vid_msk_src: typing.Optional[mtf.Tensor],
@@ -387,7 +387,7 @@ def build(params: ModelParameter,
     :param params: Instance of ModelParameter for which to build the graph
     :param vid: Optional Video to attend over, length=(context+1)
     :param cat_msk_src: Optional mask for zero frames
-    :param cat_mask_tgt: Optional mask to remove loss for certain video frames
+    :param cat_msk_tgt: Optional mask to remove loss for certain video frames
     :param txt_src: Optional tokenized text source, will be embedded
     :param txt_tgt: Optional tokenized text target, required when source is given
     :param vid_msk_src: Optional mask for zero frames
@@ -397,8 +397,10 @@ def build(params: ModelParameter,
     """
     with mtf.utils.outside_all_rewrites(), tf.variable_scope(params.model_mode):
         cat_msk_src = default_ones(params, cat_msk_src)
-        cat_mask_tgt = default_ones(params, cat_mask_tgt)
+        cat_msk_tgt = default_ones(params, cat_msk_tgt)
         vid_msk_src = default_ones(params, vid_msk_src)
+        vid_msk_tgt = default_ones(params, vid_msk_tgt)
+        txt_msk = default_ones(params, txt_msk)
         if vid is not None:
             vid = mtf.cast(vid, params.variable_dtype.activation_dtype)
 
@@ -409,18 +411,7 @@ def build(params: ModelParameter,
 
         spatial_ctx: mtf.Dimension = txt_tgt.shape[-2] if params.use_language else vid.shape[2]
 
-        if vid_msk_tgt is not None:
-            vid_msk_tgt = mtf.cast(vid_msk_tgt, params.calculation_dtype)
-        if vid_msk_src is not None:
-            vid_msk_src = mtf.cast(vid_msk_src, params.calculation_dtype)
-        if txt_msk is not None:
-            txt_msk = mtf.cast(txt_msk, params.calculation_dtype)
-        if cat_msk_src is not None:
-            cat_msk_src = mtf.cast(cat_msk_src, params.calculation_dtype)
-        if cat_mask_tgt is not None:
-            cat_mask_tgt = mtf.cast(cat_mask_tgt, params.calculation_dtype)
-
-        if params.use_video and params.input_dropout > 0:
+         if params.use_video and params.input_dropout > 0:
             vid = dropout(vid, rate=params.input_dropout)
         if params.use_video:
             context_dimension = vid.shape[1]
@@ -516,7 +507,7 @@ def build(params: ModelParameter,
                                             tf.float32), output_shape=[])
 
         if params.use_video:
-            video_loss: mtf.Tensor = einsum([mtf.abs(frame_out - tgt), vid_msk_tgt, cat_mask_tgt,
+            video_loss: mtf.Tensor = einsum([mtf.abs(frame_out - tgt), vid_msk_tgt, cat_msk_tgt,
                                              constant_scalar(params, frame_out.size)], output_shape=[])
             loss_list.append(video_loss)
             if vid_msk_tgt is not None:
