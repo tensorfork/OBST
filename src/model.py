@@ -503,8 +503,7 @@ def build(params: ModelParameter,
                                      reciprocal(reduce_sum(txt_msk))], output_shape=[])
             if params.calc_accuracy:
                 accuracy = reduce_mean(cast(mtf.equal(mtf.argmax(mtf.stop_gradient(token_out), params.vocab_dim),
-                                                      txt_tgt),
-                                            tf.float32), output_shape=[])
+                                                      txt_tgt), tf.float32), output_shape=[])
 
         if params.use_video:
             video_loss: mtf.Tensor = einsum([mtf.abs(frame_out - tgt), vid_msk_tgt, cat_msk_tgt,
