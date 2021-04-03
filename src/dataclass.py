@@ -94,7 +94,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.num_of_sample = 10
         self.gradient_clip = -1
         self.group_linear_factor = 2
-        self.embedding_stddev = 0.004
+        self.embedding_stddev = 0.04
         self.summary_flush_interval = 1024
         self.debug_train_step = False
         self.model_mode = 'jannet'

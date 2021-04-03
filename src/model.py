@@ -411,7 +411,7 @@ def build(params: ModelParameter,
 
         spatial_ctx: mtf.Dimension = txt_tgt.shape[-2] if params.use_language else vid.shape[2]
 
-         if params.use_video and params.input_dropout > 0:
+        if params.use_video and params.input_dropout > 0:
             vid = dropout(vid, rate=params.input_dropout)
         if params.use_video:
             context_dimension = vid.shape[1]
@@ -428,10 +428,8 @@ def build(params: ModelParameter,
 
         # Language embedding and initial feed forward.
         if params.use_language:
-            txt = _linear(params,
-                          one_hot(txt_src, params.vocab_dim,
-                                  dtype=params.variable_dtype.activation_dtype),
-                          [params.vocab_dim], params.intermediate)
+            txt = einsum([one_hot(txt_src, params.vocab_dim, dtype=params.variable_dtype.activation_dtype),
+                          _embed(params, [params.vocab_dim] + params.intermediate)], reduced_dims=[params.vocab_dim])
             if params.input_dropout > 0:
                 txt = dropout(txt, rate=params.input_dropout)
 
