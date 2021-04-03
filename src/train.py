@@ -267,8 +267,9 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             color_print(params, dim_name)
         print('')
 
-        model_size = {'model_variables':           int(param_count - params.embedding_param_count),
-                      'embedding_variables':       int(params.embedding_param_count),
+        model_size = {'model_variables':           int(param_count - embed_param_count),
+                      'embedding_variables':       int(embed_param_count),
+                      'body_variables':            int(body_param_count),
                       'untrainable_variables':     int(var_count - param_count),
                       'total_trainable_variables': int(param_count),
                       'total_variables':           int(var_count)
@@ -589,12 +590,17 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                                                     config=session_config),
                                        hooks=[ckpt_loader_hook, hooks[0]]) as sess:
             color_print(params, f"Connected after {time.time() - start_time:.1f}s")
+
+            color_print(params, "Initializing inputs...")
             sess.run(input_initializers)
-            # error probably here -> it didnt run init
-            infeed_thread = threading.Thread(target=_thread_fn, args=(sess,))
-            infeed_thread.start()
+
+            color_print(params, "Enqueueing first batch...")
+            sess.run(enqueue_ops)
+
             while True:
                 sess.run(computation)
                 out = sess.run(outfeed_dequeue_ops)[0]
+                sess.run(enqueue_ops)
+
                 for fn in callback_fns:
                     fn(out)
