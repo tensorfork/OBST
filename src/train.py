@@ -233,13 +233,21 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 token_out = mtf.anonymize(token_out)
             if params.use_video:
                 frame_out = mtf.anonymize(frame_out)
+
         color_print(params, f"Built in {time.time() - start_time:.1f}s")
-        param_count = int(sum(np.prod([d.size for d in variable.shape.dims]) for variable in graph.trainable_variables))
-        var_count = int(sum(np.prod([d.size for d in variable.shape.dims]) for variable in graph.all_variables))
+        param_count = int(sum([variable.size for variable in graph.trainable_variables]))
+        var_count = int(sum([variable.size for variable in graph.all_variables]))
+        embed_param_count = int(sum([variable.size for variable in
+                                         graph.trainable_variables if 'embed' in variable.name]))
+        body_param_count = int(sum([variable.size for variable in
+                                         graph.trainable_variables if 'body' in variable.name]))
+
+        print('')
 
         constant = '  variables: '
-        variable_mapping = [('Model', param_count - params.embedding_param_count),
-                            ('Embedding', params.embedding_param_count),
+        variable_mapping = [('Model', param_count - embed_param_count),
+                            ('Embedding', embed_param_count),
+                            ('Body', body_param_count),
                             ('Untrainable', var_count - param_count),
                             ('', 0),
                             ('Total trainable', param_count),
@@ -257,7 +265,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         for dim_name in sorted(list(set([item for variable in graph.all_variables
                                          for item in variable.shape.dimension_names]))):
             color_print(params, dim_name)
-        print('\n')
+        print('')
 
         model_size = {'model_variables':           int(param_count - params.embedding_param_count),
                       'embedding_variables':       int(params.embedding_param_count),

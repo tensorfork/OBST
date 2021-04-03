@@ -94,8 +94,8 @@ def _communicating_linear(params: ModelParameter, block_input: mtf.Tensor):
 
 
 def _embed(params: ModelParameter, shape: SHAPE) -> mtf.Tensor:
-    params.embedding_param_count = params.embedding_param_count + np.prod([s.size for s in shape])
-    return _normal_var(params, shape, params.embedding_stddev)
+    with tf.variable_scope('embed'):
+        return _normal_var(params, shape, params.embedding_stddev)
 
 
 def _all_mean(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple):
@@ -430,6 +430,7 @@ def build(params: ModelParameter,
         if params.use_language:
             txt = einsum([one_hot(txt_src, params.vocab_dim, dtype=params.variable_dtype.activation_dtype),
                           _embed(params, [params.vocab_dim] + params.intermediate)], reduced_dims=[params.vocab_dim])
+
             if params.input_dropout > 0:
                 txt = dropout(txt, rate=params.input_dropout)
 
