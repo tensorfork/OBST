@@ -247,7 +247,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         constant = '  variables: '
         variable_mapping = [('Model', param_count - embed_param_count),
                             ('Embedding', embed_param_count),
-                            ('Body', body_param_count),
+                            ('Body with Embed', body_param_count),
                             ('Untrainable', var_count - param_count),
                             ('', 0),
                             ('Total trainable', param_count),
@@ -556,10 +556,11 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             color_print(params, "Enqueueing first batch...")
             sess.run(enqueue_ops)
 
-            color_print(params, f"Starting training loop. Start step: {params.current_step}")
-            for i in range(params.current_step, params.train_steps):
+            current_step = params.current_step
+            color_print(params, f"Starting training loop. Start step: {current_step}")
+            for i in range(current_step, params.train_steps):
                 for e_i in range(params.grad_accumulation):
-                    if params.debug_train_step:
+                    if params.debug_train_step or (i - current_step) < 5:
                         color_print(params, f"Current global step: {i}   accumulation step: {e_i}")
                     sess.run(computation)
 
