@@ -32,9 +32,8 @@ def _get_attention_dim(params: ModelParameter, block_input: typing.Union[mtf.Ten
 
 
 def _get_variable(params: ModelParameter, shape: SHAPE, initializer: typing.Callable) -> mtf.Tensor:
-    with tf.variable_scope(random_name("get_variable")):
-        return mtf.get_variable(params.mesh, random_name("get_variable"), deduplicate(shape),
-                                dtype=params.variable_dtype, initializer=initializer)
+    return scoped(random_name("get_variable"), mtf.get_variable, params.mesh, random_name("get_variable"),
+                  deduplicate(shape), dtype=params.variable_dtype, initializer=initializer)
 
 
 class OrthogonalInit(Initializer):
@@ -94,12 +93,10 @@ def _communicating_linear(params: ModelParameter, block_input: mtf.Tensor):
 
 
 def _embed(params: ModelParameter, shape: SHAPE) -> mtf.Tensor:
-    with tf.variable_scope('embed'):
-        return _normal_var(params, shape, params.embedding_stddev)
+    return scoped("embed", _normal_var, params, shape, params.embedding_stddev)
 
 
 def _all_mean(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple):
-    # maybe use einsum instead of mean
     return einsum([block_input,
                    one_hot(constant_scalar(params, _get_attention_dim(params, block_input).index / block_input.size),
                            params.head_dim)],
