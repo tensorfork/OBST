@@ -154,7 +154,7 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
     if masked and no_norm and not linear:
         lgt *= compare_range(params, dim, tmp, greater_equal)
     inputs = [lgt, val]
-    if not no_norm:
+    if not no_norm:  # x / sum(y, 1)
         inputs[lgt.size > block_input.size] /= reduce_sum(lgt, reduced_dim=reduced)
     return einsum(inputs, block_input.shape)
 
@@ -240,9 +240,9 @@ LAYER_FUNCTIONS = {'feed_forward': _feed_forward,
 
 
 def _block_part_fn(params: ModelParameter, block_part_config: BlockConfig, block_input: mtf.Tensor,
-                   index: int, name_prefix: str = 'block') -> mtf.Tensor:
+                   name_prefix: str = 'block') -> mtf.Tensor:
     out = block_input
-    with tf.variable_scope(random_name(f"{name_prefix}{index}_")):
+    with tf.variable_scope(random_name(f"{name_prefix}_")):
         for layer in block_part_config.layer:
             name, *extras = layer.split('-')
             out = scoped(name, LAYER_FUNCTIONS[name], params, out, extras)
@@ -421,7 +421,7 @@ def build(params: ModelParameter,
             src = _linear_to_features(params, src, input_features)
 
             for config_idx, config in enumerate(params.input_block_config):
-                src = _block_part_fn(params, config, src, config_idx, name_prefix='vid_inp')
+                src = _block_part_fn(params, config, src, f'vid_inp{config_idx}')
 
         # Language embedding and initial feed forward.
         if params.use_language:
@@ -434,7 +434,7 @@ def build(params: ModelParameter,
             txt = _linear_to_features(params, txt, [txt_tgt.shape[-1]] + params.intermediate)
 
             for config_idx, config in enumerate(params.input_block_config):
-                txt = _block_part_fn(params, config, txt, config_idx, name_prefix='vid_inp')
+                txt = _block_part_fn(params, config, txt, f'lang_inp{config_idx}')
 
         if params.use_video and params.use_language:
             src = concat([src, txt], spatial_ctx)
@@ -456,12 +456,13 @@ def build(params: ModelParameter,
                         x1_backwards = zeros_like(x1)
                     if x2_backwards is None:
                         x2_backwards = zeros_like(x2)
-                    return RevGradOp(params, block_config, x1, x1_backwards, x2, x2_backwards, index).outputs
+                    return RevGradOp(params, block_config, x1, x1_backwards, x2, x2_backwards, str(index)).outputs
             else:
                 out = src
 
                 def _layer_builder(block_input: mtf.Tensor, block_config: BlockConfig, index: int):
-                    return mtf.recompute_grad(lambda x: _block_part_fn(params, block_config, x, index), [block_input])
+                    return mtf.recompute_grad(lambda x: _block_part_fn(params, block_config, x, str(index)),
+                                              [block_input])
 
             for i in range(params.n_blocks):
                 for block_part in params.block_config:
@@ -474,7 +475,7 @@ def build(params: ModelParameter,
             token_out = slice(out, 0, params.language_token_patch, spatial_ctx)
 
             for config_idx, config in enumerate(params.output_block_config):
-                token_out = _block_part_fn(params, config, token_out, config_idx, name_prefix='lang_out')
+                token_out = _block_part_fn(params, config, token_out, f'lang_out{config_idx}')
 
             token_out = _linear_from_features(params, token_out, [txt_tgt.shape[-1], params.vocab_dim])
 
@@ -482,7 +483,7 @@ def build(params: ModelParameter,
             frame_out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)
 
             for config_idx, config in enumerate(params.output_block_config):
-                frame_out = _block_part_fn(params, config, frame_out, config_idx, name_prefix='vid_out')
+                frame_out = _block_part_fn(params, config, frame_out, f'vid_out{config_idx}')
 
             frame_out = sigmoid(_linear_from_features(params, frame_out, vid.shape[-1:]))
 
