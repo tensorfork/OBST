@@ -39,9 +39,9 @@ OPT_SHAPE = typing.Optional[SHAPE]
 OPT_DIMS = typing.Optional[DIM_LIST]
 
 
-def scoped(name: str, fn: typing.Callable, *args):
+def scoped(name: str, fn: typing.Callable, *args, **kwargs):
     with tf.variable_scope(random_name(name)):
-        return fn(*args)
+        return fn(*args, **kwargs)
 
 
 def einsum(xs: TENSORS, output_shape: OPT_SHAPE = None, reduced_dims: OPT_DIMS = None) -> mtf.Tensor:

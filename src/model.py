@@ -15,11 +15,72 @@ from tensorflow.python.ops.init_ops import Initializer
 from .dataclass import BlockConfig, ModelParameter
 from .utils_core import default
 from .utils_mtf import (ACTIVATIONS, SHAPE, activate, add_n, anonymize, anonymize_dim, cast, concat, constant_scalar,
-                        deduplicate, dropout, einsum, exp, greater_equal, less, maximum, mtf_range, one_hot, ones,
-                        random_name, reciprocal, reduce_logsumexp, reduce_max, reduce_mean, reduce_sum, rsqrt, scoped,
+                        deduplicate, dropout, einsum, greater_equal, maximum, mtf_range, one_hot, ones,
+                        random_name, reciprocal, reduce_logsumexp, reduce_mean, reduce_sum, rsqrt, scoped,
                         shift, sigmoid, slice, zeros_like)
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
+
+
+class SoftmaxBackward(mtf.Operation):
+    def __init__(self, x: mtf.Tensor, dy: mtf.Tensor, dim: mtf.Dimension, masked: bool):
+        super().__init__([x, dy], name=random_name("softmax_backward"))
+        self._outputs = [mtf.Tensor(self, x.shape, x.dtype)]
+        self.dim = dim
+        self.shape: mtf.Shape = x.shape
+        self.masked = masked
+
+    def lower(self, lowering):
+        mesh_impl = lowering.mesh_impl(self)
+        dim_index = self.shape.dims.index(self.dim)
+        size = self.dim.size
+
+        def slicewise_fn(x, y):
+            if self.masked:
+                arange = tf.range(0, self.dim.size)
+                msk = tf.reshape(arange, (1, self.dim.size)) < tf.reshape(arange, (self.dim.size, 1))
+                msk = tf.cast(msk, x.dtype)
+                msk *= 1e12
+                msk = tf.reshape(msk, [1] * (len(self.shape.dims) - 2) + [self.dim.size] * 2)
+                x -= msk
+            e = tf.exp(x - tf.reduce_max(x, dim_index, True))
+            s = tf.reduce_sum(e, dim_index, True)
+            r = tf.reciprocal(s)
+            dims = ''.join(chr(ord('a') + i) for i in range(len(e.shape)))
+            return tf.einsum(f'{dims},{dims},{dims},{dims},{dims}->{dims}', e + (1 - size), s - e, r, r, y)
+
+        y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]], lowering.tensors[self.inputs[1]])
+        lowering.set_tensor_lowering(self.outputs[0], y)
+
+
+class Softmax(mtf.Operation):
+    def __init__(self, x: mtf.Tensor, dim: mtf.Dimension, masked: bool):
+        super().__init__([x], name=random_name("softmax_forward"))
+        self._outputs = [mtf.Tensor(self, x.shape, x.dtype)]
+        self.dim = dim
+        self.shape: mtf.Shape = x.shape
+        self.masked = masked
+
+    def gradient(self, grad_ys):
+        return SoftmaxBackward(self.inputs[0], grad_ys[0], self.dim, self.masked).outputs
+
+    def lower(self, lowering):
+        mesh_impl = lowering.mesh_impl(self)
+        dim_index = self.shape.dims.index(self.dim)
+
+        def slicewise_fn(x):
+            if self.masked:
+                arange = tf.range(0, self.dim.size)
+                msk = tf.reshape(arange, (1, self.dim.size)) < tf.reshape(arange, (self.dim.size, 1))
+                msk = tf.cast(msk, x.dtype)
+                msk *= 1e12
+                msk = tf.reshape(msk, [1] * (len(self.shape.dims) - 2) + [self.dim.size] * 2)
+                x -= msk
+            e = tf.exp(x - tf.reduce_max(x, dim_index, True))
+            return e / tf.reduce_sum(e, dim_index, True)
+
+        y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]])
+        lowering.set_tensor_lowering(self.outputs[0], y)
 
 
 def _get_attention_dim(params: ModelParameter, block_input: typing.Union[mtf.Tensor, mtf.Shape]) -> ATTENTION_DIM:
@@ -116,7 +177,6 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
     tmp = anonymize_dim(dim)
     base = activate(name_extras, _linear_from_features(params, block_input))
     linear = 'linear' in name_extras
-    no_norm: typing.Final[bool] = 'no_norm' in name_extras
     masked = idx in params.masked_attention_dimensions
 
     key = 0
@@ -141,22 +201,7 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
     if all(f'kernel_{k}' not in name_extras for k in ['softmax'] + list(ACTIVATIONS.keys())):
         return einsum(inputs + [val], output_shape=block_input.shape)
     lgt = einsum(inputs, reduced_dims=[dim if linear else params.key_dim])
-    reduced = anonymize_dim(val_dim)
-    if masked and not no_norm and not linear:
-        lgt += compare_range(params, dim, tmp, less) * -1e12
-    if 'kernel_softmax' in name_extras:
-        lgt = exp(lgt - reduce_max(mtf.stop_gradient(lgt), reduced_dim=reduced))
-    else:
-        for e in name_extras:
-            if e.startswith('kernel_') and e[len('kernel_'):] in ACTIVATIONS:
-                lgt = ACTIVATIONS[e[len('kernel_'):]](lgt)
-                break
-    if masked and no_norm and not linear:
-        lgt *= compare_range(params, dim, tmp, greater_equal)
-    inputs = [lgt, val]
-    if not no_norm:  # x / sum(y, 1)
-        inputs[lgt.size > block_input.size] /= reduce_sum(lgt, reduced_dim=reduced)
-    return einsum(inputs, block_input.shape)
+    return einsum(Softmax(lgt, dim, masked).outputs + [val], block_input.shape)
 
 
 def _rezero(params, block_input: mtf.Tensor, name_extras: typing.List[str]) -> mtf.Tensor:
