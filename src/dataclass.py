@@ -156,8 +156,9 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         #    self.vocab_size /= self.n_head
         if self.vocab_size % 256 > 0:  # elif
             self.vocab_size += 256 - self.vocab_size % 256
-        self.mesh_shape = f"b:{self.batch_splits:.0f}" * split_batch + f"h:{self.head_splits:.0f}" * split_heads
-        self.layout = "batch:b" * split_batch + "heads:h" * split_heads
+        self.mesh_shape = ','.join([f"b:{self.batch_splits:.0f}"] * split_batch +
+                                   [f"h:{self.head_splits:.0f}"] * split_heads)
+        self.layout = ','.join([f"batch:b"] * split_batch + [f"heads:h"] * split_heads)
         self.variable_dtype = mtf.VariableDType(self.storage_dtype, self.calculation_dtype, self.calculation_dtype)
         self.block_config = [BlockConfig(conf, use_revnet=self.use_revnet) for conf in self.block_config]
         self.input_block_config = [BlockConfig(conf, use_revnet=False) for conf in self.input_block_config]
