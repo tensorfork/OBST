@@ -23,17 +23,59 @@ ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.D
 
 
 class SoftmaxBackward(mtf.Operation):
-    def __init__(self, x: mtf.Tensor, dy: mtf.Tensor, dim: mtf.Dimension, masked: bool):
-        super().__init__([x, dy], name=random_name("softmax_backward"))
-        self._outputs = [mtf.Tensor(self, x.shape, x.dtype)]
+    def __init__(self, lgt: mtf.Tensor, val: mtf.Tensor, dy: mtf.Tensor, dim: mtf.Dimension, masked: bool):
+        super().__init__([lgt, val, dy], name=random_name("softmax_backward"))
+        self._outputs = [mtf.Tensor(self, lgt.shape, lgt.dtype), mtf.Tensor(self, val.shape, val.dtype)]
         self.dim = dim
-        self.shape: mtf.Shape = x.shape
+        self.shape: mtf.Shape = lgt.shape
         self.masked = masked
 
     def lower(self, lowering):
         mesh_impl = lowering.mesh_impl(self)
-        dim_index = self.shape.dims.index(self.dim)
+        dim_index = self.shape.dims.index(anonymize_dim(self.dim))
         size = self.dim.size
+
+        def slicewise_fn(x, y, dy):
+            if self.masked:
+                arange = tf.range(0, self.dim.size)
+                msk = tf.reshape(arange, (1, self.dim.size)) < tf.reshape(arange, (self.dim.size, 1))
+                msk = tf.cast(msk, x.dtype)
+                msk *= 1e12
+                msk = tf.reshape(msk, [1] * (len(self.shape.dims) - 2) + [self.dim.size] * 2)
+                x -= msk
+            e = tf.exp(x - tf.reduce_max(x, dim_index, True))
+            s = tf.reduce_sum(e, dim_index)
+            r = tf.reciprocal(s)
+            dims = ''.join(chr(ord('a') + i) for i in range(len(e.shape)))  # Batch Seq1 Seq2 Heads
+            dydims = f'{dims[:dim_index] + dims[dim_index + 1:]}'  # Batch Seq1 Heads
+            reshaped = tf.reshape(s, e.shape[:dim_index] + [1] + e.shape[dim_index + 1:]) - e
+            return (tf.einsum(f'{dims},{dims},{dydims},{dydims},{dydims}z,{dydims}z->{dims}',
+                              e + (1 - size), reshaped, r, r, y, dy),
+                    tf.einsum(f"{dims},{dydims},{dydims}z->{dydims}z", e, r, dy))
+
+        y0, y1 = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]],
+                                     lowering.tensors[self.inputs[1]], lowering.tensors[self.inputs[2]])
+        lowering.set_tensor_lowering(self.outputs[0], y0)
+        lowering.set_tensor_lowering(self.outputs[1], y1)
+        lowering.add_counter("attention_back", mesh_impl.laid_out_size(self.shape))
+        lowering.add_counter("attention_back_unique", self.shape.size)
+
+
+class Softmax(mtf.Operation):
+    def __init__(self, lgt: mtf.Tensor, val: mtf.Tensor, dim: mtf.Dimension, masked: bool):
+        super().__init__([lgt, val], name=random_name("softmax_forward"))
+        self._outputs = [mtf.Tensor(self, val.shape, val.dtype)]
+        self.dim = dim
+        self.shape: mtf.Shape = lgt.shape
+        self.masked = masked
+
+    def gradient(self, grad_ys):
+        return SoftmaxBackward(self.inputs[0], self.inputs[1], grad_ys[0], self.dim, self.masked).outputs
+
+    def lower(self, lowering):
+        mesh_impl = lowering.mesh_impl(self)
+        dim_index = self.shape.dims.index(anonymize_dim(self.dim))
+        anonymous_dim_index = self.shape.dims.index(anonymize_dim(self.dim))
 
         def slicewise_fn(x, y):
             if self.masked:
@@ -41,46 +83,21 @@ class SoftmaxBackward(mtf.Operation):
                 msk = tf.reshape(arange, (1, self.dim.size)) < tf.reshape(arange, (self.dim.size, 1))
                 msk = tf.cast(msk, x.dtype)
                 msk *= 1e12
-                msk = tf.reshape(msk, [1] * (len(self.shape.dims) - 2) + [self.dim.size] * 2)
+                shape = [1] * len(self.shape.dims)
+                shape[dim_index] = self.dim.size
+                shape[anonymous_dim_index] = self.dim.size
+                msk = tf.reshape(msk, shape)
                 x -= msk
-            e = tf.exp(x - tf.reduce_max(x, dim_index, True))
-            s = tf.reduce_sum(e, dim_index, True)
-            r = tf.reciprocal(s)
+            e = tf.exp(x - tf.reduce_max(x, anonymous_dim_index, True))
             dims = ''.join(chr(ord('a') + i) for i in range(len(e.shape)))
-            return tf.einsum(f'{dims},{dims},{dims},{dims},{dims}->{dims}', e + (1 - size), s - e, r, r, y)
+            dydims = dims[:anonymous_dim_index] + dims[anonymous_dim_index + 1:]
+            return tf.einsum(f"{dims},{dydims},{dydims}z->{dydims}z",
+                             e, tf.reciprocal(tf.reduce_sum(e, anonymous_dim_index)), y)
 
         y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]], lowering.tensors[self.inputs[1]])
         lowering.set_tensor_lowering(self.outputs[0], y)
-
-
-class Softmax(mtf.Operation):
-    def __init__(self, x: mtf.Tensor, dim: mtf.Dimension, masked: bool):
-        super().__init__([x], name=random_name("softmax_forward"))
-        self._outputs = [mtf.Tensor(self, x.shape, x.dtype)]
-        self.dim = dim
-        self.shape: mtf.Shape = x.shape
-        self.masked = masked
-
-    def gradient(self, grad_ys):
-        return SoftmaxBackward(self.inputs[0], grad_ys[0], self.dim, self.masked).outputs
-
-    def lower(self, lowering):
-        mesh_impl = lowering.mesh_impl(self)
-        dim_index = self.shape.dims.index(self.dim)
-
-        def slicewise_fn(x):
-            if self.masked:
-                arange = tf.range(0, self.dim.size)
-                msk = tf.reshape(arange, (1, self.dim.size)) < tf.reshape(arange, (self.dim.size, 1))
-                msk = tf.cast(msk, x.dtype)
-                msk *= 1e12
-                msk = tf.reshape(msk, [1] * (len(self.shape.dims) - 2) + [self.dim.size] * 2)
-                x -= msk
-            e = tf.exp(x - tf.reduce_max(x, dim_index, True))
-            return e / tf.reduce_sum(e, dim_index, True)
-
-        y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]])
-        lowering.set_tensor_lowering(self.outputs[0], y)
+        lowering.add_counter("attention", mesh_impl.laid_out_size(self.shape))
+        lowering.add_counter("attention_unique", self.shape.size)
 
 
 def _get_attention_dim(params: ModelParameter, block_input: typing.Union[mtf.Tensor, mtf.Shape]) -> ATTENTION_DIM:
@@ -192,16 +209,13 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
         key = activate(name_extras, key)
     if 'activate_qry' in name_extras:
         qry = activate(name_extras, qry)
-    val_dim = params.key_dim if linear else dim
     key = anonymize(key, dim)
-    val = anonymize(val, val_dim)
     inputs = [qry, anonymize(key, [params.key_dim] * linear + [dim] * (masked or not linear))]
     if masked and linear:
         inputs.append(compare_range(params, dim, tmp, greater_equal))
     if all(f'kernel_{k}' not in name_extras for k in ['softmax'] + list(ACTIVATIONS.keys())):
-        return einsum(inputs + [val], output_shape=block_input.shape)
-    lgt = einsum(inputs, reduced_dims=[dim if linear else params.key_dim])
-    return einsum(Softmax(lgt, dim, masked).outputs + [val], block_input.shape)
+        return einsum(inputs + [anonymize(val, params.key_dim if linear else dim)], output_shape=block_input.shape)
+    return Softmax(einsum(inputs, reduced_dims=[dim if linear else params.key_dim]), val, dim, masked).outputs[0]
 
 
 def _rezero(params, block_input: mtf.Tensor, name_extras: typing.List[str]) -> mtf.Tensor:
