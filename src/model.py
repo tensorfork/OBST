@@ -34,6 +34,8 @@ class SoftmaxBackward(mtf.Operation):
         mesh_impl = lowering.mesh_impl(self)
         dim_index = self.shape.dims.index(self.dim)
         size = self.dim.size
+        dim_index = self.shape.dims.index(self.dim)
+        anonymous_dim_index = self.shape.dims.index(anonymize_dim(self.dim))
 
         def slicewise_fn(x, y):
             if self.masked:
@@ -41,7 +43,10 @@ class SoftmaxBackward(mtf.Operation):
                 msk = tf.reshape(arange, (1, self.dim.size)) < tf.reshape(arange, (self.dim.size, 1))
                 msk = tf.cast(msk, x.dtype)
                 msk *= 1e12
-                msk = tf.reshape(msk, [1] * (len(self.shape.dims) - 2) + [self.dim.size] * 2)
+                shape = [1] * len(self.shape.dims)
+                shape[dim_index] = self.dim.size
+                shape[anonymous_dim_index] = self.dim.size
+                msk = tf.reshape(msk, shape)
                 x -= msk
             e = tf.exp(x - tf.reduce_max(x, dim_index, True))
             s = tf.reduce_sum(e, dim_index, True)
