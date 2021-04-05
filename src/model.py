@@ -67,7 +67,7 @@ class Softmax(mtf.Operation):
     def lower(self, lowering):
         mesh_impl = lowering.mesh_impl(self)
         dim_index = self.shape.dims.index(self.dim)
-        anonymous_dim_index = self.shape.dims.index(self.dim)
+        anonymous_dim_index = self.shape.dims.index(anonymize_dim(self.dim))
 
         def slicewise_fn(x):
             if self.masked:
