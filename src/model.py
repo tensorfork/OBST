@@ -536,13 +536,17 @@ def build(params: ModelParameter,
         accuracy = None
         if params.use_language:
             target = one_hot(txt_tgt, params.vocab_dim, dtype=params.variable_dtype.activation_dtype)
-            token_loss = reduce_sum(reduce_logsumexp(token_out, reduced_dim=params.vocab_dim), output_shape=[])
-            token_loss -= einsum([token_out, target], output_shape=[])
+            token_loss = einsum([reduce_logsumexp(token_out, reduced_dim=params.vocab_dim),
+                                 txt_msk, cat_msk_tgt], output_shape=[])
+            token_loss -= einsum([token_out, target, txt_msk, cat_msk_tgt], output_shape=[])
             token_loss /= txt_tgt.size
             loss_list.append(token_loss)
             if txt_msk is not None:
-                token_loss = einsum([mtf.stop_gradient(token_loss), constant_scalar(params, txt_msk.size),
-                                     reciprocal(reduce_sum(txt_msk))], output_shape=[])
+                token_loss = einsum([mtf.stop_gradient(token_loss),
+                                     constant_scalar(params, txt_msk.size),
+                                     reciprocal(reduce_sum(txt_msk)),
+                                     constant_scalar(params, cat_msk_tgt.size),
+                                     reciprocal(reduce_sum(cat_msk_tgt))], output_shape=[])
             if params.calc_accuracy:
                 accuracy = reduce_mean(cast(mtf.equal(mtf.argmax(mtf.stop_gradient(token_out), params.vocab_dim),
                                                       txt_tgt), tf.float32), output_shape=[])
@@ -552,8 +556,11 @@ def build(params: ModelParameter,
                                              constant_scalar(params, frame_out.size)], output_shape=[])
             loss_list.append(video_loss)
             if vid_msk_tgt is not None:
-                video_loss = einsum([mtf.stop_gradient(video_loss), constant_scalar(params, vid_msk_tgt.size),
-                                     reciprocal(reduce_sum(vid_msk_tgt))], output_shape=[])
+                video_loss = einsum([mtf.stop_gradient(video_loss),
+                                     constant_scalar(params, vid_msk_tgt.size),
+                                     reciprocal(reduce_sum(vid_msk_tgt)),
+                                     constant_scalar(params, cat_msk_tgt.size),
+                                     reciprocal(reduce_sum(cat_msk_tgt))], output_shape=[])
 
         params.layer_idx = 0
 
