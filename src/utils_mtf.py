@@ -133,6 +133,10 @@ def square(tensor: mtf.Tensor) -> mtf.Tensor:
     return scoped("square", mtf.square, tensor)
 
 
+def sign(tensor: mtf.Tensor) -> mtf.Tensor:
+    return scoped("sign", mtf.sign, tensor)
+
+
 def shift(tensor: mtf.Tensor, offset: int, dim: DIM, wrap: bool) -> mtf.Tensor:
     return scoped("shift", mtf.shift, tensor, offset, dim, wrap)
 

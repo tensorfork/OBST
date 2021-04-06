@@ -17,7 +17,7 @@ from .utils_core import default
 from .utils_mtf import (ACTIVATIONS, SHAPE, activate, add_n, anonymize, anonymize_dim, cast, concat, constant_scalar,
                         deduplicate, dropout, einsum, greater_equal, maximum, mtf_range, one_hot, ones,
                         random_name, reciprocal, reduce_logsumexp, reduce_mean, reduce_sum, rsqrt, scoped,
-                        shift, sigmoid, slice, zeros_like)
+                        shift, sigmoid, slice, zeros_like, sign)
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -545,19 +545,33 @@ def build(params: ModelParameter,
         accuracy = None
 
         if params.use_language:
-            cross_entropy = mtf.layers.softmax_cross_entropy_with_logits(token_out, txt_tgt, params.vocab_dim)
-            token_loss = mtf.reduce_mean(cat_msk_tgt * txt_msk * cross_entropy)
-
+            size = constant_scalar(params, 1 / txt_tgt.size)
+            target = one_hot(txt_tgt, params.vocab_dim, dtype=params.variable_dtype.activation_dtype)
+            token_loss = einsum([reduce_logsumexp(token_out, reduced_dim=params.vocab_dim), size, txt_msk, cat_msk_tgt],
+                                output_shape=[])
+            token_loss += einsum([token_out, target, size, constant_scalar(params, -1), txt_msk, cat_msk_tgt],
+                                 output_shape=[])
             loss_list.append(token_loss)
 
+            if txt_msk is not None:
+                token_loss = einsum([constant_scalar(params, txt_msk.size), reciprocal(reduce_sum(txt_msk)),
+                                     constant_scalar(params, cat_msk_tgt.size), reciprocal(reduce_sum(cat_msk_tgt)),
+                                     mtf.stop_gradient(token_loss)], output_shape=[])
+
             if params.calc_accuracy:
-                accuracy = reduce_mean(cast(mtf.equal(mtf.argmax(mtf.stop_gradient(token_out), params.vocab_dim),
-                                                      txt_tgt), tf.float32) * txt_msk * cat_msk_tgt, output_shape=[])
+                accuracy = einsum([cast(mtf.equal(mtf.argmax(mtf.stop_gradient(token_out), params.vocab_dim), txt_tgt),
+                                        tf.float32), txt_msk, cat_msk_tgt, size], output_shape=[])
 
         if params.use_video:
-            video_loss: mtf.Tensor = reduce_mean(mtf.abs(frame_out - tgt) * vid_msk_tgt * cat_msk_tgt)
+            size = constant_scalar(params, 1 / frame_out.size)
+            out = frame_out - tgt
+            video_loss: mtf.Tensor = einsum([out, vid_msk_tgt, cat_msk_tgt, size, sign(out)], output_shape=[])
             loss_list.append(video_loss)
 
+            if vid_msk_tgt is not None:
+                video_loss = einsum([constant_scalar(params, vid_msk_tgt.size), reciprocal(reduce_sum(vid_msk_tgt)),
+                                     constant_scalar(params, cat_msk_tgt.size), reciprocal(reduce_sum(cat_msk_tgt)),
+                                     mtf.stop_gradient(video_loss)], output_shape=[])
         params.layer_idx = 0
 
         video_loss = video_loss * vid_msk_tgt.size / reduce_sum(vid_msk_tgt)
