@@ -3,7 +3,6 @@ Contains functions to create a training loop and log its outputs to tensorboard
 """
 import collections
 import json
-import threading
 import time
 import typing
 
@@ -238,9 +237,9 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         param_count = int(sum([variable.size for variable in graph.trainable_variables]))
         var_count = int(sum([variable.size for variable in graph.all_variables]))
         embed_param_count = int(sum([variable.size for variable in
-                                         graph.trainable_variables if 'embed' in variable.name]))
+                                     graph.trainable_variables if 'embed' in variable.name]))
         body_param_count = int(sum([variable.size for variable in
-                                         graph.trainable_variables if 'body' in variable.name]))
+                                    graph.trainable_variables if 'body' in variable.name]))
 
         print('')
 
