@@ -543,27 +543,24 @@ def build(params: ModelParameter,
 
         loss_list = []
         accuracy = None
+
         if params.use_language:
-            target = one_hot(txt_tgt, params.vocab_dim, dtype=params.variable_dtype.activation_dtype)
-            token_loss = reduce_sum(reduce_logsumexp(token_out, reduced_dim=params.vocab_dim), output_shape=[])
-            token_loss -= einsum([token_out, target], output_shape=[])
-            token_loss /= txt_tgt.size
+            cross_entropy = mtf.layers.softmax_cross_entropy_with_logits(token_out, txt_tgt, params.vocab_dim)
+            token_loss = mtf.reduce_mean(cat_msk_tgt * txt_msk * cross_entropy)
+
             loss_list.append(token_loss)
-            if txt_msk is not None:
-                token_loss = einsum([mtf.stop_gradient(token_loss), constant_scalar(params, txt_msk.size),
-                                     reciprocal(reduce_sum(txt_msk))], output_shape=[])
+
             if params.calc_accuracy:
                 accuracy = reduce_mean(cast(mtf.equal(mtf.argmax(mtf.stop_gradient(token_out), params.vocab_dim),
-                                                      txt_tgt), tf.float32), output_shape=[])
+                                                      txt_tgt), tf.float32) * txt_msk * cat_msk_tgt, output_shape=[])
 
         if params.use_video:
-            video_loss: mtf.Tensor = einsum([mtf.abs(frame_out - tgt), vid_msk_tgt, cat_msk_tgt,
-                                             constant_scalar(params, frame_out.size)], output_shape=[])
+            video_loss: mtf.Tensor = reduce_mean(mtf.abs(frame_out - tgt) * vid_msk_tgt * cat_msk_tgt)
             loss_list.append(video_loss)
-            if vid_msk_tgt is not None:
-                video_loss = einsum([mtf.stop_gradient(video_loss), constant_scalar(params, vid_msk_tgt.size),
-                                     reciprocal(reduce_sum(vid_msk_tgt))], output_shape=[])
 
         params.layer_idx = 0
+
+        video_loss = video_loss * vid_msk_tgt.size / reduce_sum(vid_msk_tgt)
+        token_loss = token_loss * txt_msk.size / reduce_sum(txt_msk)
 
         return add_n(loss_list), loss_list, video_loss, accuracy, token_loss, frame_out, token_out
