@@ -48,8 +48,8 @@ class SoftmaxBackward(mtf.Operation):
                 shape[anonymous_dim_index] = self.dim.size
                 msk = tf.reshape(msk, shape)
                 x -= msk
-            e = tf.exp(x - tf.reduce_max(x, dim_index, True))
-            s = tf.reduce_sum(e, dim_index, True)
+            e = tf.exp(x - tf.reduce_max(x, anonymous_dim_index, True))
+            s = tf.reduce_sum(e, anonymous_dim_index, True)
             r = tf.reciprocal(s)
             dims = ''.join(chr(ord('a') + i) for i in range(len(e.shape)))
             return tf.einsum(f'{dims},{dims},{dims},{dims},{dims}->{dims}', e + (1 - size), s - e, r, r, y)
