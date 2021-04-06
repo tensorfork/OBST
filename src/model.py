@@ -49,12 +49,14 @@ class SoftmaxBackward(mtf.Operation):
                 msk = tf.reshape(msk, shape)
                 x -= msk
             e = tf.exp(x - tf.reduce_max(x, anonymous_dim_index, True))
-            s = tf.reduce_sum(e, anonymous_dim_index)
+            s = tf.reduce_sum(e, anonymous_dim_index, True)
             r = tf.reciprocal(s)
-            dims = ''.join(chr(ord('a') + i) for i in range(len(e.shape)))
-            sdims = dims[:anonymous_dim_index] + dims[anonymous_dim_index + 1:]
-            reshaped = tf.reshape(s, [1 if i == anonymous_dim_index else k for i, k in enumerate(e.shape)])
-            return tf.einsum(f'{dims},{sdims},{dims},{sdims},{dims}->{dims}', e + (1 - size), r, reshaped - e, r, y)
+            out = e + (1 - size)
+            out *= r
+            out *= tf.reshape(s, [1 if i == anonymous_dim_index else k for i, k in enumerate(x.shape)]) - e
+            out *= r
+            out *= y
+            return out
 
         y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]], lowering.tensors[self.inputs[1]])
         lowering.set_tensor_lowering(self.outputs[0], y)
