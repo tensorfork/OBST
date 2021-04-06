@@ -406,11 +406,11 @@ def activate(name_extras: typing.Union[typing.List[str], str], block_input: mtf.
     return block_input
 
 
-def weighted_add(left, right, alpha):
+def weighted_add(left: mtf.Tensor, right: mtf.Tensor, alpha: mtf.Tensor) -> mtf.Tensor:
     return left * alpha + right * (1 - alpha)
 
 
-def slice(tensor: mtf.Tensor, start: int, end: int, dim: typing.Union[mtf.Dimension, str]):
+def slice(tensor: mtf.Tensor, start: int, end: int, dim: typing.Union[mtf.Dimension, str]) -> mtf.Tensor:
     """
     Slice across a given (potentially non-anonymous) dimension in mtf.Tensor. This first anonymizes the dimension to
     allow slicing in the first place, next it slices across the dimension and only then it replicates it on all devices
@@ -426,3 +426,12 @@ def slice(tensor: mtf.Tensor, start: int, end: int, dim: typing.Union[mtf.Dimens
     if not start and get_dim(tensor, dim).size == end:
         return tensor
     return unanonymize(mtf.slice(anonymize(tensor, dim), start, end - start, anonymize_dim(dim)), dim)
+
+
+def feature_dims_used(params: ModelParameter, shape: typing.Union[SHAPE, mtf.Tensor, mtf.Variable],
+                      dims: OPT_DIMS = None) -> bool:
+    if isinstance(shape, (mtf.Tensor, mtf.Variable)):
+        shape = shape.shape
+    if dims is None:
+        dims = params.feature_dims
+    return all(f in shape for f in dims)

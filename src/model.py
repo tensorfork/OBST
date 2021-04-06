@@ -14,10 +14,10 @@ from tensorflow.python.ops.init_ops import Initializer
 
 from .dataclass import BlockConfig, ModelParameter
 from .utils_core import default
-from .utils_mtf import (ACTIVATIONS, SHAPE, activate, add_n, anonymize, anonymize_dim, cast, concat, constant_scalar,
-                        deduplicate, dropout, einsum, greater_equal, maximum, mtf_range, one_hot, ones,
-                        random_name, reciprocal, reduce_logsumexp, reduce_mean, reduce_sum, rsqrt, scoped,
-                        shift, sigmoid, slice, zeros_like, sign)
+from .utils_mtf import (ACTIVATIONS, OPT_DIMS, SHAPE, activate, add_n, anonymize, anonymize_dim, cast, concat,
+                        constant_scalar, deduplicate, dropout, einsum, feature_dims_used, greater_equal, maximum,
+                        mtf_range, one_hot, ones, random_name, reciprocal, reduce_logsumexp, reduce_mean, reduce_sum,
+                        rsqrt, scoped, shift, sigmoid, sign, slice, zeros_like)
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -49,10 +49,12 @@ class SoftmaxBackward(mtf.Operation):
                 msk = tf.reshape(msk, shape)
                 x -= msk
             e = tf.exp(x - tf.reduce_max(x, anonymous_dim_index, True))
-            s = tf.reduce_sum(e, anonymous_dim_index, True)
+            s = tf.reduce_sum(e, anonymous_dim_index)
             r = tf.reciprocal(s)
             dims = ''.join(chr(ord('a') + i) for i in range(len(e.shape)))
-            return tf.einsum(f'{dims},{dims},{dims},{dims},{dims}->{dims}', e + (1 - size), s - e, r, r, y)
+            sdims = dims[:anonymous_dim_index] + dims[anonymous_dim_index + 1:]
+            reshaped = tf.reshape(s, [1 if i == anonymous_dim_index else k for i, k in enumerate(e.shape)])
+            return tf.einsum(f'{dims},{sdims},{dims},{sdims},{dims}->{dims}', e + (1 - size), r, reshaped - e, r, y)
 
         y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]], lowering.tensors[self.inputs[1]])
         lowering.set_tensor_lowering(self.outputs[0], y)
@@ -107,19 +109,23 @@ def _get_variable(params: ModelParameter, shape: SHAPE, initializer: typing.Call
 
 
 class OrthogonalInit(Initializer):
-    def __init__(self, params: ModelParameter, shape: SHAPE):
+    def __init__(self, params: ModelParameter, shape: SHAPE, fan_in_dims: OPT_DIMS = None):
+        if fan_in_dims is None:
+            fan_in_dims = []
         self.params = params
-        self.sizes = sizes = [d.size for d in shape]
+        self.sizes = [d.size for d in shape]
         self.seed = random.randint(0, 2 ** 32)
-        feature_dims_used = all(f in shape for f in params.feature_dims)
-        if feature_dims_used and shape.index(params.key_dim) == len(sizes) - 1:
+        sizes = [d.size for d in shape - fan_in_dims]
+        features_used = feature_dims_used(params, shape)
+        if features_used and shape.index(params.key_dim) == len(sizes) - 1:
             fan_in = np.prod(sizes[:-2])
-        elif feature_dims_used:
+        elif features_used:
             fan_in = np.prod([d.size for d in params.feature_dims])
         elif len(sizes) == 2:
             fan_in = sizes[0]
         else:
-            raise ValueError(f"Shape: {shape}\nParams: {params}\nFeatureDimsUsed: {feature_dims_used}")
+            raise ValueError(f"Shape: {shape}\nParams: {params}\nFeaturesUsed: {features_used}")
+        fan_in *= np.prod([d.size for d in fan_in_dims])
         fan_out = np.prod(sizes) // fan_in
         self.transpose = transpose = fan_out > fan_in
         self.shape = (fan_out, fan_in) if transpose else (fan_in, fan_out)
@@ -132,9 +138,10 @@ class OrthogonalInit(Initializer):
         return tf.cast(array_ops.reshape(q, self.sizes) / self.params.n_blocks ** 0.5, dtype)
 
 
-def _orthogonal_var(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape]) -> mtf.Tensor:
+def _orthogonal_var(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
+                    fan_in_dims: OPT_DIMS = None) -> mtf.Tensor:
     shape = deduplicate(shape)
-    return scoped("orthogonal_var", _get_variable, params, shape, OrthogonalInit(params, shape))
+    return scoped("orthogonal_var", _get_variable, params, shape, OrthogonalInit(params, shape, fan_in_dims))
 
 
 def _normal_var(params: ModelParameter, shape: SHAPE, stddev: float = 0.02, mean: float = 0.) -> mtf.Tensor:

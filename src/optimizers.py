@@ -11,7 +11,7 @@ import tensorflow.compat.v1 as tf
 from .dataclass import ModelParameter
 from .model import RevGradOp
 from .utils_mtf import (add_n, anonymize, anonymize_dim, cast, constant_scalar, einsum, equal, greater, minimum, mod,
-                        reduce_max, reduce_mean, reduce_sum, rsqrt, sqrt, square, weighted_add)
+                        reduce_max, reduce_mean, reduce_sum, rsqrt, sqrt, square, weighted_add, feature_dims_used)
 
 
 def import_float(imported):
@@ -206,9 +206,9 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                         if params.weight_decay > 0:
                             weight_update += params.weight_decay * var.value
                         weight_update *= learning_rate
-                        feature_dims_used = all(f in var.shape.dims for f in params.feature_dims)
-                        large_tensor = feature_dims_used and len(var.shape.dims) > len(params.feature_dims)
-                        large_tensor |= not feature_dims_used and len(var.shape.dims) >= 2
+                        features_used = feature_dims_used(params, var)
+                        large_tensor = features_used and len(var.shape.dims) > len(params.feature_dims)
+                        large_tensor |= not features_used and len(var.shape.dims) >= 2
                         large_tensor &= var.shape.size > 1
                         if params.weight_centralisation and large_tensor:
                             weight_update += reduce_mean(var.value)
@@ -219,9 +219,9 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                             std = rsqrt(1e-6 + reduce_sum(square(val / (val.size ** 0.5)), output_shape=[]))
 
                             shape = [d.size for d in var.shape.dims]
-                            if feature_dims_used and var.shape.dims.index(params.key_dim) == var.shape.ndims - 1:
+                            if features_used and var.shape.dims.index(params.key_dim) == var.shape.ndims - 1:
                                 fan_in = np.prod(shape[:-2])
-                            elif feature_dims_used:
+                            elif features_used:
                                 fan_in = np.prod(shape[:2])
                             else:
                                 fan_in = shape[0]
