@@ -115,7 +115,7 @@ class OrthogonalInit(Initializer):
         self.params = params
         self.sizes = [d.size for d in shape]
         self.seed = random.randint(0, 2 ** 32)
-        sizes = [d.size for d in shape - fan_in_dims]
+        sizes = [d.size for d in mtf.Shape(shape) - fan_in_dims]
         features_used = feature_dims_used(params, shape)
         if features_used and shape.index(params.key_dim) == len(sizes) - 1:
             fan_in = np.prod(sizes[:-2])
