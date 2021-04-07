@@ -575,7 +575,4 @@ def build(params: ModelParameter,
                                      mtf.stop_gradient(video_loss)], output_shape=[])
         params.layer_idx = 0
 
-        video_loss = video_loss * vid_msk_tgt.size / reduce_sum(vid_msk_tgt)
-        token_loss = token_loss * txt_msk.size / reduce_sum(txt_msk)
-
         return add_n(loss_list), loss_list, video_loss, accuracy, token_loss, frame_out, token_out
