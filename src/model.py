@@ -21,6 +21,121 @@ from .utils_mtf import (ACTIVATIONS, OPT_DIMS, SHAPE, activate, add_n, anonymize
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
+mtf.Conv2or3dBackpropInputOperation
+
+
+class ConvolutionForward(mtf.Operation):
+    def __init__(self, params: ModelParameter, x: mtf.Tensor, dim: mtf.Dimension, kernel_size: int, masked: bool):
+        shape: mtf.Shape = x.shape
+        batch = shape.dims[0].size
+        self.sizes = sizes = [d.size for d in shape]
+        space_dims = (shape - params.intermediate - params.feature_dims).dims[1:]
+        dim_index = shape.dims.index(dim)
+        space_dim_index = space_dims.index(dim)
+        features = params.mesh_impl.slice_size(mtf.Shape(params.feature_dims))
+
+        self.weight_size = [features, features]
+        self.kwargs = {'stride': 1, 'name': random_name('conv'), 'dilations': 1}
+
+        if len(space_dims) == 1:
+            self.kwargs['data_format'] = 'NWC'
+            self.weight_size.append(kernel_size)
+            self.input_size = [s.size for s in shape if s not in params.feature_dims] + [features]
+            self.conv = tf.nn.conv1d
+            input2d = self.input_size.copy()
+            weight2d = self.weight_size.copy()
+            input2d.insert(2, 1)
+            weight2d.append(1)
+
+            def back_filter(x, w, dy, **kwargs):
+                x = tf.reshape(x, input2d)
+                w = tf.reshape(w, weight2d)
+                dy = tf.reshape(dy, input2d)
+                out = tf.nn.conv2d_backprop_filter(x, w, dy, **kwargs)
+                return tf.reshape(out, self.input_size)
+
+            def back_input(dy, w, **kwargs):
+                w = tf.reshape(w, weight2d)
+                dy = tf.reshape(dy, input2d)
+                out = tf.nn.conv2d_backprop_input(dy.shape, w, dy, **kwargs)
+                return tf.reshape(out, self.input_size)
+
+            self.filter_backprop = back_filter
+            self.input_backprop = back_input
+        elif space_dim_index == 0:
+            self.kwargs['data_format'] = 'NHWC'
+            self.weight_size.extend([kernel_size, 1])
+            self.input_size = [batch, sizes[1], int(np.prod(sizes[2:len(space_dims)])), features]
+            self.conv = tf.nn.conv2d
+            self.filter_backprop = tf.nn.conv2d_backprop_filter
+            self.input_backprop = tf.nn.conv2d_transpose
+        elif space_dim_index == len(space_dims) - 1:
+            self.kwargs['data_format'] = 'NHWC'
+            self.weight_size.extend([1, kernel_size])
+            self.input_size = [batch, int(np.prod(sizes[1:len(space_dims) - 1])), sizes[len(space_dims)], features]
+            self.conv = tf.nn.conv2d
+            self.filter_backprop = tf.nn.conv2d_backprop_filter
+            self.input_backprop = tf.nn.conv2d_transpose
+        else:
+            self.kwargs['data_format'] = 'NDHWC'
+            self.weight_size.extend([1, kernel_size, 1])
+            self.input_size = [batch, int(np.prod(sizes[1:dim_index])), sizes[dim_index],
+                               int(np.prod(sizes[dim_index + 1:len(space_dims)])), features]
+            self.conv = tf.nn.conv3d
+            self.filter_backprop = tf.nn.conv3d_backprop_filter_v2
+            self.input_backprop = tf.nn.conv3d_transpose
+        self.kwargs['padding'] = 'SAME'
+        if masked:
+            self.kwargs['padding'] = [[w - 1, 0] for w in self.weight_size[2:]]
+
+        fan_in = [mtf.Dimension(chr(i + ord('a')), w) for i, w in enumerate(self.weight_size[1:]) if w != 1]
+        mtf_weight_size = params.feature_dims
+        mtf_weight_size.extend(fan_in)
+        super().__init__([x, _get_variable(params, mtf_weight_size, OrthogonalInit(params, mtf_weight_size, fan_in))],
+                         name=random_name("conv_forward"))
+        self._outputs = [mtf.Tensor(self, x.shape, x.dtype)]
+        self.params = params
+
+    def gradient(self, grad_ys):
+        return ConvolutionFilterBackward(self).outputs
+
+    def lower(self, lowering):
+        mesh_impl = lowering.mesh_impl(self)
+
+        def slicewise_fn(x, w):
+            x = tf.reshape(x, self.input_size)
+            w = tf.reshape(w, self.weight_size)
+            out = self.conv(x, w, **self.kwargs)
+            return tf.reshape(out, self.sizes)
+
+        y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]], lowering.tensors[self.inputs[1]])
+        lowering.set_tensor_lowering(self.outputs[0], y)
+
+
+class ConvolutionFilterBackward(mtf.Operation):
+    def __init__(self, conv: ConvolutionForward):
+        super().__init__(conv.inputs + conv.outputs, name=random_name("conv_backward"))
+        self._outputs = conv.inputs
+        self.conv = conv
+
+    def lower(self, lowering):
+        mesh_impl = lowering.mesh_impl(self)
+        conv = self.conv
+
+        def slicewise_fn(x, w, dy):
+            x = tf.reshape(x, conv.input_size)
+            w = tf.reshape(w, conv.weight_size)
+            dy = tf.reshape(dy, conv.input_size)
+            back_filter = conv.filter_backprop(x, w, dy, **conv.kwargs)
+            back_input = conv.input_backprop(dy, w, **conv.kwargs)
+            back_filter = tf.reshape(back_filter, conv.input_size)
+            back_input = tf.reshape(back_input, conv.input_size)
+            return back_input, back_filter
+
+        dx, dw = mesh_impl.slicewise(slicewise_fn, *[lowering.tensors[self.inputs[i]] for i in range(3)])
+        lowering.set_tensor_lowering(self.outputs[0], dx)
+        lowering.set_tensor_lowering(self.outputs[1], dw)
+
 
 def tf_softmax(x, masked, dim, dim_index, anonymous_dim_index):
     if masked:
@@ -63,7 +178,7 @@ class SoftmaxBackward(mtf.Operation):
         lowering.set_tensor_lowering(self.outputs[0], y)
 
 
-class Softmax(mtf.Operation):
+class SoftmaxForward(mtf.Operation):
     def __init__(self, x: mtf.Tensor, dim: mtf.Dimension, masked: bool):
         super().__init__([x], name=random_name("softmax_forward"))
         self._outputs = [mtf.Tensor(self, x.shape, x.dtype)]
@@ -111,15 +226,18 @@ class OrthogonalInit(Initializer):
         self.seed = random.randint(0, 2 ** 32)
         sizes = [d.size for d in mtf.Shape(shape) - fan_in_dims]
         features_used = feature_dims_used(params, shape)
-        if features_used and shape.index(params.key_dim) == len(sizes) - 1:
-            fan_in = np.prod(sizes[:-2])
-        elif features_used:
-            fan_in = np.prod([d.size for d in params.feature_dims])
-        elif len(sizes) == 2:
-            fan_in = sizes[0]
+        if fan_in_dims is None:
+            if features_used:
+                if shape.index(params.key_dim) == len(sizes) - 1:
+                    fan_in = np.prod(sizes[:-2])
+                else:
+                    fan_in = np.prod([d.size for d in params.feature_dims])
+            elif len(sizes) == 2:
+                fan_in = sizes[0]
+            else:
+                raise ValueError(f"Shape: {shape}\nParams: {params}\nFeaturesUsed: {features_used}")
         else:
-            raise ValueError(f"Shape: {shape}\nParams: {params}\nFeaturesUsed: {features_used}")
-        fan_in *= int(np.prod([d.size for d in fan_in_dims]))
+            fan_in = int(np.prod([d.size for d in fan_in_dims]))
         fan_out = np.prod(sizes) // fan_in
         self.transpose = transpose = fan_out > fan_in
         self.shape = (fan_out, fan_in) if transpose else (fan_in, fan_out)
@@ -211,7 +329,7 @@ def _attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typ
     if all(f'kernel_{k}' not in name_extras for k in ['softmax'] + list(ACTIVATIONS.keys())):
         return einsum(inputs + [val], output_shape=block_input.shape)
     lgt = einsum(inputs, reduced_dims=[dim if linear else params.key_dim])
-    return einsum(Softmax(lgt, dim, masked).outputs + [val], block_input.shape)
+    return einsum(SoftmaxForward(lgt, dim, masked).outputs + [val], block_input.shape)
 
 
 def _rezero(params, block_input: mtf.Tensor, name_extras: typing.List[str]) -> mtf.Tensor:
