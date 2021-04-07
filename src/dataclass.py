@@ -108,13 +108,11 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.own_color = "\x1b[32;1m"
         self.other_color = "\x1b[0m"
         self.block_config = [{'layer': ["norm-group-instance-mean-std-shift-scale",
-                                        "feed_forward-relu-group",
-                                        "rezero"]
+                                        "feed_forward-relu-group"]
                               },
 
                              {'layer': ["norm-group-instance-mean-std-shift-scale",
-                                        "attention-relu-embedded-kernel_softmax",
-                                        "rezero"]
+                                        "attention-relu-embedded-kernel_softmax"]
                               }]
 
         self.input_block_config = []
