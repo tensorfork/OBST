@@ -203,18 +203,18 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                             update_ops.extend([mtf.assign(buf_ptr, reduce_max(update, output_shape=[dim]))
                                                for buf_ptr, dim in zip(buffer, update.shape.dims)])
 
-                        if params.weight_decay > 0:
-                            weight_update += params.weight_decay * var.value
                         weight_update *= learning_rate
                         features_used = feature_dims_used(params, var)
                         large_tensor = features_used and len(var.shape.dims) > len(params.feature_dims)
                         large_tensor |= not features_used and len(var.shape.dims) >= 2
                         large_tensor &= var.shape.size > 1
-                        if params.weight_centralisation and large_tensor:
+                        if large_tensor and params.weight_decay > 0:
+                            weight_update += params.weight_decay * var.value
+                        if large_tensor and params.weight_centralisation:
                             weight_update += reduce_mean(var.value)
                         if params.grad_accumulation > 1:
                             weight_update *= step
-                        if params.weight_standardisation and large_tensor:
+                        if large_tensor and params.weight_standardisation:
                             val: mtf.Tensor = var.value - weight_update
                             std = rsqrt(1e-6 + reduce_sum(square(val / (val.size ** 0.5)), output_shape=[]))
 
