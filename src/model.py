@@ -22,6 +22,21 @@ from .utils_mtf import (ACTIVATIONS, OPT_DIMS, SHAPE, activate, add_n, anonymize
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
 
+def tf_softmax(x, masked, dim, dim_index, anonymous_dim_index):
+    if masked:
+        arange = tf.range(0, dim.size)
+        msk = tf.reshape(arange, (1, dim.size)) < tf.reshape(arange, (dim.size, 1))
+        msk = tf.cast(msk, x.dtype)
+        msk *= 1e12
+        shape = [1] * len(x.shape)
+        shape[dim_index] = dim.size
+        shape[anonymous_dim_index] = dim.size
+        msk = tf.reshape(msk, shape)
+        x -= msk
+    e = tf.exp(x - tf.reduce_max(x, anonymous_dim_index, True))
+    return e / tf.reduce_sum(e, anonymous_dim_index, True)
+
+
 class SoftmaxBackward(mtf.Operation):
     def __init__(self, x: mtf.Tensor, dy: mtf.Tensor, dim: mtf.Dimension, masked: bool):
         super().__init__([x, dy], name=random_name("softmax_backward"))
@@ -33,30 +48,16 @@ class SoftmaxBackward(mtf.Operation):
     def lower(self, lowering):
         mesh_impl = lowering.mesh_impl(self)
         dim_index = self.shape.dims.index(self.dim)
-        size = self.dim.size
         dim_index = self.shape.dims.index(self.dim)
         anonymous_dim_index = self.shape.dims.index(anonymize_dim(self.dim))
+        masked = self.masked
+        dim = self.dim
 
         def slicewise_fn(x, y):
-            if self.masked:
-                arange = tf.range(0, self.dim.size)
-                msk = tf.reshape(arange, (1, self.dim.size)) < tf.reshape(arange, (self.dim.size, 1))
-                msk = tf.cast(msk, x.dtype)
-                msk *= 1e12
-                shape = [1] * len(self.shape.dims)
-                shape[dim_index] = self.dim.size
-                shape[anonymous_dim_index] = self.dim.size
-                msk = tf.reshape(msk, shape)
-                x -= msk
-            e = tf.exp(x - tf.reduce_max(x, anonymous_dim_index, True))
-            s = tf.reduce_sum(e, anonymous_dim_index, True)
-            r = tf.reciprocal(s)
-            out = e + (1 - size)
-            out *= r
-            out *= tf.reshape(s, [1 if i == anonymous_dim_index else k for i, k in enumerate(x.shape)]) - e
-            out *= r
-            out *= y
-            return out
+            s = tf_softmax(x, masked, dim, dim_index, anonymous_dim_index)
+            dims = ''.join(chr(ord('a') + i) for i in range(len(x.shape)))
+            sdims = dims[:anonymous_dim_index] + 'z' + dims[anonymous_dim_index + 1:]
+            return s * y - tf.einsum(f"{dims},{sdims},{sdims}->{dims}", s, s, y)
 
         y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]], lowering.tensors[self.inputs[1]])
         lowering.set_tensor_lowering(self.outputs[0], y)
@@ -77,20 +78,11 @@ class Softmax(mtf.Operation):
         mesh_impl = lowering.mesh_impl(self)
         dim_index = self.shape.dims.index(self.dim)
         anonymous_dim_index = self.shape.dims.index(anonymize_dim(self.dim))
+        masked = self.masked
+        dim = self.dim
 
         def slicewise_fn(x):
-            if self.masked:
-                arange = tf.range(0, self.dim.size)
-                msk = tf.reshape(arange, (1, self.dim.size)) < tf.reshape(arange, (self.dim.size, 1))
-                msk = tf.cast(msk, x.dtype)
-                msk *= 1e12
-                shape = [1] * len(self.shape.dims)
-                shape[dim_index] = self.dim.size
-                shape[anonymous_dim_index] = self.dim.size
-                msk = tf.reshape(msk, shape)
-                x -= msk
-            e = tf.exp(x - tf.reduce_max(x, anonymous_dim_index, True))
-            return e / tf.reduce_sum(e, anonymous_dim_index, True)
+            return tf_softmax(x, masked, dim, dim_index, anonymous_dim_index)
 
         y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]])
         lowering.set_tensor_lowering(self.outputs[0], y)
