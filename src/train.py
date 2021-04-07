@@ -462,7 +462,9 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             options.experimental_optimization.apply_default_optimizations = False
             options.experimental_threading.max_intra_op_parallelism = 1
             options.experimental_threading.private_threadpool_size = 48
-            options.experimental_distribute.auto_shard = True
+            from tensorflow.python.data.experimental.ops.distribute_options import AutoShardPolicy
+            #options.experimental_distribute.auto_shard = True
+            options.experimental_distribute.auto_shard_policy = AutoShardPolicy.AUTO
             dataset: Dataset = dataset.with_options(options)
             _ds_iterator = dataset.make_initializable_iterator()
             ds_iterator.append(_ds_iterator)
