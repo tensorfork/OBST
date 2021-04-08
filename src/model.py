@@ -15,9 +15,9 @@ from tensorflow.python.ops.init_ops import Initializer
 from .dataclass import BlockConfig, ModelParameter
 from .utils_core import default
 from .utils_mtf import (ACTIVATIONS, OPT_DIMS, SHAPE, activate, add_n, anonymize, anonymize_dim, cast, concat,
-                        constant_scalar, deduplicate, dropout, einsum, feature_dims_used, greater_equal, maximum,
-                        mtf_range, one_hot, ones, random_name, reciprocal, reduce_logsumexp, reduce_mean, reduce_sum,
-                        rsqrt, scoped, shift, sigmoid, sign, slice, zeros_like)
+                        constant_scalar, deduplicate, dropout, einsum, feature_dims_used, greater_equal, mtf_range,
+                        one_hot, ones, random_name, reciprocal, reduce_logsumexp, reduce_mean, reduce_sum,
+                        rsqrt, scoped, sigmoid, sign, slice, zeros_like)
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -384,6 +384,7 @@ def _convolution(params: ModelParameter, block_input: mtf.Tensor, name_extras: t
     if len(name_extras) > 0 and name_extras[-1].isdigit():
         convolution_size = int(name_extras[-1])
     return ConvolutionForward(params, block_input, dim, convolution_size, idx in params.masked_attention_dimensions)
+
 
 LAYER_FUNCTIONS = {'feed_forward': _feed_forward,
                    'attention':    _attention,
