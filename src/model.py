@@ -21,8 +21,6 @@ from .utils_mtf import (ACTIVATIONS, OPT_DIMS, SHAPE, activate, add_n, anonymize
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
-mtf.Conv2or3dBackpropInputOperation
-
 
 class ConvolutionForward(mtf.Operation):
     def __init__(self, params: ModelParameter, x: mtf.Tensor, dim: mtf.Dimension, kernel_size: int, masked: bool):
@@ -385,21 +383,7 @@ def _convolution(params: ModelParameter, block_input: mtf.Tensor, name_extras: t
     convolution_size = 16
     if len(name_extras) > 0 and name_extras[-1].isdigit():
         convolution_size = int(name_extras[-1])
-    if "gather" in name_extras:
-        anonymous_block_input = anonymize(block_input, dim)
-        indexed = mtf.Dimension("indexed", convolution_size)
-        hot = mtf_range(params.mesh, indexed, params.variable_dtype.activation_dtype)
-        hot -= params.convolution_size
-        hot += mtf_range(params.mesh, dim, params.variable_dtype.activation_dtype)
-        hot = maximum(hot, 0)
-        hot = one_hot(hot, dim)
-        output = einsum([hot, anonymous_block_input], block_input.shape + [indexed])
-        output = _linear(params, output, [indexed] + params.feature_dims, params.intermediate)
-        output = activate(name_extras, output)
-        return _communicating_linear(params, output)
-    out = [shift(_linear_from_features(params, block_input), i, dim, False) for i in range(convolution_size)]
-    return _communicating_linear(params, activate(name_extras, add_n(out)))
-
+    return ConvolutionForward(params, block_input, dim, convolution_size, idx in params.masked_attention_dimensions)
 
 LAYER_FUNCTIONS = {'feed_forward': _feed_forward,
                    'attention':    _attention,
