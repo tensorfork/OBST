@@ -217,7 +217,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             loop_out = mtf.while_loop(cond_fn=cond_fn, body_fn=body_fn, inputs=while_loop_inputs)
 
             if params.use_language:
-                token_out = loop_out[2]
+                token_out = loop_out[1]
             if params.use_video:
                 frame_out = loop_out[3]
 
