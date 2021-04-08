@@ -383,7 +383,8 @@ def _convolution(params: ModelParameter, block_input: mtf.Tensor, name_extras: t
     convolution_size = 16
     if len(name_extras) > 0 and name_extras[-1].isdigit():
         convolution_size = int(name_extras[-1])
-    return ConvolutionForward(params, block_input, dim, convolution_size, idx in params.masked_attention_dimensions)
+    return ConvolutionForward(params, block_input, dim, convolution_size,
+                              idx in params.masked_attention_dimensions).outputs[0]
 
 
 LAYER_FUNCTIONS = {'feed_forward': _feed_forward,
