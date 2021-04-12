@@ -207,7 +207,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
                     return (position + 1, weighted_add(token_out, token_x, one_hot_mask), token_y)
 
-                while_loop_inputs = [constant_scalar(params, params.initial_autoregressive_position, dtype=tf.int32),
+                while_loop_inputs = [mtf.constant(params.mesh, params.initial_autoregressive_position, dtype=tf.int32),
                                      token_x_input, token_y_input]
 
             def cond_fn(position, *states):
