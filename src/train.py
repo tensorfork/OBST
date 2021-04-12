@@ -20,7 +20,7 @@ from .dataclass import ModelParameter
 from .model import build
 from .optimizers import get_optimizer
 from .utils_core import color_print
-from .utils_mtf import pad, to_float, weighted_add
+from .utils_mtf import pad, to_float, weighted_add, constant_scalar
 
 
 class CheckpointLoaderHook(tf.estimator.SessionRunHook):
@@ -130,6 +130,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                                                             token_mask)
         else:
             if params.use_video:
+                # todo: fix token shift for video (Jan).
                 tkn_per_frame = mtf.Dimension("language_token_per_frame",
                                               params.language_token_per_frame)
                 shape = [params.batch_dim, params.sequence_dim, tkn_per_frame, params.vocab_dim]
@@ -199,12 +200,14 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                         mtf.ones(params.mesh, [], tf.float32),
                                                         mtf.ones(params.mesh, [], tf.float32),
                                                         mtf.ones(params.mesh, [], tf.float32))
-                    return (position + 1,
-                            weighted_add(mtf.argmax(token_out, reduced_dim=params.vocab_dim), token_x,
-                                         mtf.one_hot(position, output_dim=params.sequence_dim, dtype=tf.int32)),
-                            token_y)
 
-                while_loop_inputs = [mtf.zeros(params.mesh, [], tf.int32) + params.initial_autoregressive_position,
+                    one_hot_mask = mtf.one_hot(position, output_dim=params.sequence_dim, dtype=tf.int32)
+                    token_out = mtf.argmax(token_out, reduced_dim=params.vocab_dim)
+                    token_out = mtf.shift(token_out, offset=1, dim=params.sequence_dim, wrap=False)
+
+                    return (position + 1, weighted_add(token_out, token_x, one_hot_mask), token_y)
+
+                while_loop_inputs = [constant_scalar(params, params.initial_autoregressive_position),
                                      token_x_input, token_y_input]
 
             def cond_fn(position, *states):
