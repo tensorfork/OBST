@@ -68,12 +68,17 @@ def process_token_output(token_out: np.ndarray, padding_token: int = -1, do_argm
     token_out_str = []
 
     for token in token_out:
-        if padding_token > -1:
-            if padding_token in token:
-                token = token[:token.tolist().index(padding_token)]
+        if padding_token > -1 and padding_token in token:
+            token = token[:token.tolist().index(padding_token)]
 
         if bpe_tokenizer is None:
-            token_out_str.append("".join([chr(tok) if tok > 31 and tok != 127 and tok != 10 else " " for tok in token]))
+            token_out_str.append(
+                "".join(
+                    chr(tok) if tok > 31 and tok != 127 and tok != 10 else " "
+                    for tok in token
+                )
+            )
+
         else:
             token_out_str.append(bpe_tokenizer.decode([int(tok) for tok in token]))
 
