@@ -202,7 +202,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                         mtf.ones(params.mesh, [], tf.float32))
 
                     one_hot_mask = mtf.one_hot(position, output_dim=params.sequence_dim, dtype=tf.int32)
-                    token_out = mtf.argmax(token_out, reduced_dim=params.vocab_dim)
+                    token_out = mtf.sample_with_temperature(token_out, params.vocab_dim, params.sampling_temperature)
                     token_out = mtf.shift(token_out, offset=1, dim=params.sequence_dim, wrap=False)
 
                     return (position + 1, weighted_add(token_out, token_x, one_hot_mask), token_y)

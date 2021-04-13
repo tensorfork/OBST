@@ -90,6 +90,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.iterations = 2500
         self.initial_autoregressive_position = 128
         self.use_autoregressive_sampling = False
+        self.sampling_temperature = 0
         self.weight_centralisation = True
         self.shuffle_input_filenames = True
         self.calc_accuracy = False
