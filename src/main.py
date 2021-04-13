@@ -5,6 +5,7 @@
 import argparse
 import json
 import re
+import time
 from functools import partial
 
 import mesh_tensorflow as mtf
@@ -38,17 +39,22 @@ def main(args: argparse.Namespace) -> None:
         _params = json.load(f)
     params = ModelParameter(_params)
     params.train = args.run_mode == 'train'
+    params.debug_sample = args.run_mode == 'debug'
     params.debug_gradients = args.debug_grad is not None
 
     # Read params of model
-
-    json.dump(_params, tf.io.gfile.GFile(f"{params.model_path}/run_config.json", 'w'))
+    if params.train:
+        json.dump(_params, tf.io.gfile.GFile(f"{params.model_path}/run_config_{int(time.time())}.json", 'w'))
 
     params.current_step = int(estimator_lib._load_global_step_from_checkpoint_dir(params.model_path))
 
     # If run mode == sample, set the batch size to one
     if not params.train:
-        params.train_batch_size = 1
+        if params.debug_sample:
+            params.train_batch_size = 2
+        else:
+            params.train_batch_size = 1
+
         params = ModelParameter(params)
 
     # Fetch appropriate input functions

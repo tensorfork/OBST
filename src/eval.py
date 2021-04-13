@@ -134,12 +134,23 @@ def gen_sample_fn(params: ModelParameter):
                                                                      params.vocab_size > 256 else None
 
         if params.use_autoregressive_sampling:
-            print('Prompt:')
-            print(process_token_output(out[1], do_argmax=False,
-                                       bpe_tokenizer=bpe_tokenizer)[0][:params.initial_autoregressive_position])
-            print('\noutput:')
-            print(process_token_output(out[0], do_argmax=False,
-                                       bpe_tokenizer=bpe_tokenizer)[0][params.initial_autoregressive_position:])
+
+            if params.debug_sample:
+                score = np.int(np.mean(np.equal(out[0][0], out[0][1])) * 100)
+                print(f"similarity score: {score}%\n")
+                print([process_token_output(out[0], do_argmax=False, bpe_tokenizer=bpe_tokenizer)[0]])
+                print([process_token_output(out[0], do_argmax=False, bpe_tokenizer=bpe_tokenizer)[1]])
+                print([process_token_output(out[1], do_argmax=False, bpe_tokenizer=bpe_tokenizer)[0]])
+                print('')
+
+            else:
+
+                print('Prompt:')
+                print(process_token_output(out[1], do_argmax=False,
+                                           bpe_tokenizer=bpe_tokenizer)[0][:params.initial_autoregressive_position])
+                print('\noutput:')
+                print(process_token_output(out[0], do_argmax=False,
+                                           bpe_tokenizer=bpe_tokenizer)[0][params.initial_autoregressive_position:])
         else:
             print('target:')
             print(process_token_output(out[1], do_argmax=False, bpe_tokenizer=bpe_tokenizer)[0])

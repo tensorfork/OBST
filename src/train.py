@@ -20,7 +20,7 @@ from .dataclass import ModelParameter
 from .model import build
 from .optimizers import get_optimizer
 from .utils_core import color_print
-from .utils_mtf import pad, to_float, weighted_add, constant_scalar
+from .utils_mtf import pad, to_float, weighted_add, concat, slice
 
 
 class CheckpointLoaderHook(tf.estimator.SessionRunHook):
@@ -207,8 +207,17 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
                     return (position + 1, weighted_add(token_out, token_x, one_hot_mask), token_y)
 
-                while_loop_inputs = [mtf.constant(params.mesh, params.initial_autoregressive_position, dtype=tf.int32),
-                                     token_x_input, token_y_input]
+                initial_pos = mtf.constant(params.mesh, value=params.initial_autoregressive_position, dtype=tf.int32)
+                if params.debug_sample:
+                    token_debug_mask = mtf.less_equal(mtf.range(params.mesh, params.sequence_dim, dtype=tf.int32),
+                                                initial_pos)
+                    token_debug_mask = mtf.cast(token_debug_mask, tf.int32)
+
+                    token_x_input_a = slice(token_x_input, 0, 1, dim=params.batch_dim)
+                    token_x_input_b = token_x_input_a * token_debug_mask
+                    token_x_input = concat([token_x_input_a, token_x_input_b], dim=token_x_input_a.shape[0])
+
+                while_loop_inputs = [initial_pos, token_x_input, token_y_input]
 
             def cond_fn(position, *states):
                 is_done = mtf.greater_equal(position, steps)
@@ -278,7 +287,8 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                       'total_variables':           int(var_count)
                       }
 
-        json.dump(model_size, tf.io.gfile.GFile(f"{params.model_path}/model_size.info", 'w'))
+        if params.train:
+            json.dump(model_size, tf.io.gfile.GFile(f"{params.model_path}/model_size.info", 'w'))
 
         color_print(params, "Lowering graph to TensorFlow...")
         start_time = time.time()

@@ -40,6 +40,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.dataset_configs = []
         self.data_seed = 456772
         self.train = True
+        self.debug_sample = False
         self.padding_token = 0
         self.concat_token = 4
         self.n_ctx = 32
