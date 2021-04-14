@@ -208,14 +208,16 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     return (position + 1, weighted_add(token_out, token_x, one_hot_mask), token_y)
 
                 initial_pos = mtf.constant(params.mesh, value=params.initial_autoregressive_position, dtype=tf.int32)
-                if params.debug_sample:
-                    token_debug_mask = mtf.less_equal(mtf.range(params.mesh, params.sequence_dim, dtype=tf.int32),
-                                                initial_pos)
-                    token_debug_mask = mtf.cast(token_debug_mask, tf.int32)
+                token_initial_pos_mask = mtf.less_equal(mtf.range(params.mesh, params.sequence_dim, dtype=tf.int32),
+                                                  initial_pos)
+                token_initial_pos_mask = mtf.cast(token_initial_pos_mask, tf.int32)
 
+                if params.debug_sample:
                     token_x_input_a = slice(token_x_input, 0, 1, dim=params.batch_dim)
-                    token_x_input_b = token_x_input_a * token_debug_mask
+                    token_x_input_b = token_x_input_a * token_initial_pos_mask
                     token_x_input = concat([token_x_input_a, token_x_input_b], dim=token_x_input_a.shape[0])
+                else:
+                    token_x_input = token_x_input * token_initial_pos_mask
 
                 while_loop_inputs = [initial_pos, token_x_input, token_y_input]
 

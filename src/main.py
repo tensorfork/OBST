@@ -52,6 +52,8 @@ def main(args: argparse.Namespace) -> None:
     if not params.train:
         if params.debug_sample:
             params.train_batch_size = 2
+            params.use_autoregressive_sampling = True
+            params.sampling_temperature = 0
         else:
             params.train_batch_size = 1
 
