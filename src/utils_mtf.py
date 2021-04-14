@@ -74,6 +74,14 @@ def constant(params: ModelParameter, value: typing.Union[int, float], shape: OPT
     return scoped("constant", mtf.constant, params.mesh, value, shape, params.variable_dtype.activation_dtype)
 
 
+def constant_float(params: ModelParameter, value: typing.Union[int, float], shape: OPT_SHAPE = None) -> mtf.Tensor:
+    return scoped("constant", mtf.constant, params.mesh, value, shape, tf.float32)
+
+
+def constant_int(params: ModelParameter, value: typing.Union[int, float], shape: OPT_SHAPE = None) -> mtf.Tensor:
+    return scoped("constant", mtf.constant, params.mesh, value, shape, tf.int32)
+
+
 def constant_scalar(params: ModelParameter, value: typing.Union[int, float], dtype: tf.TypeSpec = None) -> mtf.Tensor:
     dtype = params.variable_dtype.activation_dtype if dtype is None else dtype
     return scoped("constant_scalar", mtf.constant, params.mesh, value, [], dtype)

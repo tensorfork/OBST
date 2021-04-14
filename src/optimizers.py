@@ -11,7 +11,8 @@ import tensorflow.compat.v1 as tf
 from .dataclass import ModelParameter
 from .model import RevGradOp
 from .utils_mtf import (add_n, anonymize, anonymize_dim, cast, constant_scalar, einsum, equal, greater, minimum, mod,
-                        reduce_max, reduce_mean, reduce_sum, rsqrt, sqrt, square, weighted_add, feature_dims_used)
+                        reduce_max, reduce_mean, reduce_sum, rsqrt, sqrt, square, weighted_add, feature_dims_used,
+                        constant_float, greater_equal, to_float)
 
 
 def import_float(imported):
@@ -20,6 +21,17 @@ def import_float(imported):
 
 def sum_dim(inp: mtf.Tensor, dims: typing.List[mtf.Dimension]):
     return einsum([inp, anonymize(dims, dims)], output_shape=mtf.Shape(dims) + [anonymize_dim(d) for d in dims])
+
+
+def _min_norm_element_from2(params: ModelParameter, v1v1: mtf.Tensor, v1v2: mtf.Tensor,
+                            v2v2: mtf.Tensor, min_gamma: float = 0.001):
+
+    gamma = constant_float(params, value=(1 - min_gamma), shape=[]) * to_float(greater_equal(v1v2, v1v1))
+    gamma += constant_float(params, value=min_gamma, shape=[]) * \
+             to_float(greater_equal(v1v2, v2v2)) * to_float(equal(gamma, 0))
+    gamma += (-1.0 * ((v1v2 - v2v2) / (v1v1 + v2v2 - 2 * v1v2))) * to_float(equal(gamma, 0))
+
+    return gamma
 
 
 def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, manual_step: tf.Tensor,
@@ -62,15 +74,44 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
     beta2 = 1 - step * import_mtf(1 - 0.95, "beta2")
     epsilon = 1e-5
 
+    def _variable(mesh, name, shape, dtype):
+        return mtf.get_variable(mesh, name, shape=shape,
+                                initializer=tf.zeros_initializer(), trainable=False, dtype=dtype)
+
     def variable(var, name, shape):
-        return mtf.get_variable(var.mesh, f"{var.name}/{params.optimizer}/{name}", shape,
-                                initializer=tf.zeros_initializer(), trainable=False, dtype=params.variable_dtype)
+        return _variable(var.mesh, f"{var.name}/{params.optimizer}/{name}", shape, params.variable_dtype)
 
     debug_gradients_dict = {}
+    update_ops = []
+
+    if params.multi_loss_strategy == "mgda":
+        loss_multi_list = [mtf.get_variable(mesh=params.mesh, name=f"loss_multi_{loss_multi_idx}", shape=[],
+                                            initializer=tf.zeros_initializer(), trainable=False,
+                                            dtype=tf.float32) for loss_multi_idx in range(2)]
+        loss_1__loss_1 = _variable(params.mesh, "loss_1__loss_1", [params.head_dim], tf.float32)
+        loss_1__loss_2 = _variable(params.mesh, "loss_1__loss_2", [params.head_dim], tf.float32)
+        loss_2__loss_2 = _variable(params.mesh, "loss_2__loss_2", [params.head_dim], tf.float32)
+
+        _zero = constant_float(params, 0, shape=[params.head_dim])
+
+        update_ops = [mtf.assign(loss_1__loss_1, _zero),
+                      mtf.assign(loss_1__loss_2, _zero),
+                      mtf.assign(loss_2__loss_2, _zero)]
 
     for loss_idx, loss in enumerate(loss_list):
 
-        update_ops = []
+        if params.multi_loss_strategy == "mgda" and loss_idx == 2:
+
+            gamma = _min_norm_element_from2(params,
+                                            reduce_sum(loss_1__loss_1, output_shape=[]),
+                                            reduce_sum(loss_1__loss_2, output_shape=[]),
+                                            reduce_sum(loss_2__loss_2, output_shape=[]))
+
+            update_ops.extend([mtf.assign(loss_multi_list[0], gamma), mtf.assign(loss_multi_list[1], (1 - gamma))])
+
+            loss = mtf.add(mtf.multiply(loss_list[0], loss_multi_list[0]),
+                           mtf.multiply(loss_list[1], loss_multi_list[1]))
+
         operations = loss.graph.operations
         xs = [x.outputs[0] for x in params.mesh.graph.trainable_variables]
         tensor_to_var = dict(zip(xs, params.mesh.graph.trainable_variables))
@@ -129,21 +170,45 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                             update_ops.append(mtf.assign(flat_grad, mtf.reshape(grad, new_shape=flat_shape)))
                             debug_gradients_dict[f"loss_{loss_idx}/{var.name}"] = flat_grad
 
-                        if params.use_PCGrad and len(loss_list) > 1:
-                            if 'body' in op.name:
-                                other_grads = [variable(var, f"grad_{i}", var.shape) for i in range(len(loss_list) - 1)]
-                                if loss_idx < len(loss_list) - 1:
-                                    update_ops.append(mtf.assign(other_grads[loss_idx], grad))
-                                    continue
-                                other_grads.insert(0, grad)
-                                g_square = [1e-6 + einsum([g, g], output_shape=[]) for g in other_grads[1:]]
-                                for i in range(len(other_grads)):
-                                    grad = other_grads.pop(0)
-                                    for g, sq in zip(other_grads, g_square):
-                                        grad -= g * (minimum(einsum([grad, g], output_shape=[]), 0) / sq)
-                                    other_grads.append(grad)
-                                    g_square.append(einsum([g, g], output_shape=[]))
-                                grad = add_n(other_grads)
+                        if len(loss_list) > 1:
+                            if params.multi_loss_strategy == "pcgrad":
+                                if 'body' in op.name:
+                                    other_grads = [variable(var, f"grad_{i}", var.shape) for i in range(len(loss_list) - 1)]
+                                    if loss_idx < len(loss_list) - 1:
+                                        update_ops.append(mtf.assign(other_grads[loss_idx], grad))
+                                        continue
+                                    other_grads.insert(0, grad)
+                                    g_square = [1e-6 + einsum([g, g], output_shape=[]) for g in other_grads[1:]]
+                                    for i in range(len(other_grads)):
+                                        grad = other_grads.pop(0)
+                                        for g, sq in zip(other_grads, g_square):
+                                            grad -= g * (minimum(einsum([grad, g], output_shape=[]), 0) / sq)
+                                        other_grads.append(grad)
+                                        g_square.append(einsum([g, g], output_shape=[]))
+                                    grad = add_n(other_grads)
+
+                                elif params.multi_loss_strategy == "mgda":
+                                    if 'body' in op.name:
+                                        if loss_idx < 2:
+                                            first_grads = variable(loss_list[0], f"first_grad", loss_list[0].shape)
+                                            if loss_idx == 0:
+                                                update_ops.append(mtf.assign(first_grads, grad))
+                                                continue
+
+                                            _loss_1__loss_1 = einsum([first_grads, first_grads], [params.head_dim])
+                                            update_ops.append(mtf.assign_add(loss_1__loss_1, _loss_1__loss_1))
+
+                                            _loss_1__loss_2 = einsum([first_grads, grad], [params.head_dim])
+                                            update_ops.append(mtf.assign_add(loss_1__loss_2, _loss_1__loss_2))
+
+                                            _loss_2__loss_2 = einsum([grad, grad], [params.head_dim])
+                                            update_ops.append(mtf.assign_add(loss_2__loss_2, _loss_2__loss_2))
+
+                                            del first_grads
+                                            continue
+
+                                    elif loss_idx == 2: # not in body and optimize body params.
+                                        continue
 
                         if params.grad_accumulation > 1:
                             grad_buffer = variable(var, "grad_accumulation", var.shape)

@@ -102,7 +102,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.debug_train_step = False
         self.model_mode = 'jannet'
         self.optimizer = 'adam'
-        self.use_PCGrad = True
+        self.multi_loss_strategy = "linear"
         self.use_revnet = True
         self.debug_gradients = False
         self.use_initial_position_embedding = False
@@ -132,6 +132,11 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             config = config.dict()
         self.__dict__.update(config)
 
+        self.multi_loss_strategy = self.multi_loss_strategy.lower()
+        if not self.multi_loss_strategy in ["linear", "pcgrad", "mgda"]:
+            raise UserWarning(f'{self.multi_loss_strategy} is not in the support option list for multi loss strategies:'
+                              f' ["linear", "pcgrad", "mgda"]. default to "linear".')
+            self.multi_loss_strategy = "linear"
         if not self.use_language and not self.use_video:
             raise ValueError("Language and video mode are disabled. No model can be built.")
         if self.weight_standardisation and not self.weight_centralisation:

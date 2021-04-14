@@ -235,8 +235,10 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 frame_out = loop_out[3]
 
         if params.train:
-            if not params.use_PCGrad:
+            if params.multi_loss_strategy == "linear":
                 loss_list = [loss]
+            elif params.multi_loss_strategy == "mgda":
+                loss_list = loss_list + [None]
 
             update_ops, learning_rate, debug_gradients_dict = get_optimizer(loss_list, params, manual_global_step)
         else:
