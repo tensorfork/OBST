@@ -187,13 +187,20 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         frame_input_shape = [self.batch_dim, self.frame_input_sequence]
 
         if self.three_axes:
-            frame_input_shape = frame_input_shape + [mtf.Dimension("height", self.frame_height_patch),
-                                                     mtf.Dimension("width", self.frame_width_patch)]
-        else:
-            frame_input_shape = frame_input_shape + [
-                    mtf.Dimension("height", self.frame_height_patch * self.frame_width_patch)]
+            frame_input_shape += [
+                mtf.Dimension("height", self.frame_height_patch),
+                mtf.Dimension("width", self.frame_width_patch),
+            ]
 
-        frame_input_shape = frame_input_shape + [mtf.Dimension("color_channels", self.channel_color_size)]
+        else:
+            frame_input_shape += [
+                mtf.Dimension(
+                    "height", self.frame_height_patch * self.frame_width_patch
+                )
+            ]
+
+
+        frame_input_shape += [mtf.Dimension("color_channels", self.channel_color_size)]
         self.frame_input_shape = mtf.Shape(frame_input_shape)
         self.input_pipeline_shape = {}
 
