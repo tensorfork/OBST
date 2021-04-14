@@ -1,7 +1,7 @@
 
 numpy<1.19.0,>=1.16.0
 mesh-tensorflow==0.1.16
-tensorflow==1.15.5
+tensorflow==2.4.1
 tensorflow-datasets==3.2.1
 tokenizers==0.9.3
 transformers==3.5.1
