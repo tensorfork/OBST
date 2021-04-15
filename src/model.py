@@ -657,11 +657,6 @@ def build(params: ModelParameter,
                                  output_shape=[])
             loss_list.append(token_loss)
 
-            if txt_msk is not None:
-                token_loss = einsum([constant_scalar(params, txt_msk.size), reciprocal(reduce_sum(txt_msk)),
-                                     constant_scalar(params, cat_msk_tgt.size), reciprocal(reduce_sum(cat_msk_tgt)),
-                                     mtf.stop_gradient(token_loss)], output_shape=[])
-
             if params.calc_accuracy:
                 accuracy = einsum([cast(mtf.equal(mtf.argmax(mtf.stop_gradient(token_out), params.vocab_dim), txt_tgt),
                                         tf.float32), txt_msk, cat_msk_tgt, size], output_shape=[])
@@ -672,10 +667,6 @@ def build(params: ModelParameter,
             video_loss: mtf.Tensor = einsum([out, vid_msk_tgt, cat_msk_tgt, size, sign(out)], output_shape=[])
             loss_list.append(video_loss)
 
-            if vid_msk_tgt is not None:
-                video_loss = einsum([constant_scalar(params, vid_msk_tgt.size), reciprocal(reduce_sum(vid_msk_tgt)),
-                                     constant_scalar(params, cat_msk_tgt.size), reciprocal(reduce_sum(cat_msk_tgt)),
-                                     mtf.stop_gradient(video_loss)], output_shape=[])
         params.layer_idx = 0
 
         return add_n(loss_list), loss_list, video_loss, accuracy, token_loss, frame_out, token_out
