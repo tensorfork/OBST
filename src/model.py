@@ -146,8 +146,8 @@ def tf_softmax(x, masked, dim, dim_index, anonymous_dim_index):
         shape[anonymous_dim_index] = dim.size
         msk = tf.reshape(msk, shape)
         x -= msk
-    e = tf.exp(x - tf.reduce_max(x, anonymous_dim_index, True))
-    return e / tf.reduce_sum(e, anonymous_dim_index, True)
+    e = tf.exp(x - tf.reduce_max(x, dim_index, True))
+    return e / tf.reduce_sum(e, dim_index, True)
 
 
 class SoftmaxBackward(mtf.Operation):
