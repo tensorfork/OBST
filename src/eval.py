@@ -143,10 +143,10 @@ def gen_sample_fn(params: ModelParameter):
             if params.debug_sample:
                 score = np.int(np.mean(np.equal(out[0][0], out[0][1])) * 100)
                 print(f"similarity score: {score}%\n")
-                print([process_token_output(out[0], do_argmax=False, bpe_tokenizer=bpe_tokenizer)[0]])
-                print([process_token_output(out[0], do_argmax=False, bpe_tokenizer=bpe_tokenizer)[1]])
-                print([process_token_output(out[1], do_argmax=False, bpe_tokenizer=bpe_tokenizer)[0]])
-                print('')
+                #print([process_token_output(out[0], do_argmax=False, bpe_tokenizer=bpe_tokenizer)[0]])
+                #print([process_token_output(out[0], do_argmax=False, bpe_tokenizer=bpe_tokenizer)[1]])
+                #print([process_token_output(out[1], do_argmax=False, bpe_tokenizer=bpe_tokenizer)[0]])
+                #print('')
 
             else:
 
@@ -166,6 +166,6 @@ def gen_sample_fn(params: ModelParameter):
         if state['sample_index'] >= params.num_of_sample:
             exit()
 
-        print('\n')
+        #print('\n')
 
     return _video_fn if params.model_mode == 'jannet' else _text_fn
