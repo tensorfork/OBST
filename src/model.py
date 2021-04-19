@@ -137,22 +137,16 @@ class ConvolutionFilterBackward(mtf.Operation):
 
 def tf_softmax(x, masked, dim, dim_index, anonymous_dim_index):
     if masked:
-        _shape = [1] * len(x.shape)
-        _shape[dim_index] = dim.size
-        _shape[anonymous_dim_index] = dim.size
-
-        msk = tf.range(0, dim.size)
-        msk = tf.reshape(msk, (1, dim.size)) > tf.reshape(msk, (dim.size, 1))
+        arange = tf.range(0, dim.size)
+        msk = tf.reshape(arange, (1, dim.size)) > tf.reshape(arange, (dim.size, 1))
         msk = tf.cast(msk, x.dtype)
-        msk = tf.reshape(msk, _shape)
-
-        x = x * (1 - msk)
-        x -= msk * 1e38
-        e = tf.exp(x - tf.reduce_max(x, anonymous_dim_index, True)) * (1 - msk)
-
-    else:
-        e = tf.exp(x - tf.reduce_max(x, anonymous_dim_index, True))
-
+        msk *= 1e120
+        shape = [1] * len(x.shape)
+        shape[dim_index] = dim.size
+        shape[anonymous_dim_index] = dim.size
+        msk = tf.reshape(msk, shape)
+        x -= msk
+    e = tf.exp(x - tf.reduce_max(x, anonymous_dim_index, True))
     return e / tf.reduce_sum(e, anonymous_dim_index, True)
 
 
