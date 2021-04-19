@@ -140,7 +140,7 @@ def tf_softmax(x, masked, dim, dim_index, anonymous_dim_index):
         arange = tf.range(0, dim.size)
         msk = tf.reshape(arange, (1, dim.size)) > tf.reshape(arange, (dim.size, 1))
         msk = tf.cast(msk, x.dtype)
-        msk *= 1e120
+        msk = (msk * 1e38) * 2
         shape = [1] * len(x.shape)
         shape[dim_index] = dim.size
         shape[anonymous_dim_index] = dim.size
