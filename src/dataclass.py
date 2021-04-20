@@ -138,7 +138,11 @@ class ModelParameter(typing.Dict[str, typing.Any]):
 
         if hasattr(config, 'dict'):
             config = config.dict()
-        self.__dict__.update(config)
+
+        for k, v in config.items():
+            if k not in self.__dict__:
+                print(f"WARNING: Unknown ModelParameter {k}={v!r}")
+            self.__dict__[k] = v
 
         self.multi_loss_strategy = self.multi_loss_strategy.lower()
         if not self.multi_loss_strategy in ["linear", "pcgrad", "mgda"]:
