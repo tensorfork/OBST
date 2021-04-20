@@ -62,6 +62,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.current_step = 0
         self.batch_splits = 1
         self.head_splits = 32.
+        self.vocab_splits = 1
         self.prefix = "datasets/full_hd_video"
         self.model_path = "gs://text-datasets/video-transformer/ctx=32-layer=64-heads=8-feat=256"
         self.tensorflow_optimization_settings = {"layout_optimizer":              True,
@@ -131,6 +132,9 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.num_cores_per_host = 0
         self.masked_attention_dimensions = [0]
 
+        self.mesh_shape = None
+        self.layout = None
+
         if hasattr(config, 'dict'):
             config = config.dict()
         self.__dict__.update(config)
@@ -159,15 +163,23 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             self.intermediate_feed_forward_multiplier = self.group_linear_factor / self.head_splits
         split_batch = self.batch_splits > 1
         split_heads = self.head_splits > 1
+        split_vocab = self.vocab_splits > 1
         # if split_heads and isinstance(self.head_splits, int) and self.vocab_size > 256:
         #    full_partition_size = self.head_splits * 128
         #    self.vocab_size += full_partition_size - self.vocab_size % full_partition_size
         #    self.vocab_size /= self.n_head
         if self.vocab_size % 256 > 0:  # elif
             self.vocab_size += 256 - self.vocab_size % 256
-        self.mesh_shape = ','.join([f"b:{self.batch_splits:.0f}"] * split_batch +
-                                   [f"h:{self.head_splits:.0f}"] * split_heads)
-        self.layout = ','.join([f"batch:b"] * split_batch + [f"heads:h"] * split_heads)
+        if self.mesh_shape is None:
+            self.mesh_shape = ','.join([f"b:{self.batch_splits:.0f}"] * split_batch +
+                                       [f"h:{self.head_splits:.0f}"] * split_heads +
+                                       [f"v:{self.vocab_splits:.0f}"] * split_vocab)
+        if self.layout is None:
+            self.layout = ','.join(
+                [f"batch:b"] * split_batch +
+                [f"heads:h"] * split_heads +
+                [f"vocab:v"] * split_vocab
+            )
         self.variable_dtype = mtf.VariableDType(self.storage_dtype, self.calculation_dtype, self.calculation_dtype)
         self.block_config = [BlockConfig(conf, use_revnet=self.use_revnet) for conf in self.block_config]
         self.input_block_config = [BlockConfig(conf, use_revnet=False) for conf in self.input_block_config]
