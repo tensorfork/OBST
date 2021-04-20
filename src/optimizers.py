@@ -232,20 +232,14 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                                                    1 / params.gradient_clip), grad,
                                            import_float(params.gradient_clip)], grad.shape)
                         if var.shape.ndims <= 1 or params.optimizer == 'adam':
+                            exp_avg_p2_ptr = variable(var, 'exp_avg_p2', var.shape)
+                            exp_avg_p2 = weighted_add(exp_avg_p2_ptr, square(grad), beta2)
+                            update_ops.append(mtf.assign(exp_avg_p2_ptr, exp_avg_p2))                                                         
                             if params.opt_beta1:
                                 exp_avg_p1_ptr = variable(var, 'exp_avg_p1', var.shape)
-                            exp_avg_p2_ptr = variable(var, 'exp_avg_p2', var.shape)
-
-                            if params.opt_beta1:
-                                exp_avg_p1 = weighted_add(exp_avg_p1_ptr, grad, beta1)
-                            else:
-                                exp_avg_p1 = grad
-                            exp_avg_p2 = weighted_add(exp_avg_p2_ptr, square(grad), beta2)
-
-                            weight_update = exp_avg_p1 * rsqrt(exp_avg_p2 + epsilon)
-                            if params.opt_beta1:
-                                update_ops.append(mtf.assign(exp_avg_p1_ptr, exp_avg_p1))
-                            update_ops.append(mtf.assign(exp_avg_p2_ptr, exp_avg_p2))
+                                grad = weighted_add(exp_avg_p1_ptr, grad, beta1)
+                                update_ops.append(mtf.assign(exp_avg_p1_ptr, grad))  
+                            weight_update = grad * rsqrt(exp_avg_p2 + epsilon)   
 
                         elif params.optimizer == 'shampoo':
                             shape = grad.shape
