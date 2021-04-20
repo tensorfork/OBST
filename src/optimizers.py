@@ -10,9 +10,9 @@ import tensorflow.compat.v1 as tf
 
 from .dataclass import ModelParameter
 from .model import RevGradOp
-from .utils_mtf import (add_n, anonymize, anonymize_dim, cast, constant_scalar, einsum, equal, greater, minimum, mod,
-                        reduce_max, reduce_mean, reduce_sum, rsqrt, sqrt, square, weighted_add, feature_dims_used,
-                        constant_float, greater_equal, to_float)
+from .utils_mtf import (add_n, anonymize, anonymize_dim, cast, constant_float, constant_scalar, einsum, equal,
+                        feature_dims_used, greater, greater_equal, maximum, minimum, mod, reciprocal, reduce_max,
+                        reduce_mean, reduce_sum, rsqrt, sqrt, square, to_float, weighted_add)
 
 
 def import_float(imported):
@@ -25,7 +25,6 @@ def sum_dim(inp: mtf.Tensor, dims: typing.List[mtf.Dimension]):
 
 def _min_norm_element_from2(params: ModelParameter, v1v1: mtf.Tensor, v1v2: mtf.Tensor,
                             v2v2: mtf.Tensor, min_gamma: float = 0.001):
-
     gamma = constant_float(params, value=(1 - min_gamma), shape=[]) * to_float(greater_equal(v1v2, v1v1))
     gamma += constant_float(params, value=min_gamma, shape=[]) * \
              to_float(greater_equal(v1v2, v2v2)) * to_float(equal(gamma, 0))
@@ -70,8 +69,8 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                           import_mtf(params.grad_accumulation * 1., "grad_accum")),
                       import_mtf(0., "zero")), dtype)
     mstep = 1 - step
-    beta1 = 1 - step * import_mtf(1 - 0.9, "beta1")
-    beta2 = 1 - step * import_mtf(1 - 0.95, "beta2")
+    beta1 = 1 - step * import_mtf(1 - params.beta1, "beta1")
+    beta2 = 1 - step * import_mtf(1 - params.beta2, "beta2")
     epsilon = 1e-5
 
     def _variable(mesh, name, shape, dtype):
@@ -101,7 +100,6 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
     for loss_idx, loss in enumerate(loss_list):
 
         if params.multi_loss_strategy == "mgda" and loss_idx == 2:
-
             gamma = _min_norm_element_from2(params,
                                             reduce_sum(loss_1__loss_1, output_shape=[]),
                                             reduce_sum(loss_1__loss_2, output_shape=[]),
@@ -173,7 +171,8 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                         if len(loss_list) > 1:
                             if params.multi_loss_strategy == "pcgrad":
                                 if 'body' in op.name:
-                                    other_grads = [variable(var, f"grad_{i}", var.shape) for i in range(len(loss_list) - 1)]
+                                    other_grads = [variable(var, f"grad_{i}", var.shape) for i in
+                                                   range(len(loss_list) - 1)]
                                     if loss_idx < len(loss_list) - 1:
                                         update_ops.append(mtf.assign(other_grads[loss_idx], grad))
                                         continue
@@ -207,7 +206,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                                             del first_grads
                                             continue
 
-                                    elif loss_idx == 2: # not in body and optimize body params.
+                                    elif loss_idx == 2:  # not in body and optimize body params.
                                         continue
 
                         if params.grad_accumulation > 1:
@@ -215,12 +214,22 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                             update_ops.append(mtf.assign(grad_buffer, grad + grad_buffer * mstep))
                             grad = grad_buffer * step / params.grad_accumulation
 
-                        if params.gradient_clip > 0:
-                            grd_norm = sqrt(reduce_sum(square(grad)) + 1e-5)
-                            wgt_norm = sqrt(reduce_sum(square(var.value)) + 1e-3)
+                        features_used = feature_dims_used(params, var)
+                        if features_used and var.shape.dims.index(params.key_dim) == var.shape.ndims - 1:
+                            fan_in = var.shape.dims[:-2]
+                        elif features_used:
+                            fan_in = var.shape.dims[:2]
+                        else:
+                            fan_in = var.shape.dims[0]
+                        if params.gradient_clip > 0 and params.adaptive_gradient_clipping:
+                            grd_norm = sqrt(einsum([grad, grad], reduced_dims=fan_in) + 1e-5)
+                            wgt_norm = sqrt(einsum([var.value, var.value], reduced_dims=fan_in) + 1e-3)
                             grad = weighted_add(grd_norm / wgt_norm * params.gradient_clip * grad, grad,
                                                 cast(greater(wgt_norm / grd_norm, params.gradient_clip), dtype))
-
+                        elif params.gradient_clip > 0:
+                            grad = einsum([maximum(reciprocal(sqrt(einsum([grad, grad], []) + 1e-6)),
+                                                   1 / params.gradient_clip), grad,
+                                           import_float(params.gradient_clip)], grad.shape)
                         if var.shape.ndims <= 1 or params.optimizer == 'adam':
                             exp_avg_p1_ptr = variable(var, 'exp_avg_p1', var.shape)
                             exp_avg_p2_ptr = variable(var, 'exp_avg_p2', var.shape)
@@ -271,7 +280,6 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                         if large_tensor and params.weight_decay > 0:
                             weight_update += params.weight_decay * var.value
                         weight_update *= learning_rate
-                        features_used = feature_dims_used(params, var)
                         large_tensor = features_used and len(var.shape.dims) > len(params.feature_dims)
                         large_tensor |= not features_used and len(var.shape.dims) >= 2
                         large_tensor &= var.shape.size > 1
@@ -283,15 +291,10 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                             val: mtf.Tensor = var.value - weight_update
                             std = rsqrt(1e-6 + reduce_sum(square(val / (val.size ** 0.5)), output_shape=[]))
                             shape = [d.size for d in var.shape.dims]
-                            if features_used and var.shape.dims.index(params.key_dim) == var.shape.ndims - 1:
-                                fan_in = np.prod(shape[:-2])
-                            elif features_used:
-                                fan_in = np.prod(shape[:2])
-                            else:
-                                fan_in = shape[0]
+                            fan_in_size = np.prod([d.size for d in fan_in])
                             size = np.prod(shape)
                             # ((1 - 1 / max_fan) / size ** 2 + 1 / max_fan - 2 / size + 1 / min_fan / size) ** 0.5
-                            std *= ((fan_in - 2) / size / params.n_blocks) ** 0.5  # 0.01% error
+                            std *= ((fan_in_size - 2) / size / params.n_blocks) ** 0.5  # 0.01% error
                             update_ops.append(mtf.assign(var, val * std))
                         else:
                             update_ops.append(mtf.assign_sub(var, weight_update))
