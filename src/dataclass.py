@@ -34,8 +34,9 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.patch_size = 16
         self.frame_width = 320
         self.frame_height = 176
-        self.beta1 = 0.9
-        self.beta2 = 0.999
+        self.opt_beta1 = 0.9
+        self.opt_beta2 = 0.999
+        self.opt_epsilon = 1e-6
         self.adaptive_gradient_clipping = True
         self.vocab_size = 256
         self.color_channels = 3
