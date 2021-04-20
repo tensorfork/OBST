@@ -1,6 +1,7 @@
 import typing
 
 import mesh_tensorflow as mtf
+import numpy as np
 import tensorflow.compat.v1 as tf
 
 from .dataclass import ModelParameter
@@ -54,6 +55,23 @@ def one_hot(indices: mtf.Tensor, output_dim: mtf.Dimension, on_value: float = 1.
     return scoped("one_hot", mtf.one_hot, indices, output_dim, on_value, off_value, dtype)
 
 
+def argmax(tensor: mtf.Tensor, dims: typing.List[mtf.Dimension]) -> mtf.Tensor:
+    sizes = list(np.cumprod([1] + [d.size for d in dims][:-1]))
+    dims = sorted(zip(dims, sizes), key=lambda x: x[0].size)
+    dims.reverse()
+    val, ind = mtf.top_1(tensor, dims.pop(0))
+    for dim, size in dims:
+        val, ind0 = mtf.top_1(val, dim)
+        ind = mtf.einsum([ind, one_hot(ind0, dim, dtype=ind.dtype)], reduced_dims=[dim])
+        ind += ind0 * size
+    return ind
+
+
+def text_embed(params: ModelParameter, int_tokens: mtf.Tensor) -> typing.Tuple[mtf.Tensor, mtf.Tensor]:
+    return (one_hot(int_tokens / params.vocab_size, params.head_dim, dtype=params.variable_dtype.activation_dtype),
+            one_hot(mod(int_tokens, params.vocab_size), params.vocab_dims,
+                    dtype=params.variable_dtype.activation_dtype))
+
 def reduce_mean(tensor: mtf.Tensor, output_shape: OPT_SHAPE = None, reduced_dim: OPT_DIMS = None) -> mtf.Tensor:
     return scoped("reduce_mean", mtf.reduce_mean, tensor, None, output_shape, reduced_dim)
 
@@ -75,11 +93,11 @@ def constant(params: ModelParameter, value: typing.Union[int, float], shape: OPT
 
 
 def constant_float(params: ModelParameter, value: typing.Union[int, float], shape: OPT_SHAPE = None) -> mtf.Tensor:
-    return scoped("constant", mtf.constant, params.mesh, value, shape, tf.float32)
+    return scoped("constant_float", mtf.constant, params.mesh, value, shape, tf.float32)
 
 
 def constant_int(params: ModelParameter, value: typing.Union[int, float], shape: OPT_SHAPE = None) -> mtf.Tensor:
-    return scoped("constant", mtf.constant, params.mesh, value, shape, tf.int32)
+    return scoped("constant_int", mtf.constant, params.mesh, value, shape, tf.int32)
 
 
 def constant_scalar(params: ModelParameter, value: typing.Union[int, float], dtype: tf.TypeSpec = None) -> mtf.Tensor:

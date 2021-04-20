@@ -14,10 +14,10 @@ from tensorflow.python.ops.init_ops import Initializer
 
 from .dataclass import BlockConfig, ModelParameter
 from .utils_core import default
-from .utils_mtf import (ACTIVATIONS, OPT_DIMS, SHAPE, activate, add_n, anonymize, anonymize_dim, cast, concat,
+from .utils_mtf import (ACTIVATIONS, OPT_DIMS, SHAPE, activate, add_n, anonymize, anonymize_dim, argmax, cast, concat,
                         constant_scalar, deduplicate, dropout, einsum, exp, feature_dims_used, log, mod, mtf_range,
                         one_hot, ones, random_name, reciprocal, reduce_max, reduce_mean, reduce_sum, rsqrt, scoped,
-                        sigmoid, sign, slice, zeros_like)
+                        sigmoid, sign, slice, zeros_like, text_embed)
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -524,23 +524,6 @@ def _default_ones(params: ModelParameter, inp: typing.Optional[mtf.Tensor]) -> m
                 params.variable_dtype.activation_dtype)
 
 
-def _text_embed(params: ModelParameter, int_tokens: mtf.Tensor) -> typing.Tuple[mtf.Tensor, mtf.Tensor]:
-    return (one_hot(int_tokens / params.vocab_size, params.head_dim, dtype=params.variable_dtype.activation_dtype),
-            one_hot(mod(int_tokens, params.vocab_size), params.vocab_dims,
-                    dtype=params.variable_dtype.activation_dtype))
-
-
-def _argmax(tensor: mtf.Tensor, dims: typing.List[mtf.Dimension]) -> mtf.Tensor:
-    sizes = list(np.cumprod([1] + [d.size for d in dims][:-1]))
-    dims = sorted(zip(dims, sizes), key=lambda x: x[0].size)
-    dims.reverse()
-    val, ind = mtf.top_1(tensor, dims.pop(0))
-    for dim, size in dims:
-        val, ind0 = mtf.top_1(val, dim)
-        ind = mtf.einsum([ind, one_hot(ind0, dim, dtype=ind.dtype)], reduced_dims=[dim])
-        ind += ind0 * size
-    return ind
-
 
 def build(params: ModelParameter,
           vid: typing.Optional[mtf.Tensor],
@@ -602,7 +585,7 @@ def build(params: ModelParameter,
         # Language embedding and initial feed forward.
         if params.use_language:
             txt = einsum([_embed(params, [params.head_dim, params.vocab_dim] + params.intermediate),
-                          *_text_embed(params, txt_src)], reduced_dims=[params.vocab_dim, params.head_dim])
+                          *text_embed(params, txt_src)], reduced_dims=[params.vocab_dim, params.head_dim])
 
             if params.input_dropout > 0:
                 txt = dropout(txt, rate=params.input_dropout)
@@ -673,7 +656,7 @@ def build(params: ModelParameter,
             max_logit = reduce_max(mtf.stop_gradient(token_out), output_shape=reduced_shape)
             token_loss = einsum([log(reduce_sum(exp(token_out - max_logit), output_shape=reduced_shape)), size, txt_msk,
                                  cat_msk_tgt], output_shape=[])
-            token_loss += einsum([token_out, *_text_embed(params, txt_tgt), size, constant_scalar(params, -1), txt_msk,
+            token_loss += einsum([token_out, *text_embed(params, txt_tgt), size, constant_scalar(params, -1), txt_msk,
                                   cat_msk_tgt], output_shape=[])
             token_loss += einsum([max_logit, size, txt_msk, cat_msk_tgt], output_shape=[])
             loss_list.append(token_loss)
@@ -684,7 +667,7 @@ def build(params: ModelParameter,
                                      mtf.stop_gradient(token_loss)], output_shape=[])
 
             if params.calc_accuracy:
-                accuracy = einsum([cast(mtf.equal(_argmax(mtf.stop_gradient(token_out), params.vocab_dims), txt_tgt),
+                accuracy = einsum([cast(mtf.equal(argmax(mtf.stop_gradient(token_out), params.vocab_dims), txt_tgt),
                                         tf.float32), txt_msk, cat_msk_tgt, size], output_shape=[])
 
         if params.use_video:

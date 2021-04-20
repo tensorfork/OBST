@@ -20,7 +20,7 @@ from .dataclass import ModelParameter
 from .model import build
 from .optimizers import get_optimizer
 from .utils_core import color_print
-from .utils_mtf import pad, to_float, weighted_add, concat, slice
+from .utils_mtf import argmax, concat, log, pad, slice, to_float, weighted_add, constant_scalar
 
 
 class CheckpointLoaderHook(tf.estimator.SessionRunHook):
@@ -133,7 +133,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 # todo: fix token shift for video (Jan).
                 tkn_per_frame = mtf.Dimension("language_token_per_frame",
                                               params.language_token_per_frame)
-                shape = [params.batch_dim, params.sequence_dim, tkn_per_frame, params.vocab_dim]
+                shape = [params.batch_dim, params.sequence_dim, tkn_per_frame] + params.vocab_dims
                 steps = params.time_patch_size
 
                 def body_fn(position, token_x_input, token_y_input, frame_input,
@@ -154,7 +154,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
                     if params.use_language:
                         one_hot_sequence = mtf.one_hot(position, params.sequence_dim, dtype=tf.float32)
-                        token_out = mtf.argmax(mtf.reshape(token_out, new_shape=shape), reduced_dim=params.vocab_dim)
+                        token_out = argmax(mtf.reshape(token_out, new_shape=shape), params.vocab_dims)
                         padding_token = to_float(mtf.equal(token_out, params.padding_token))
 
                         token_x_input = weighted_add(mtf.reshape(token_out, new_shape=params.token_dim_shape),
@@ -202,14 +202,18 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                         mtf.ones(params.mesh, [], tf.float32))
 
                     one_hot_mask = mtf.one_hot(position, output_dim=params.sequence_dim, dtype=tf.int32)
-                    token_out = mtf.sample_with_temperature(token_out, params.vocab_dim, params.sampling_temperature)
+                    if params.sampling_temperature != 0.0:
+                        token_out += (log(-log(mtf.random_uniform(params.mesh, token_out.shape, maxval=1,
+                                                                  minval=1e-9, dtype=tf.float32))),
+                                      * constant_scalar(params, -params.sampling_temperature))
+                    token_out = argmax(token_out, params.vocab_dims)
                     token_out = mtf.shift(token_out, offset=1, dim=params.sequence_dim, wrap=False)
 
                     return (position + 1, weighted_add(token_out, token_x, one_hot_mask), token_y)
 
                 initial_pos = mtf.constant(params.mesh, value=params.initial_autoregressive_position, dtype=tf.int32)
                 token_initial_pos_mask = mtf.less_equal(mtf.range(params.mesh, params.sequence_dim, dtype=tf.int32),
-                                                  initial_pos)
+                                                        initial_pos)
                 token_initial_pos_mask = mtf.cast(token_initial_pos_mask, tf.int32)
 
                 if params.debug_sample:
