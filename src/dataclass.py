@@ -57,6 +57,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.token_patch_size = 1
         self.learning_rate = 5e-5
         self.storage_dtype = "float32"
+        self.slice_dtype = "float32"
         self.calculation_dtype = "float32"
         self.train_batch_size = 1
         self.current_step = 0
@@ -157,6 +158,8 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             self.n_embd_per_head = self.n_embd // self.n_head
         if isinstance(self.storage_dtype, str):
             self.storage_dtype = getattr(tf, self.storage_dtype)
+        if isinstance(self.slice_dtype, str):
+            self.slice_dtype = getattr(tf, self.slice_dtype)
         if isinstance(self.calculation_dtype, str):
             self.calculation_dtype = getattr(tf, self.calculation_dtype)
         if self.intermediate_feed_forward_multiplier is None:
@@ -182,7 +185,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
                 [f"heads:h"] * split_heads +
                 [f"vocab:v"] * split_vocab
             )
-        self.variable_dtype = mtf.VariableDType(self.storage_dtype, self.calculation_dtype, self.calculation_dtype)
+        self.variable_dtype = mtf.VariableDType(self.storage_dtype, self.slice_dtype, self.calculation_dtype)
         self.block_config = [BlockConfig(conf, use_revnet=self.use_revnet) for conf in self.block_config]
         self.input_block_config = [BlockConfig(conf, use_revnet=False) for conf in self.input_block_config]
         self.output_block_config = [BlockConfig(conf, use_revnet=False) for conf in self.output_block_config]
