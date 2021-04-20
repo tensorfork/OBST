@@ -309,7 +309,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
             global_step = tf.train.get_or_create_global_step()
 
-            step = tf.mod(manual_global_step, tf.constant(params.grad_accumulation, dtype=tf.int64))
+            step = tf.mod(manual_global_step + 1, tf.constant(params.grad_accumulation, dtype=tf.int64))
             step = tf.equal(step, tf.constant(0, dtype=tf.int64))
             step = tf.cast(step, tf.int64)
 
