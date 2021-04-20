@@ -1,8 +1,6 @@
 import typing
 
-import cv2
 import numpy as np
-import scipy.ndimage
 from transformers import GPT2TokenizerFast
 
 from src.dataclass import ModelParameter
@@ -23,6 +21,7 @@ def render_video(model_output: typing.List[typing.Tuple[np.ndarray, typing.List[
                  prompt_sample_color: typing.Tuple[int, int, int] = (0, 128, 255),
                  prompt_sample_pos: typing.Tuple[int, int] = (50, 50),
                  ):
+    import cv2
     writer = cv2.VideoWriter(f"{save_prefix}_{count}.avi", cv2.VideoWriter_fourcc(*"MJPG"), 1,
                              (params.frame_width * upscale * len(model_output), params.frame_height * upscale))
 
@@ -32,6 +31,7 @@ def render_video(model_output: typing.List[typing.Tuple[np.ndarray, typing.List[
 
             sub_frame = model_output[sub_idx][0][idx]
             sub_frame = sub_frame * 255
+            import scipy.ndimage
             sub_frame = scipy.ndimage.zoom(sub_frame, (upscale, upscale, 1), order=0)
             sub_frame = np.uint8(sub_frame)
             cv2.cvtColor(sub_frame, cv2.COLOR_RGB2BGR)
