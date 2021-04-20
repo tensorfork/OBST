@@ -15,9 +15,9 @@ from tensorflow.python.ops.init_ops import Initializer
 from .dataclass import BlockConfig, ModelParameter
 from .utils_core import default
 from .utils_mtf import (ACTIVATIONS, OPT_DIMS, SHAPE, activate, add_n, anonymize, anonymize_dim, cast, concat,
-                        constant_scalar, deduplicate, dropout, einsum, feature_dims_used, greater_equal, mtf_range,
-                        one_hot, ones, random_name, reciprocal, reduce_logsumexp, reduce_mean, reduce_sum,
-                        rsqrt, scoped, sigmoid, sign, slice, zeros_like)
+                        constant_scalar, deduplicate, dropout, einsum, exp, feature_dims_used, log, mod, mtf_range,
+                        one_hot, ones, random_name, reciprocal, reduce_max, reduce_mean, reduce_sum, rsqrt, scoped,
+                        sigmoid, sign, slice, zeros_like)
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -519,9 +519,27 @@ class RevGradOp(mtf.Operation):
         yield params[2], dy2 + tensor_to_gradient[x2][2]
 
 
-def default_ones(params, inp):
+def _default_ones(params: ModelParameter, inp: typing.Optional[mtf.Tensor]) -> mtf.Tensor:
     return cast(default(inp, ones(params.mesh, [], params.variable_dtype.activation_dtype)),
                 params.variable_dtype.activation_dtype)
+
+
+def _text_embed(params: ModelParameter, int_tokens: mtf.Tensor) -> typing.Tuple[mtf.Tensor, mtf.Tensor]:
+    return (one_hot(int_tokens / params.vocab_size, params.head_dim, dtype=params.variable_dtype.activation_dtype),
+            one_hot(mod(int_tokens, params.vocab_size), params.vocab_dims,
+                    dtype=params.variable_dtype.activation_dtype))
+
+
+def _argmax(tensor: mtf.Tensor, dims: typing.List[mtf.Dimension]) -> mtf.Tensor:
+    sizes = list(np.cumprod([1] + [d.size for d in dims][:-1]))
+    dims = sorted(zip(dims, sizes), key=lambda x: x[0].size)
+    dims.reverse()
+    val, ind = mtf.top_1(tensor, dims.pop(0))
+    for dim, size in dims:
+        val, ind0 = mtf.top_1(val, dim)
+        ind = mtf.einsum([ind, one_hot(ind0, dim, dtype=ind.dtype)], reduced_dims=[dim])
+        ind += ind0 * size
+    return ind
 
 
 def build(params: ModelParameter,
@@ -551,11 +569,11 @@ def build(params: ModelParameter,
     :return: (Generated Video, Total Loss, Video Loss, Token Loss)
     """
     with mtf.utils.outside_all_rewrites(), tf.variable_scope(params.model_mode):
-        cat_msk_src = default_ones(params, cat_msk_src)
-        cat_msk_tgt = default_ones(params, cat_msk_tgt)
-        vid_msk_src = default_ones(params, vid_msk_src)
-        vid_msk_tgt = default_ones(params, vid_msk_tgt)
-        txt_msk = default_ones(params, txt_msk)
+        cat_msk_src = _default_ones(params, cat_msk_src)
+        cat_msk_tgt = _default_ones(params, cat_msk_tgt)
+        vid_msk_src = _default_ones(params, vid_msk_src)
+        vid_msk_tgt = _default_ones(params, vid_msk_tgt)
+        txt_msk = _default_ones(params, txt_msk)
         if vid is not None:
             vid = mtf.cast(vid, params.variable_dtype.activation_dtype)
 
@@ -583,8 +601,8 @@ def build(params: ModelParameter,
 
         # Language embedding and initial feed forward.
         if params.use_language:
-            txt = einsum([one_hot(txt_src, params.vocab_dim, dtype=params.variable_dtype.activation_dtype),
-                          _embed(params, [params.vocab_dim] + params.intermediate)], reduced_dims=[params.vocab_dim])
+            txt = einsum([_embed(params, [params.head_dim, params.vocab_dim] + params.intermediate),
+                          *_text_embed(params, txt_src)], reduced_dims=[params.vocab_dim, params.head_dim])
 
             if params.input_dropout > 0:
                 txt = dropout(txt, rate=params.input_dropout)
@@ -635,7 +653,7 @@ def build(params: ModelParameter,
             for config_idx, config in enumerate(params.output_block_config):
                 token_out = _block_part_fn(params, config, token_out, f'lang_out{config_idx}')
 
-            token_out = _linear_from_features(params, token_out, [txt_tgt.shape[-1], params.vocab_dim])
+            token_out = _linear_from_features(params, token_out, [txt_tgt.shape[-1]] + params.vocab_dims)
 
         if params.use_video:
             frame_out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)
@@ -650,11 +668,14 @@ def build(params: ModelParameter,
 
         if params.use_language:
             size = constant_scalar(params, 1 / txt_tgt.size)
-            target = one_hot(txt_tgt, params.vocab_dim, dtype=params.variable_dtype.activation_dtype)
-            token_loss = einsum([reduce_logsumexp(token_out, reduced_dim=params.vocab_dim), size, txt_msk, cat_msk_tgt],
-                                output_shape=[])
-            token_loss += einsum([token_out, target, size, constant_scalar(params, -1), txt_msk, cat_msk_tgt],
-                                 output_shape=[])
+
+            reduced_shape = token_out.shape - params.vocab_dims
+            max_logit = reduce_max(mtf.stop_gradient(token_out), output_shape=reduced_shape)
+            token_loss = einsum([log(reduce_sum(exp(token_out - max_logit), output_shape=reduced_shape)), size, txt_msk,
+                                 cat_msk_tgt], output_shape=[])
+            token_loss += einsum([token_out, *_text_embed(params, txt_tgt), size, constant_scalar(params, -1), txt_msk,
+                                  cat_msk_tgt], output_shape=[])
+            token_loss += einsum([max_logit, size, txt_msk, cat_msk_tgt], output_shape=[])
             loss_list.append(token_loss)
 
             if txt_msk is not None:
@@ -663,7 +684,7 @@ def build(params: ModelParameter,
                                      mtf.stop_gradient(token_loss)], output_shape=[])
 
             if params.calc_accuracy:
-                accuracy = einsum([cast(mtf.equal(mtf.argmax(mtf.stop_gradient(token_out), params.vocab_dim), txt_tgt),
+                accuracy = einsum([cast(mtf.equal(_argmax(mtf.stop_gradient(token_out), params.vocab_dims), txt_tgt),
                                         tf.float32), txt_msk, cat_msk_tgt, size], output_shape=[])
 
         if params.use_video:
