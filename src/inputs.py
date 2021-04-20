@@ -362,7 +362,6 @@ def dataset(params: ModelParameter, sub_batch_size, slice_index, slice_count):
 
     dset = dset.map(memory_op)
     dset = dset.map(align_tensor_op)
-    dset = dset.skip(params.current_step)
 
     return dset
 
@@ -464,6 +463,5 @@ def gpt_neo_input(params, sub_batch_size, slice_index, slice_count):
     dset = dset.batch(sub_batch_size)
     dset = dset.map(_memory_func)
     dset = dset.map(align_tensor_op)
-    dset = dset.skip(params.current_step)
 
     return dset

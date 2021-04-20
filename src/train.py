@@ -461,7 +461,9 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             all_sub_batch_pnums = [pnum_map.flatten().tolist() for pnum_map in pnum_maps]
 
         with ops.device(f"/job:worker/task:{host_id}/device:CPU:0"):
-            dataset = input_fn(params, sub_batch_size, sub_batch_i, len(hosts_to_hold_ds)).prefetch(params.buffer_size)
+            dataset = input_fn(params, sub_batch_size, sub_batch_i, len(hosts_to_hold_ds))
+            dataset = dataset.prefetch(params.buffer_size)
+            dataset = dataset.skip(params.current_step)
             options = tf.data.Options()
             options.experimental_deterministic = not params.train
             options.experimental_optimization.autotune = True
