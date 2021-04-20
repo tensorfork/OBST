@@ -65,7 +65,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                                       import_float(params.learning_rate_decay_min * 1.))
 
     learning_rate = import_mtf(tf_learning_rate, "learning_rate")
-    step = cast(equal(mod(tf.cast(manual_step, dtype),
+    step = cast(equal(mod(tf.cast(manual_step + 1, dtype),
                           import_mtf(params.grad_accumulation * 1., "grad_accum")),
                       import_mtf(0., "zero")), dtype)
     mstep = 1 - step
@@ -211,8 +211,9 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
 
                         if params.grad_accumulation > 1:
                             grad_buffer = variable(var, "grad_accumulation", var.shape)
-                            update_ops.append(mtf.assign(grad_buffer, grad + grad_buffer * mstep))
-                            grad = grad_buffer * step / params.grad_accumulation
+                            next_grad = grad + mtf.identity(grad_buffer)
+                            update_ops.append(mtf.assign(grad_buffer, next_grad * mstep))
+                            grad = next_grad * step / params.grad_accumulation
 
                         features_used = feature_dims_used(params, var)
                         if features_used and var.shape.dims.index(params.key_dim) == var.shape.ndims - 1:
