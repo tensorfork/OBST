@@ -20,7 +20,7 @@ from .dataclass import ModelParameter
 from .model import build
 from .optimizers import get_optimizer
 from .utils_core import color_print
-from .utils_mtf import argmax, concat, log, pad, slice, to_float, weighted_add, constant_scalar
+from .utils_mtf import argmax, concat, constant_scalar, log, pad, slice, to_float, weighted_add
 
 
 class CheckpointLoaderHook(tf.estimator.SessionRunHook):
@@ -205,7 +205,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     if params.sampling_temperature != 0.0:
                         token_out += (log(-log(mtf.random_uniform(params.mesh, token_out.shape, maxval=1,
                                                                   minval=1e-9, dtype=tf.float32))),
-                                      * constant_scalar(params, -params.sampling_temperature))
+                                      *constant_scalar(params, -params.sampling_temperature))
                     token_out = argmax(token_out, params.vocab_dims)
                     token_out = mtf.shift(token_out, offset=1, dim=params.sequence_dim, wrap=False)
 
