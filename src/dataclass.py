@@ -161,6 +161,8 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             self.calculation_dtype = getattr(tf, self.calculation_dtype)
         if self.intermediate_feed_forward_multiplier is None:
             self.intermediate_feed_forward_multiplier = self.group_linear_factor / self.head_splits
+        if self.language_token_per_frame != self.n_ctx:
+            raise ValueError("language_token_per_frame must match n_ctx")
         split_batch = self.batch_splits > 1
         split_heads = self.head_splits > 1
         split_vocab = self.vocab_splits > 1
