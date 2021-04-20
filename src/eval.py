@@ -4,7 +4,7 @@ import numpy as np
 from transformers import GPT2TokenizerFast
 
 from src.dataclass import ModelParameter
-from src.utils_core import chunks
+from src.utils_core import chunks, color_print
 
 
 def render_video(model_output: typing.List[typing.Tuple[np.ndarray, typing.List[str]]],
@@ -148,14 +148,12 @@ def gen_sample_fn(params: ModelParameter):
                 print([process_token_output(out[1], do_argmax=False, bpe_tokenizer=bpe_tokenizer)[0]])
                 print('')
 
-            else:
-
-                print('Prompt:')
-                print(process_token_output(out[1], do_argmax=False,
-                                           bpe_tokenizer=bpe_tokenizer)[0][:params.initial_autoregressive_position])
-                print('\noutput:')
-                print(process_token_output(out[0], do_argmax=False,
-                                           bpe_tokenizer=bpe_tokenizer)[0][params.initial_autoregressive_position:])
+            print('\n------\n')
+            color_print(params, 'Prompt:')
+            assert params.initial_autoregressive_position > 0
+            print(process_token_output(out[1][:, :params.initial_autoregressive_position-1], do_argmax=False, bpe_tokenizer=bpe_tokenizer)[0])
+            color_print(params, 'Output:')
+            print(process_token_output(out[0][:, params.initial_autoregressive_position:], do_argmax=False, bpe_tokenizer=bpe_tokenizer)[0].rstrip())
         else:
             print('target:')
             print(process_token_output(out[1], do_argmax=False, bpe_tokenizer=bpe_tokenizer)[0])
