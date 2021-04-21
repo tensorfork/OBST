@@ -2,7 +2,7 @@ import typing
 
 import mesh_tensorflow as mtf
 import numpy as np
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 
 from .dataclass import ModelParameter
 from .utils_core import default
