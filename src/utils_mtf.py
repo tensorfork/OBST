@@ -129,6 +129,7 @@ def equal(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None) -> mtf
 def mod(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None) -> mtf.Tensor:
     return scoped("mod", mtf.mod, x1, x2, output_shape)
 
+
 def floordiv(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None) -> mtf.Tensor:
     return scoped("floordiv", mtf.floordiv, x1, x2, output_shape)
 
