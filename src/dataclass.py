@@ -136,9 +136,9 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.__dict__.update(config)
 
         self.multi_loss_strategy = self.multi_loss_strategy.lower()
-        if not self.multi_loss_strategy in ["linear", "pcgrad", "mgda"]:
-            raise UserWarning(f'{self.multi_loss_strategy} is not in the support option list for multi loss strategies:'
-                              f' ["linear", "pcgrad", "mgda"]. default to "linear".')
+        if self.multi_loss_strategy not in ["linear", "pcgrad", "mgda"]:
+            print(f'{self.multi_loss_strategy} is not in the support option list for multi loss strategies: '
+                  f'["linear", "pcgrad", "mgda"]. default to "linear".')
             self.multi_loss_strategy = "linear"
         if not self.use_language and not self.use_video:
             raise ValueError("Language and video mode are disabled. No model can be built.")
@@ -159,11 +159,12 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             self.intermediate_feed_forward_multiplier = self.group_linear_factor / self.head_splits
         split_batch = self.batch_splits > 1
         split_heads = self.head_splits > 1
-        # if split_heads and isinstance(self.head_splits, int) and self.vocab_size > 256:
-        #    full_partition_size = self.head_splits * 128
-        #    self.vocab_size += full_partition_size - self.vocab_size % full_partition_size
-        #    self.vocab_size /= self.n_head
-        if self.vocab_size % 256 > 0:  # elif
+        self.split_vocab = split_heads and isinstance(self.head_splits, int) and self.vocab_size > 256
+        if self.split_vocab:
+            full_partition_size = self.head_splits * 128
+            self.vocab_size += full_partition_size - self.vocab_size % full_partition_size
+            self.vocab_size /= self.n_head
+        elif self.vocab_size % 256 > 0:
             self.vocab_size += 256 - self.vocab_size % 256
         self.mesh_shape = ','.join([f"b:{self.batch_splits:.0f}"] * split_batch +
                                    [f"h:{self.head_splits:.0f}"] * split_heads)
@@ -189,7 +190,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
                                                self.intermediate_feed_forward_multiplier))]
 
         self.vocab_dim = mtf.Dimension("vocab", self.vocab_size)
-        self.vocab_dims = [self.head_dim, self.vocab_dim]
+        self.vocab_dims = [self.head_dim] * self.split_vocab + [self.vocab_dim]
         self.batch_dim = mtf.Dimension("batch", self.train_batch_size)
         self.frame_input_sequence = mtf.Dimension("_sequence", self.time_patch_size + 1)
 
@@ -197,17 +198,16 @@ class ModelParameter(typing.Dict[str, typing.Any]):
 
         if self.three_axes:
             frame_input_shape += [
-                mtf.Dimension("height", self.frame_height_patch),
-                mtf.Dimension("width", self.frame_width_patch),
-            ]
+                    mtf.Dimension("height", self.frame_height_patch),
+                    mtf.Dimension("width", self.frame_width_patch),
+                    ]
 
         else:
             frame_input_shape += [
-                mtf.Dimension(
-                    "height", self.frame_height_patch * self.frame_width_patch
-                )
-            ]
-
+                    mtf.Dimension(
+                            "height", self.frame_height_patch * self.frame_width_patch
+                            )
+                    ]
 
         frame_input_shape += [mtf.Dimension("color_channels", self.channel_color_size)]
         self.frame_input_shape = mtf.Shape(frame_input_shape)

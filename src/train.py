@@ -248,7 +248,6 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
             update_ops, learning_rate, debug_gradients_dict = get_optimizer(loss_list, params, manual_global_step)
         else:
-
             if params.use_language:
                 token_out = mtf.anonymize(token_out)
             if params.use_video:
