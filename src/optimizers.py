@@ -65,13 +65,13 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                                       import_float(params.learning_rate_decay_min * 1.))
 
     learning_rate = import_mtf(tf_learning_rate, "learning_rate")
-    step = cast(equal(mod(tf.cast(manual_step, dtype),
+    step = cast(equal(mod(tf.cast(manual_step + 1, dtype),
                           import_mtf(params.grad_accumulation * 1., "grad_accum")),
                       import_mtf(0., "zero")), dtype)
     mstep = 1 - step
-    beta1 = 1 - step * import_mtf(1 - params.beta1, "beta1")
-    beta2 = 1 - step * import_mtf(1 - params.beta2, "beta2")
-    epsilon = 1e-5
+    beta1 = 1 - step * import_mtf(1 - params.opt_beta1, "beta1") if params.opt_beta1 else None
+    beta2 = 1 - step * import_mtf(1 - params.opt_beta2, "beta2")
+    epsilon = params.opt_epsilon
 
     def _variable(mesh, name, shape, dtype):
         return mtf.get_variable(mesh, name, shape=shape,
@@ -211,8 +211,9 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
 
                         if params.grad_accumulation > 1:
                             grad_buffer = variable(var, "grad_accumulation", var.shape)
-                            update_ops.append(mtf.assign(grad_buffer, grad + grad_buffer * mstep))
-                            grad = grad_buffer * step / params.grad_accumulation
+                            next_grad = grad + mtf.identity(grad_buffer)
+                            update_ops.append(mtf.assign(grad_buffer, next_grad * mstep))
+                            grad = next_grad * step / params.grad_accumulation
 
                         features_used = feature_dims_used(params, var)
                         if features_used and var.shape.dims.index(params.key_dim) == var.shape.ndims - 1:
@@ -231,15 +232,14 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                                                    1 / params.gradient_clip), grad,
                                            import_float(params.gradient_clip)], grad.shape)
                         if var.shape.ndims <= 1 or params.optimizer == 'adam':
-                            exp_avg_p1_ptr = variable(var, 'exp_avg_p1', var.shape)
                             exp_avg_p2_ptr = variable(var, 'exp_avg_p2', var.shape)
-
-                            exp_avg_p1 = weighted_add(exp_avg_p1_ptr, grad, beta1)
                             exp_avg_p2 = weighted_add(exp_avg_p2_ptr, square(grad), beta2)
-
-                            weight_update = exp_avg_p1 * rsqrt(exp_avg_p2 + epsilon)
-                            update_ops.extend([mtf.assign(exp_avg_p1_ptr, exp_avg_p1),
-                                               mtf.assign(exp_avg_p2_ptr, exp_avg_p2)])
+                            update_ops.append(mtf.assign(exp_avg_p2_ptr, exp_avg_p2))                                                         
+                            if params.opt_beta1:
+                                exp_avg_p1_ptr = variable(var, 'exp_avg_p1', var.shape)
+                                grad = weighted_add(exp_avg_p1_ptr, grad, beta1)
+                                update_ops.append(mtf.assign(exp_avg_p1_ptr, grad))  
+                            weight_update = grad * rsqrt(exp_avg_p2 + epsilon)   
 
                         elif params.optimizer == 'shampoo':
                             shape = grad.shape
@@ -277,12 +277,12 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                             update_ops.extend([mtf.assign(buf_ptr, reduce_max(update, output_shape=[dim]))
                                                for buf_ptr, dim in zip(buffer, update.shape.dims)])
 
-                        if large_tensor and params.weight_decay > 0:
-                            weight_update += params.weight_decay * var.value
                         weight_update *= learning_rate
                         large_tensor = features_used and len(var.shape.dims) > len(params.feature_dims)
                         large_tensor |= not features_used and len(var.shape.dims) >= 2
                         large_tensor &= var.shape.size > 1
+                        if large_tensor and params.weight_decay > 0:
+                            weight_update += params.weight_decay * var.value * learning_rate
                         if large_tensor and params.weight_centralisation:
                             weight_update += reduce_mean(var.value)
                         if params.grad_accumulation > 1:
