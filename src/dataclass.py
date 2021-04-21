@@ -23,6 +23,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         super().__init__()
 
         self.use_video = True
+        self.save_graph = False
         self.use_language = True
         self.input_dropout = 0.
         self.output_offset = 1
