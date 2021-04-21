@@ -164,8 +164,9 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             self.calculation_dtype = getattr(tf, self.calculation_dtype)
         if self.intermediate_feed_forward_multiplier is None:
             self.intermediate_feed_forward_multiplier = self.group_linear_factor / self.head_splits
-        if self.language_token_per_frame != self.n_ctx:
-            raise ValueError("language_token_per_frame must match n_ctx")
+        if not self.video and self.language_token_per_frame != self.n_ctx:
+            print(f"language_token_per_frame is unused in language-only mode. Overwriting with n_ctx={self.n_ctx}")
+            self.language_token_per_frame = self.n_ctx
         split_batch = self.batch_splits > 1
         split_heads = self.head_splits > 1
         # if split_heads and isinstance(self.head_splits, int) and self.vocab_size > 256:
