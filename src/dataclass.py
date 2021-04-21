@@ -58,6 +58,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.token_patch_size = 1
         self.learning_rate = 5e-5
         self.storage_dtype = "float32"
+        self.slice_dtype = "float32"
         self.calculation_dtype = "float32"
         self.train_batch_size = 1
         self.current_step = 0
@@ -134,7 +135,11 @@ class ModelParameter(typing.Dict[str, typing.Any]):
 
         if hasattr(config, 'dict'):
             config = config.dict()
-        self.__dict__.update(config)
+
+        for k, v in config.items():
+            if k not in self.__dict__:
+                print(f"WARNING: Unknown ModelParameter {k}={v!r}")
+            self.__dict__[k] = v
 
         self.multi_loss_strategy = self.multi_loss_strategy.lower()
         if not self.multi_loss_strategy in ["linear", "pcgrad", "mgda"]:
@@ -154,10 +159,15 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             self.n_embd_per_head = self.n_embd // self.n_head
         if isinstance(self.storage_dtype, str):
             self.storage_dtype = getattr(tf, self.storage_dtype)
+        if isinstance(self.slice_dtype, str):
+            self.slice_dtype = getattr(tf, self.slice_dtype)
         if isinstance(self.calculation_dtype, str):
             self.calculation_dtype = getattr(tf, self.calculation_dtype)
         if self.intermediate_feed_forward_multiplier is None:
             self.intermediate_feed_forward_multiplier = self.group_linear_factor / self.head_splits
+        if not self.video and self.language_token_per_frame != self.n_ctx:
+            print(f"language_token_per_frame is unused in language-only mode. Overwriting with n_ctx={self.n_ctx}")
+            self.language_token_per_frame = self.n_ctx
         split_batch = self.batch_splits > 1
         split_heads = self.head_splits > 1
         # if split_heads and isinstance(self.head_splits, int) and self.vocab_size > 256:
@@ -168,8 +178,9 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             self.vocab_size += 256 - self.vocab_size % 256
         self.mesh_shape = ','.join([f"b:{self.batch_splits:.0f}"] * split_batch +
                                    [f"h:{self.head_splits:.0f}"] * split_heads)
-        self.layout = ','.join([f"batch:b"] * split_batch + [f"heads:h"] * split_heads)
-        self.variable_dtype = mtf.VariableDType(self.storage_dtype, self.calculation_dtype, self.calculation_dtype)
+        self.layout = ','.join([f"batch:b"] * split_batch +
+                               [f"heads:h"] * split_heads)
+        self.variable_dtype = mtf.VariableDType(self.storage_dtype, self.slice_dtype, self.calculation_dtype)
         self.block_config = [BlockConfig(conf, use_revnet=self.use_revnet) for conf in self.block_config]
         self.input_block_config = [BlockConfig(conf, use_revnet=False) for conf in self.input_block_config]
         self.output_block_config = [BlockConfig(conf, use_revnet=False) for conf in self.output_block_config]
