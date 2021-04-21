@@ -69,7 +69,7 @@ def argmax(tensor: mtf.Tensor, dims: typing.List[mtf.Dimension]) -> mtf.Tensor:
 
 def text_embed(params: ModelParameter, int_tokens: mtf.Tensor) -> typing.Tuple[mtf.Tensor, mtf.Tensor]:
     return (one_hot(int_tokens / params.vocab_size, params.head_dim, dtype=params.variable_dtype.activation_dtype),
-            one_hot(mod(int_tokens, params.vocab_size), params.vocab_dims,
+            one_hot(mod(int_tokens, params.vocab_size), params.vocab_dim,
                     dtype=params.variable_dtype.activation_dtype))
 
 def reduce_mean(tensor: mtf.Tensor, output_shape: OPT_SHAPE = None, reduced_dim: OPT_DIMS = None) -> mtf.Tensor:
