@@ -159,13 +159,14 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             self.intermediate_feed_forward_multiplier = self.group_linear_factor / self.head_splits
         split_batch = self.batch_splits > 1
         split_heads = self.head_splits > 1
-        self.split_vocab = split_heads and isinstance(self.head_splits, int) and self.vocab_size > 256
-        if self.split_vocab:
-            full_partition_size = self.head_splits * 128
-            self.vocab_size += full_partition_size - self.vocab_size % full_partition_size
-            self.vocab_size //= self.n_head
-        elif self.vocab_size % 256 > 0:
-            self.vocab_size += 256 - self.vocab_size % 256
+        if not hasattr(self, 'split_vocab'):
+            self.split_vocab = split_heads and isinstance(self.head_splits, int) and self.vocab_size > 256
+            if self.split_vocab:
+                full_partition_size = self.head_splits * 128
+                self.vocab_size += full_partition_size - self.vocab_size % full_partition_size
+                self.vocab_size //= self.n_head
+            elif self.vocab_size % 256 > 0:
+                self.vocab_size += 256 - self.vocab_size % 256
         self.mesh_shape = ','.join([f"b:{self.batch_splits:.0f}"] * split_batch +
                                    [f"h:{self.head_splits:.0f}"] * split_heads)
         self.layout = ','.join([f"batch:b"] * split_batch + [f"heads:h"] * split_heads)
