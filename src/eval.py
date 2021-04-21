@@ -1,12 +1,10 @@
 import typing
 
-import cv2
 import numpy as np
-import scipy.ndimage
 from transformers import GPT2TokenizerFast
 
 from src.dataclass import ModelParameter
-from src.utils_core import chunks
+from src.utils_core import chunks, color_print
 
 
 def render_video(model_output: typing.List[typing.Tuple[np.ndarray, typing.List[str]]],
@@ -23,6 +21,7 @@ def render_video(model_output: typing.List[typing.Tuple[np.ndarray, typing.List[
                  prompt_sample_color: typing.Tuple[int, int, int] = (0, 128, 255),
                  prompt_sample_pos: typing.Tuple[int, int] = (50, 50),
                  ):
+    import cv2
     writer = cv2.VideoWriter(f"{save_prefix}_{count}.avi", cv2.VideoWriter_fourcc(*"MJPG"), 1,
                              (params.frame_width * upscale * len(model_output), params.frame_height * upscale))
 
@@ -32,6 +31,7 @@ def render_video(model_output: typing.List[typing.Tuple[np.ndarray, typing.List[
 
             sub_frame = model_output[sub_idx][0][idx]
             sub_frame = sub_frame * 255
+            import scipy.ndimage
             sub_frame = scipy.ndimage.zoom(sub_frame, (upscale, upscale, 1), order=0)
             sub_frame = np.uint8(sub_frame)
             cv2.cvtColor(sub_frame, cv2.COLOR_RGB2BGR)
@@ -148,14 +148,12 @@ def gen_sample_fn(params: ModelParameter):
                 print([process_token_output(out[1], do_argmax=False, bpe_tokenizer=bpe_tokenizer)[0]])
                 print('')
 
-            else:
-
-                print('Prompt:')
-                print(process_token_output(out[1], do_argmax=False,
-                                           bpe_tokenizer=bpe_tokenizer)[0][:params.initial_autoregressive_position])
-                print('\noutput:')
-                print(process_token_output(out[0], do_argmax=False,
-                                           bpe_tokenizer=bpe_tokenizer)[0][params.initial_autoregressive_position:])
+            print('\n------\n')
+            color_print(params, 'Prompt:')
+            assert params.initial_autoregressive_position > 0
+            print(process_token_output(out[1][:, :params.initial_autoregressive_position-1], do_argmax=False, bpe_tokenizer=bpe_tokenizer)[0])
+            color_print(params, 'Output:')
+            print(process_token_output(out[0][:, params.initial_autoregressive_position:], do_argmax=False, bpe_tokenizer=bpe_tokenizer)[0].rstrip())
         else:
             print('target:')
             print(process_token_output(out[1], do_argmax=False, bpe_tokenizer=bpe_tokenizer)[0])

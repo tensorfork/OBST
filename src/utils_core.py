@@ -2,8 +2,13 @@
 Generic utility functions that are called frequently across modules.
 """
 import typing
+import os
+import pytz
+from datetime import datetime, timezone
 
 from .dataclass import ModelParameter
+
+TZ = pytz.timezone(os.environ.get('TZ', 'US/Pacific'))
 
 
 def default(value: typing.Any, default_value: typing.Any) -> typing.Any:
@@ -27,5 +32,13 @@ def chunks(lst: typing.List, n: int):
         yield lst[i:i + n]
 
 
+def timestamp(now=None, tz=None):
+    if now is None:
+        now = datetime.now(timezone.utc)
+    if tz is None:
+        tz = TZ
+    return "{}".format(now.astimezone(tz).isoformat())
+
+
 def color_print(params: ModelParameter, string):
-    print(f"{params.own_color}{string}{params.other_color}", flush=True)
+    print(f"{params.own_color}{timestamp()} {string}{params.other_color}", flush=True)
