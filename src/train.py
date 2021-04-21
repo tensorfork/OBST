@@ -15,6 +15,7 @@ from tensorflow.python.framework import ops
 from tensorflow.python.ops import summary_ops_v2 as summary, variables
 from tensorflow.python.tpu import tpu, tpu_feed
 from tensorflow.python.tpu.ops import tpu_ops
+from tensorflow.python.training import checkpoint_management
 
 from .dataclass import ModelParameter
 from .model import build
@@ -342,7 +343,12 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     hooks.append(tf.train.CheckpointSaverHook(params.model_path,
                                                               save_steps=params.steps_per_checkpoint,
                                                               saver=saver,
-                                                              listeners=[mtf.MtfCheckpointSaverListener(lowering)]))
+                                                              listeners=[mtf.MtfCheckpointSaverListener(lowering)],
+                                                              save_graph_def=params.save_graph))
+                    ckpt = checkpoint_management.get_checkpoint_state(params.model_path)
+                    if ckpt is not None:
+                        color_print(params, "Recovering last checkpoints...")
+                        saver.recover_last_checkpoints(ckpt.all_model_checkpoint_paths)
 
                 ret = tf.group(comput_ops)
 
