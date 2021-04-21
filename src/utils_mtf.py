@@ -59,7 +59,9 @@ def argmax(tensor: mtf.Tensor, dims: typing.List[mtf.Dimension]) -> mtf.Tensor:
     sizes = list(np.cumprod([1] + [d.size for d in dims][:-1]))
     dims = sorted(zip(dims, sizes), key=lambda x: x[0].size)
     dims.reverse()
-    val, ind = mtf.top_1(tensor, dims.pop(0))
+    dim, size = dims.pop(0)
+    val, ind = mtf.top_1(tensor, dim)
+    ind *= size
     for dim, size in dims:
         val, ind0 = mtf.top_1(val, dim)
         ind = mtf.einsum([ind, one_hot(ind0, dim, dtype=ind.dtype)], reduced_dims=[dim])
