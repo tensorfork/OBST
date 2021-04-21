@@ -71,7 +71,8 @@ def argmax(tensor: mtf.Tensor, dims: typing.List[mtf.Dimension]) -> mtf.Tensor:
 
 
 def text_embed(params: ModelParameter, int_tokens: mtf.Tensor) -> typing.Tuple[mtf.Tensor, mtf.Tensor]:
-    return (one_hot(int_tokens / params.vocab_size, params.head_dim, dtype=params.variable_dtype.activation_dtype),
+    return (one_hot(floordiv(int_tokens, params.vocab_size), params.head_dim,
+                    dtype=params.variable_dtype.activation_dtype),
             one_hot(mod(int_tokens, params.vocab_size), params.vocab_dim,
                     dtype=params.variable_dtype.activation_dtype))
 
@@ -127,6 +128,9 @@ def equal(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None) -> mtf
 
 def mod(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None) -> mtf.Tensor:
     return scoped("mod", mtf.mod, x1, x2, output_shape)
+
+def floordiv(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None) -> mtf.Tensor:
+    return scoped("floordiv", mtf.floordiv, x1, x2, output_shape)
 
 
 def mtf_range(mesh: mtf.Mesh, dim: DIM, dtype: tf.dtypes) -> mtf.Tensor:
