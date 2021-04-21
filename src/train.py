@@ -344,7 +344,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                               save_steps=params.steps_per_checkpoint,
                                                               saver=saver,
                                                               listeners=[mtf.MtfCheckpointSaverListener(lowering)],
-                                                              save_graph_def=False))
+                                                              save_graph_def=params.save_graph))
                     ckpt = checkpoint_management.get_checkpoint_state(params.model_path)
                     if ckpt is not None:
                         color_print(params, "Recovering last checkpoints...")
