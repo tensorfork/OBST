@@ -21,6 +21,8 @@ from .utils_mtf import (ACTIVATIONS, OPT_DIMS, SHAPE, activate, add_n, anonymize
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
+tf1 = tf.compat.v1
+
 
 class ConvolutionForward(mtf.Operation):
     def __init__(self, params: ModelParameter, x: mtf.Tensor, dim: mtf.Dimension, kernel_size: int, masked: bool):
@@ -49,13 +51,13 @@ class ConvolutionForward(mtf.Operation):
                 x = tf.reshape(x, input2d)
                 w = tf.reshape(w, weight2d)
                 dy = tf.reshape(dy, input2d)
-                out = tf.compat.v1.nn.conv2d_backprop_filter(x, w, dy, **kwargs)
+                out = tf1.nn.conv2d_backprop_filter(x, w, dy, **kwargs)
                 return tf.reshape(out, self.input_size)
 
             def back_input(dy, w, **kwargs):
                 w = tf.reshape(w, weight2d)
                 dy = tf.reshape(dy, input2d)
-                out = tf.compat.v1.nn.conv2d_backprop_input(dy.shape, w, dy, **kwargs)
+                out = tf1.nn.conv2d_backprop_input(dy.shape, w, dy, **kwargs)
                 return tf.reshape(out, self.input_size)
 
             self.filter_backprop = back_filter
@@ -65,14 +67,14 @@ class ConvolutionForward(mtf.Operation):
             self.weight_size.extend([kernel_size, 1])
             self.input_size = [batch, sizes[1], int(np.prod(sizes[2:len(space_dims)])), features]
             self.conv = tf.nn.conv2d
-            self.filter_backprop = tf.compat.v1.nn.conv2d_backprop_filter
+            self.filter_backprop = tf1.nn.conv2d_backprop_filter
             self.input_backprop = tf.nn.conv2d_transpose
         elif space_dim_index == len(space_dims) - 1:
             self.kwargs['data_format'] = 'NHWC'
             self.weight_size.extend([1, kernel_size])
             self.input_size = [batch, int(np.prod(sizes[1:len(space_dims) - 1])), sizes[len(space_dims)], features]
             self.conv = tf.nn.conv2d
-            self.filter_backprop = tf.compat.v1.nn.conv2d_backprop_filter
+            self.filter_backprop = tf1.nn.conv2d_backprop_filter
             self.input_backprop = tf.nn.conv2d_transpose
         else:
             self.kwargs['data_format'] = 'NDHWC'
@@ -80,7 +82,7 @@ class ConvolutionForward(mtf.Operation):
             self.input_size = [batch, int(np.prod(sizes[1:dim_index])), sizes[dim_index],
                                int(np.prod(sizes[dim_index + 1:len(space_dims)])), features]
             self.conv = tf.nn.conv3d
-            self.filter_backprop = tf.compat.v1.nn.conv3d_backprop_filter_v2
+            self.filter_backprop = tf1.nn.conv3d_backprop_filter_v2
             self.input_backprop = tf.nn.conv3d_transpose
         self.kwargs['padding'] = 'SAME'
         if masked:
@@ -291,7 +293,7 @@ def _all_mean(params: ModelParameter, block_input: mtf.Tensor, name_extras: typi
 
 
 def compare_range(params: ModelParameter, dim0: mtf.Dimension, dim1: mtf.Dimension, comparison):
-    with tf.compat.v1.variable_scope(f"compare{dim0.name}_{dim1.name}"):
+    with tf1.variable_scope(f"compare{dim0.name}_{dim1.name}"):
         return cast(comparison(mtf_range(params.mesh, dim0, tf.bfloat16),
                                mtf_range(params.mesh, dim1, tf.bfloat16)),
                     params.variable_dtype.activation_dtype)
@@ -401,7 +403,7 @@ LAYER_FUNCTIONS = {'feed_forward': _feed_forward,
 def _block_part_fn(params: ModelParameter, block_part_config: BlockConfig, block_input: mtf.Tensor,
                    name_prefix: str = 'block') -> mtf.Tensor:
     out = block_input
-    with tf.compat.v1.variable_scope(random_name(f"{name_prefix}_")):
+    with tf1.variable_scope(random_name(f"{name_prefix}_")):
         for layer in block_part_config.layer:
             name, *extras = layer.split('-')
             out = scoped(name, LAYER_FUNCTIONS[name], params, out, extras)
@@ -466,12 +468,12 @@ class RevGradOp(mtf.Operation):
         if params is None:
             yield dy1
             yield (self._y1 if dy1_backwards is None else dy1_backwards) - fx2
-            with tf.compat.v1.variable_scope(fx2.graph.captured_variable_scope):
+            with tf1.variable_scope(fx2.graph.captured_variable_scope):
                 for op in f_again_ops[::-1]:
                     grad_outputs = [tensor_to_gradient.get(out) for out in op.outputs]
                     if not op.has_gradient or not any(grad_outputs) or not set(op.inputs) & downstream:
                         continue
-                    with tf.compat.v1.variable_scope(op.name + "/revnet/gradients"):
+                    with tf1.variable_scope(op.name + "/revnet/gradients"):
                         for inp, grad in zip(op.inputs, op.gradient(grad_outputs)):
                             if inp not in downstream or grad is None:
                                 continue
@@ -487,7 +489,7 @@ class RevGradOp(mtf.Operation):
         yield params[0], dy1
         yield params[1], (self._y1 if dy1_backwards is None else dy1_backwards) - fx2
         yield params[3], x2
-        with tf.compat.v1.variable_scope(fx2.graph.captured_variable_scope):
+        with tf1.variable_scope(fx2.graph.captured_variable_scope):
             for op in f_again_ops[::-1]:
                 grad_outputs = []
                 for out in op.outputs:
@@ -507,7 +509,7 @@ class RevGradOp(mtf.Operation):
                     if inp in tensor_to_gradient:
                         grad_list = tensor_to_gradient[inp]
                         grad_list[1] += 1
-                        with tf.compat.v1.variable_scope(op.name + "/revnet/gradients"):
+                        with tf1.variable_scope(op.name + "/revnet/gradients"):
                             grad_list[2] += grad
                     else:
                         tensor_to_gradient[inp] = grad_list = [0, 1, grad]
@@ -550,7 +552,7 @@ def build(params: ModelParameter,
     :param txt_msk: Optional mask to remove loss for certain token positions
     :return: (Generated Video, Total Loss, Video Loss, Token Loss)
     """
-    with mtf.utils.outside_all_rewrites(), tf.compat.v1.variable_scope(params.model_mode):
+    with mtf.utils.outside_all_rewrites(), tf1.variable_scope(params.model_mode):
         cat_msk_src = _default_ones(params, cat_msk_src)
         cat_msk_tgt = _default_ones(params, cat_msk_tgt)
         vid_msk_src = _default_ones(params, vid_msk_src)
@@ -599,7 +601,7 @@ def build(params: ModelParameter,
         elif not params.use_video:
             src: mtf.Tensor = txt
 
-        with tf.compat.v1.variable_scope('body'):
+        with tf1.variable_scope('body'):
             if params.use_initial_position_embedding:
                 for dim in (src.shape - params.feature_dims).dims[1:]:
                     src += _embed(params, [dim] + params.feature_dims)

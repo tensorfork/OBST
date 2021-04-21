@@ -8,7 +8,7 @@ import typing
 
 import mesh_tensorflow as mtf
 import numpy as np
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 from tensorflow.compat.v1.data import Dataset
 from tensorflow.python.data.experimental.ops.distribute_options import AutoShardPolicy
 from tensorflow.python.framework import ops
@@ -22,6 +22,8 @@ from .optimizers import get_optimizer
 from .utils_core import color_print
 from .utils_mtf import argmax, concat, constant_scalar, log, pad, slice, to_float, weighted_add
 
+tf1 = tf.compat.v1
+
 
 class CheckpointLoaderHook(tf.estimator.SessionRunHook):
     """Load checkpoint right after the session started."""
@@ -30,7 +32,7 @@ class CheckpointLoaderHook(tf.estimator.SessionRunHook):
         self.checkpoint_dir = checkpoint_dir
 
     def after_create_session(self, session, coord):
-        saver_collection = tf.get_collection(tf.GraphKeys.SAVERS)
+        saver_collection = tf1.get_collection(tf1.GraphKeys.SAVERS)
         if saver_collection:
             check_point = tf.train.latest_checkpoint(self.checkpoint_dir)
             if check_point:
@@ -79,9 +81,9 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
     tf.config.optimizer.set_experimental_options(params.tensorflow_optimization_settings)
 
     def _model_fn(*args):
-        manual_global_step = tf.get_variable("manual_global_step", [], tf.int64, initializer=tf.zeros_initializer(),
-                                             trainable=False,
-                                             aggregation=variables.VariableAggregation.ONLY_FIRST_REPLICA)
+        manual_global_step = tf1.get_variable("manual_global_step", [], tf.int64, initializer=tf.zeros_initializer(),
+                                              trainable=False,
+                                              aggregation=variables.VariableAggregation.ONLY_FIRST_REPLICA)
         # Construct mtf graph + mesh from params
         graph = mtf.Graph()
 
@@ -310,9 +312,9 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             if accuracy is not None:
                 log_dict['accuracy'] = tf.cast(lowering.export_to_tf_tensor(accuracy), tf.float32)
 
-            global_step = tf.train.get_or_create_global_step()
+            global_step = tf1.train.get_or_create_global_step()
 
-            step = tf.mod(manual_global_step, tf.constant(params.grad_accumulation, dtype=tf.int64))
+            step = tf.math.mod(manual_global_step, tf.constant(params.grad_accumulation, dtype=tf.int64))
             step = tf.equal(step, tf.constant(0, dtype=tf.int64))
             step = tf.cast(step, tf.int64)
 
@@ -328,24 +330,24 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 comput_ops.append(add_histogram(tf_loss=tf_loss, value=debug_gradients_dict,
                                                 global_step=global_step))
 
-            comput_ops.extend([tf.assign_add(global_step, step),
-                               tf.assign_add(manual_global_step, tf.constant(1, dtype=tf.int64, shape=[]))])
+            comput_ops.extend([tf1.assign_add(global_step, step),
+                               tf1.assign_add(manual_global_step, tf.constant(1, dtype=tf.int64, shape=[]))])
 
             comput_ops = comput_ops + [lowering.lowered_operation(op) for op in update_ops]
 
             hooks.append(mtf.MtfRestoreHook(lowering))
             with mtf.utils.outside_all_rewrites():
                 if params.use_checkpointing:
-                    saver = tf.train.Saver(tf.global_variables(),
-                                           sharded=True,
-                                           max_to_keep=params.max_checkpoints_keep,
-                                           defer_build=False,
-                                           save_relative_paths=True)
-                    tf.add_to_collection(tf.GraphKeys.SAVERS, saver)
-                    hooks.append(tf.train.CheckpointSaverHook(params.model_path,
-                                                              save_steps=params.steps_per_checkpoint,
-                                                              saver=saver,
-                                                              listeners=[mtf.MtfCheckpointSaverListener(lowering)]))
+                    saver = tf1.train.Saver(tf1.global_variables(),
+                                            sharded=True,
+                                            max_to_keep=params.max_checkpoints_keep,
+                                            defer_build=False,
+                                            save_relative_paths=True)
+                    tf1.add_to_collection(tf1.GraphKeys.SAVERS, saver)
+                    hooks.append(tf1.train.CheckpointSaverHook(params.model_path,
+                                                               save_steps=params.steps_per_checkpoint,
+                                                               saver=saver,
+                                                               listeners=[mtf.MtfCheckpointSaverListener(lowering)]))
 
                 ret = tf.group(comput_ops)
 
@@ -442,7 +444,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         hosts_to_hold_ds = [num_hosts - 1]
 
     sub_batch_size = batch_size // len(hosts_to_hold_ds)
-    tf.logging.info("MTF sub_batch_size: {}".format(sub_batch_size))
+    tf1.logging.info("MTF sub_batch_size: {}".format(sub_batch_size))
     assert sub_batch_size * len(hosts_to_hold_ds) == batch_size
 
     # Slots for all laidout tensors.
@@ -487,7 +489,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             options.experimental_threading.private_threadpool_size = 48
             options.experimental_distribute.auto_shard_policy = AutoShardPolicy.AUTO
             dataset: Dataset = dataset.with_options(options)
-            _ds_iterator = tf.compat.v1.data.make_initializable_iterator(dataset)
+            _ds_iterator = tf1.data.make_initializable_iterator(dataset)
             ds_iterator.append(_ds_iterator)
             all_input_tensors = _ds_iterator.get_next()
 
@@ -558,10 +560,10 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         # if params.write_summary:
         flush_summary = summary.flush()
 
-        with tf.train.MonitoredTrainingSession(master=cluster_resolver.master(),
-                                               hooks=[ckpt_loader_hook,
-                                                      tf.train.StepCounterHook(every_n_steps=10)] + hooks,
-                                               config=session_config) as sess:
+        with tf1.train.MonitoredTrainingSession(master=cluster_resolver.master(),
+                                                hooks=[ckpt_loader_hook,
+                                                       tf1.train.StepCounterHook(every_n_steps=10)] + hooks,
+                                                config=session_config) as sess:
             color_print(params, f"Connected after {time.time() - start_time:.1f}s")
             color_print(params, 'Compiling computation...')
             now = time.time()
@@ -609,9 +611,9 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     # We don't need output other than from core 0.
                     outfeed_dequeue_ops.append([tf.reduce_mean(x) for x in outfeed_dequeue_op]
                                                if outfeed_dequeue_ops else outfeed_dequeue_op)
-        with tf.train.MonitoredSession(session_creator=tf.train.ChiefSessionCreator(master=cluster_resolver.master(),
-                                                                                    config=session_config),
-                                       hooks=[ckpt_loader_hook, hooks[0]]) as sess:
+        with tf1.train.MonitoredSession(session_creator=tf1.train.ChiefSessionCreator(master=cluster_resolver.master(),
+                                                                                      config=session_config),
+                                        hooks=[ckpt_loader_hook, hooks[0]]) as sess:
             color_print(params, f"Connected after {time.time() - start_time:.1f}s")
 
             color_print(params, "Initializing inputs...")

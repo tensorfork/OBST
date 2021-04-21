@@ -7,6 +7,7 @@ import tensorflow as tf
 from .dataclass import ModelParameter
 from .utils_core import default
 
+tf1 = tf.compat.v1
 _NAME_INDEX = [0]
 
 
@@ -42,7 +43,7 @@ OPT_DIMS = typing.Optional[DIM_LIST]
 
 
 def scoped(name: str, fn: typing.Callable, *args, **kwargs):
-    with tf.variable_scope(random_name(name)):
+    with tf1.variable_scope(random_name(name)):
         return fn(*args, **kwargs)
 
 
@@ -73,6 +74,7 @@ def text_embed(params: ModelParameter, int_tokens: mtf.Tensor) -> typing.Tuple[m
     return (one_hot(int_tokens / params.vocab_size, params.head_dim, dtype=params.variable_dtype.activation_dtype),
             one_hot(mod(int_tokens, params.vocab_size), params.vocab_dim,
                     dtype=params.variable_dtype.activation_dtype))
+
 
 def reduce_mean(tensor: mtf.Tensor, output_shape: OPT_SHAPE = None, reduced_dim: OPT_DIMS = None) -> mtf.Tensor:
     return scoped("reduce_mean", mtf.reduce_mean, tensor, None, output_shape, reduced_dim)
