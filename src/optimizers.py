@@ -81,21 +81,14 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
         return _variable(var.mesh, f"{var.name}/{params.optimizer}/{name}", shape, params.variable_dtype)
 
     debug_gradients_dict = {}
+    first_grad = {}
     update_ops = []
 
     if params.multi_loss_strategy == "mgda":
-        loss_multi_list = [mtf.get_variable(mesh=params.mesh, name=f"loss_multi_{loss_multi_idx}", shape=[],
-                                            initializer=tf.zeros_initializer(), trainable=False,
-                                            dtype=tf.float32) for loss_multi_idx in range(2)]
-        loss_1__loss_1 = _variable(params.mesh, "loss_1__loss_1", [params.head_dim], tf.float32)
-        loss_1__loss_2 = _variable(params.mesh, "loss_1__loss_2", [params.head_dim], tf.float32)
-        loss_2__loss_2 = _variable(params.mesh, "loss_2__loss_2", [params.head_dim], tf.float32)
 
-        _zero = constant_float(params, 0, shape=[params.head_dim])
-
-        update_ops = [mtf.assign(loss_1__loss_1, _zero),
-                      mtf.assign(loss_1__loss_2, _zero),
-                      mtf.assign(loss_2__loss_2, _zero)]
+        loss_1__loss_1 = constant_float(params, 0, shape=[params.head_dim])
+        loss_1__loss_2 = constant_float(params, 0, shape=[params.head_dim])
+        loss_2__loss_2 = constant_float(params, 0, shape=[params.head_dim])
 
     for loss_idx, loss in enumerate(loss_list):
 
@@ -105,10 +98,8 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                                             reduce_sum(loss_1__loss_2, output_shape=[]),
                                             reduce_sum(loss_2__loss_2, output_shape=[]))
 
-            update_ops.extend([mtf.assign(loss_multi_list[0], gamma), mtf.assign(loss_multi_list[1], (1 - gamma))])
-
-            loss = mtf.add(mtf.multiply(loss_list[0], loss_multi_list[0]),
-                           mtf.multiply(loss_list[1], loss_multi_list[1]))
+            loss = mtf.add(mtf.multiply(loss_list[0], gamma),
+                           mtf.multiply(loss_list[1], (1 - gamma)))
 
         operations = loss.graph.operations
         xs = [x.outputs[0] for x in params.mesh.graph.trainable_variables]
@@ -171,40 +162,43 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                         if len(loss_list) > 1:
                             if params.multi_loss_strategy == "pcgrad":
                                 if 'body' in op.name:
-                                    other_grads = [variable(var, f"grad_{i}", var.shape) for i in
-                                                   range(len(loss_list) - 1)]
+
                                     if loss_idx < len(loss_list) - 1:
-                                        update_ops.append(mtf.assign(other_grads[loss_idx], grad))
+                                        first_grad[op.name] = grad
                                         continue
-                                    other_grads.insert(0, grad)
-                                    g_square = [1e-6 + einsum([g, g], output_shape=[]) for g in other_grads[1:]]
-                                    for i in range(len(other_grads)):
-                                        grad = other_grads.pop(0)
-                                        for g, sq in zip(other_grads, g_square):
-                                            grad -= g * (minimum(einsum([grad, g], output_shape=[]), 0) / sq)
-                                        other_grads.append(grad)
-                                        g_square.append(einsum([g, g], output_shape=[]))
-                                    grad = add_n(other_grads)
+
+                                    else:
+
+                                        all_grads = [grad, first_grad[op.name]]
+                                        g_square = [1e-6 + einsum([g, g], output_shape=[]) for g in all_grads[1:]]
+
+                                        for i in range(len(all_grads)):
+                                            grad = all_grads.pop(0)
+                                            for g, sq in zip(all_grads, g_square):
+                                                grad -= g * (minimum(einsum([grad, g], output_shape=[]), 0) / sq)
+
+                                            all_grads.append(grad)
+                                            g_square.append(einsum([g, g], output_shape=[]))
+
+                                        grad = add_n(all_grads)
+                                        del first_grad[op.name]
 
                                 elif params.multi_loss_strategy == "mgda":
                                     if 'body' in op.name:
                                         if loss_idx < 2:
-                                            first_grads = variable(loss_list[0], f"first_grad", loss_list[0].shape)
                                             if loss_idx == 0:
-                                                update_ops.append(mtf.assign(first_grads, grad))
+                                                first_grad[op.name] = grad
                                                 continue
 
-                                            _loss_1__loss_1 = einsum([first_grads, first_grads], [params.head_dim])
-                                            update_ops.append(mtf.assign_add(loss_1__loss_1, _loss_1__loss_1))
+                                            else:
 
-                                            _loss_1__loss_2 = einsum([first_grads, grad], [params.head_dim])
-                                            update_ops.append(mtf.assign_add(loss_1__loss_2, _loss_1__loss_2))
+                                                loss_1__loss_1 += einsum([first_grad[op.name], first_grad[op.name]],
+                                                                         [params.head_dim])
+                                                loss_1__loss_2 += einsum([first_grad[op.name], grad], [params.head_dim])
+                                                loss_2__loss_2 += einsum([grad, grad], [params.head_dim])
 
-                                            _loss_2__loss_2 = einsum([grad, grad], [params.head_dim])
-                                            update_ops.append(mtf.assign_add(loss_2__loss_2, _loss_2__loss_2))
-
-                                            del first_grads
-                                            continue
+                                                del first_grad[op.name]
+                                                continue
 
                                     elif loss_idx == 2:  # not in body and optimize body params.
                                         continue
