@@ -8,18 +8,20 @@ import typing
 
 import mesh_tensorflow as mtf
 import numpy as np
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 from tensorflow.python.ops import array_ops, gen_linalg_ops, math_ops, random_ops
 from tensorflow.python.ops.init_ops import Initializer
 
 from .dataclass import BlockConfig, ModelParameter
 from .utils_core import default
-from .utils_mtf import (ACTIVATIONS, OPT_DIMS, SHAPE, activate, add_n, anonymize, anonymize_dim, cast, concat,
-                        constant_scalar, deduplicate, dropout, einsum, feature_dims_used, greater_equal, mtf_range,
-                        one_hot, ones, random_name, reciprocal, reduce_logsumexp, reduce_mean, reduce_sum,
-                        rsqrt, scoped, sigmoid, sign, slice, zeros_like)
+from .utils_mtf import (ACTIVATIONS, OPT_DIMS, SHAPE, activate, add_n, anonymize, anonymize_dim, argmax, cast, concat,
+                        constant_scalar, deduplicate, dropout, einsum, exp, feature_dims_used, log, mtf_range, one_hot,
+                        ones, random_name, reciprocal, reduce_max, reduce_mean, reduce_sum, rsqrt, scoped, sigmoid,
+                        sign, slice, text_embed, zeros_like)
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
+
+tf1 = tf.compat.v1
 
 
 class ConvolutionForward(mtf.Operation):
@@ -49,13 +51,13 @@ class ConvolutionForward(mtf.Operation):
                 x = tf.reshape(x, input2d)
                 w = tf.reshape(w, weight2d)
                 dy = tf.reshape(dy, input2d)
-                out = tf.nn.conv2d_backprop_filter(x, w, dy, **kwargs)
+                out = tf1.nn.conv2d_backprop_filter(x, w, dy, **kwargs)
                 return tf.reshape(out, self.input_size)
 
             def back_input(dy, w, **kwargs):
                 w = tf.reshape(w, weight2d)
                 dy = tf.reshape(dy, input2d)
-                out = tf.nn.conv2d_backprop_input(dy.shape, w, dy, **kwargs)
+                out = tf1.nn.conv2d_backprop_input(dy.shape, w, dy, **kwargs)
                 return tf.reshape(out, self.input_size)
 
             self.filter_backprop = back_filter
@@ -65,14 +67,14 @@ class ConvolutionForward(mtf.Operation):
             self.weight_size.extend([kernel_size, 1])
             self.input_size = [batch, sizes[1], int(np.prod(sizes[2:len(space_dims)])), features]
             self.conv = tf.nn.conv2d
-            self.filter_backprop = tf.nn.conv2d_backprop_filter
+            self.filter_backprop = tf1.nn.conv2d_backprop_filter
             self.input_backprop = tf.nn.conv2d_transpose
         elif space_dim_index == len(space_dims) - 1:
             self.kwargs['data_format'] = 'NHWC'
             self.weight_size.extend([1, kernel_size])
             self.input_size = [batch, int(np.prod(sizes[1:len(space_dims) - 1])), sizes[len(space_dims)], features]
             self.conv = tf.nn.conv2d
-            self.filter_backprop = tf.nn.conv2d_backprop_filter
+            self.filter_backprop = tf1.nn.conv2d_backprop_filter
             self.input_backprop = tf.nn.conv2d_transpose
         else:
             self.kwargs['data_format'] = 'NDHWC'
@@ -80,7 +82,7 @@ class ConvolutionForward(mtf.Operation):
             self.input_size = [batch, int(np.prod(sizes[1:dim_index])), sizes[dim_index],
                                int(np.prod(sizes[dim_index + 1:len(space_dims)])), features]
             self.conv = tf.nn.conv3d
-            self.filter_backprop = tf.nn.conv3d_backprop_filter_v2
+            self.filter_backprop = tf1.nn.conv3d_backprop_filter_v2
             self.input_backprop = tf.nn.conv3d_transpose
         self.kwargs['padding'] = 'SAME'
         if masked:
@@ -291,7 +293,7 @@ def _all_mean(params: ModelParameter, block_input: mtf.Tensor, name_extras: typi
 
 
 def compare_range(params: ModelParameter, dim0: mtf.Dimension, dim1: mtf.Dimension, comparison):
-    with tf.variable_scope(f"compare{dim0.name}_{dim1.name}"):
+    with tf1.variable_scope(f"compare{dim0.name}_{dim1.name}"):
         return cast(comparison(mtf_range(params.mesh, dim0, tf.bfloat16),
                                mtf_range(params.mesh, dim1, tf.bfloat16)),
                     params.variable_dtype.activation_dtype)
@@ -401,7 +403,7 @@ LAYER_FUNCTIONS = {'feed_forward': _feed_forward,
 def _block_part_fn(params: ModelParameter, block_part_config: BlockConfig, block_input: mtf.Tensor,
                    name_prefix: str = 'block') -> mtf.Tensor:
     out = block_input
-    with tf.variable_scope(random_name(f"{name_prefix}_")):
+    with tf1.variable_scope(random_name(f"{name_prefix}_")):
         for layer in block_part_config.layer:
             name, *extras = layer.split('-')
             out = scoped(name, LAYER_FUNCTIONS[name], params, out, extras)
@@ -466,12 +468,12 @@ class RevGradOp(mtf.Operation):
         if params is None:
             yield dy1
             yield (self._y1 if dy1_backwards is None else dy1_backwards) - fx2
-            with tf.variable_scope(fx2.graph.captured_variable_scope):
+            with tf1.variable_scope(fx2.graph.captured_variable_scope):
                 for op in f_again_ops[::-1]:
                     grad_outputs = [tensor_to_gradient.get(out) for out in op.outputs]
                     if not op.has_gradient or not any(grad_outputs) or not set(op.inputs) & downstream:
                         continue
-                    with tf.variable_scope(op.name + "/revnet/gradients"):
+                    with tf1.variable_scope(op.name + "/revnet/gradients"):
                         for inp, grad in zip(op.inputs, op.gradient(grad_outputs)):
                             if inp not in downstream or grad is None:
                                 continue
@@ -487,7 +489,7 @@ class RevGradOp(mtf.Operation):
         yield params[0], dy1
         yield params[1], (self._y1 if dy1_backwards is None else dy1_backwards) - fx2
         yield params[3], x2
-        with tf.variable_scope(fx2.graph.captured_variable_scope):
+        with tf1.variable_scope(fx2.graph.captured_variable_scope):
             for op in f_again_ops[::-1]:
                 grad_outputs = []
                 for out in op.outputs:
@@ -507,7 +509,7 @@ class RevGradOp(mtf.Operation):
                     if inp in tensor_to_gradient:
                         grad_list = tensor_to_gradient[inp]
                         grad_list[1] += 1
-                        with tf.variable_scope(op.name + "/revnet/gradients"):
+                        with tf1.variable_scope(op.name + "/revnet/gradients"):
                             grad_list[2] += grad
                     else:
                         tensor_to_gradient[inp] = grad_list = [0, 1, grad]
@@ -519,7 +521,7 @@ class RevGradOp(mtf.Operation):
         yield params[2], dy2 + tensor_to_gradient[x2][2]
 
 
-def default_ones(params, inp):
+def _default_ones(params: ModelParameter, inp: typing.Optional[mtf.Tensor]) -> mtf.Tensor:
     return cast(default(inp, ones(params.mesh, [], params.variable_dtype.activation_dtype)),
                 params.variable_dtype.activation_dtype)
 
@@ -550,12 +552,12 @@ def build(params: ModelParameter,
     :param txt_msk: Optional mask to remove loss for certain token positions
     :return: (Generated Video, Total Loss, Video Loss, Token Loss)
     """
-    with mtf.utils.outside_all_rewrites(), tf.variable_scope(params.model_mode):
-        cat_msk_src = default_ones(params, cat_msk_src)
-        cat_msk_tgt = default_ones(params, cat_msk_tgt)
-        vid_msk_src = default_ones(params, vid_msk_src)
-        vid_msk_tgt = default_ones(params, vid_msk_tgt)
-        txt_msk = default_ones(params, txt_msk)
+    with mtf.utils.outside_all_rewrites(), tf1.variable_scope(params.model_mode):
+        cat_msk_src = _default_ones(params, cat_msk_src)
+        cat_msk_tgt = _default_ones(params, cat_msk_tgt)
+        vid_msk_src = _default_ones(params, vid_msk_src)
+        vid_msk_tgt = _default_ones(params, vid_msk_tgt)
+        txt_msk = _default_ones(params, txt_msk)
         if vid is not None:
             vid = mtf.cast(vid, params.variable_dtype.activation_dtype)
 
@@ -583,8 +585,8 @@ def build(params: ModelParameter,
 
         # Language embedding and initial feed forward.
         if params.use_language:
-            txt = einsum([one_hot(txt_src, params.vocab_dim, dtype=params.variable_dtype.activation_dtype),
-                          _embed(params, [params.vocab_dim] + params.intermediate)], reduced_dims=[params.vocab_dim])
+            txt = einsum([_embed(params, [params.head_dim, params.vocab_dim] + params.intermediate),
+                          *text_embed(params, txt_src)], reduced_dims=[params.vocab_dim, params.head_dim])
 
             if params.input_dropout > 0:
                 txt = dropout(txt, rate=params.input_dropout)
@@ -599,7 +601,7 @@ def build(params: ModelParameter,
         elif not params.use_video:
             src: mtf.Tensor = txt
 
-        with tf.variable_scope('body'):
+        with tf1.variable_scope('body'):
             if params.use_initial_position_embedding:
                 for dim in (src.shape - params.feature_dims).dims[1:]:
                     src += _embed(params, [dim] + params.feature_dims)
@@ -635,7 +637,7 @@ def build(params: ModelParameter,
             for config_idx, config in enumerate(params.output_block_config):
                 token_out = _block_part_fn(params, config, token_out, f'lang_out{config_idx}')
 
-            token_out = _linear_from_features(params, token_out, [txt_tgt.shape[-1], params.vocab_dim])
+            token_out = _linear_from_features(params, token_out, [txt_tgt.shape[-1]] + params.vocab_dims)
 
         if params.use_video:
             frame_out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)
@@ -650,11 +652,14 @@ def build(params: ModelParameter,
 
         if params.use_language:
             size = constant_scalar(params, 1 / txt_tgt.size)
-            target = one_hot(txt_tgt, params.vocab_dim, dtype=params.variable_dtype.activation_dtype)
-            token_loss = einsum([reduce_logsumexp(token_out, reduced_dim=params.vocab_dim), size, txt_msk, cat_msk_tgt],
-                                output_shape=[])
-            token_loss += einsum([token_out, target, size, constant_scalar(params, -1), txt_msk, cat_msk_tgt],
-                                 output_shape=[])
+
+            reduced_shape = token_out.shape - params.vocab_dims
+            max_logit = reduce_max(mtf.stop_gradient(token_out), output_shape=reduced_shape)
+            token_loss = einsum([log(reduce_sum(exp(token_out - max_logit), output_shape=reduced_shape)), size, txt_msk,
+                                 cat_msk_tgt], output_shape=[])
+            token_loss += einsum([token_out, *text_embed(params, txt_tgt), size, constant_scalar(params, -1), txt_msk,
+                                  cat_msk_tgt], output_shape=[])
+            token_loss += einsum([max_logit, size, txt_msk, cat_msk_tgt], output_shape=[])
             loss_list.append(token_loss)
 
             if txt_msk is not None:
@@ -663,7 +668,7 @@ def build(params: ModelParameter,
                                      mtf.stop_gradient(token_loss)], output_shape=[])
 
             if params.calc_accuracy:
-                accuracy = einsum([cast(mtf.equal(mtf.argmax(mtf.stop_gradient(token_out), params.vocab_dim), txt_tgt),
+                accuracy = einsum([cast(mtf.equal(argmax(mtf.stop_gradient(token_out), params.vocab_dims), txt_tgt),
                                         tf.float32), txt_msk, cat_msk_tgt, size], output_shape=[])
 
         if params.use_video:

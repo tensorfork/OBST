@@ -1,11 +1,13 @@
 import typing
 
 import mesh_tensorflow as mtf
-import tensorflow.compat.v1 as tf
+import numpy as np
+import tensorflow as tf
 
 from .dataclass import ModelParameter
 from .utils_core import default
 
+tf1 = tf.compat.v1
 _NAME_INDEX = [0]
 
 
@@ -41,7 +43,7 @@ OPT_DIMS = typing.Optional[DIM_LIST]
 
 
 def scoped(name: str, fn: typing.Callable, *args, **kwargs):
-    with tf.variable_scope(random_name(name)):
+    with tf1.variable_scope(random_name(name)):
         return fn(*args, **kwargs)
 
 
@@ -52,6 +54,27 @@ def einsum(xs: TENSORS, output_shape: OPT_SHAPE = None, reduced_dims: OPT_DIMS =
 def one_hot(indices: mtf.Tensor, output_dim: mtf.Dimension, on_value: float = 1.0, off_value: float = 0.0,
             dtype: tf.dtypes = tf.float32) -> mtf.Tensor:
     return scoped("one_hot", mtf.one_hot, indices, output_dim, on_value, off_value, dtype)
+
+
+def argmax(tensor: mtf.Tensor, dims: typing.List[mtf.Dimension]) -> mtf.Tensor:
+    sizes = list(np.cumprod([1] + [d.size for d in dims][:-1]))
+    dims = sorted(zip(dims, sizes), key=lambda x: x[0].size)
+    dims.reverse()
+    dim, size = dims.pop(0)
+    val, ind = mtf.top_1(tensor, dim)
+    ind *= size
+    for dim, size in dims:
+        val, ind0 = mtf.top_1(val, dim)
+        ind = mtf.einsum([ind, one_hot(ind0, dim, dtype=ind.dtype)], reduced_dims=[dim])
+        ind += ind0 * size
+    return ind
+
+
+def text_embed(params: ModelParameter, int_tokens: mtf.Tensor) -> typing.Tuple[mtf.Tensor, mtf.Tensor]:
+    return (one_hot(floordiv(int_tokens, params.vocab_size), params.head_dim,
+                    dtype=params.variable_dtype.activation_dtype),
+            one_hot(mod(int_tokens, params.vocab_size), params.vocab_dim,
+                    dtype=params.variable_dtype.activation_dtype))
 
 
 def reduce_mean(tensor: mtf.Tensor, output_shape: OPT_SHAPE = None, reduced_dim: OPT_DIMS = None) -> mtf.Tensor:
@@ -75,11 +98,11 @@ def constant(params: ModelParameter, value: typing.Union[int, float], shape: OPT
 
 
 def constant_float(params: ModelParameter, value: typing.Union[int, float], shape: OPT_SHAPE = None) -> mtf.Tensor:
-    return scoped("constant", mtf.constant, params.mesh, value, shape, tf.float32)
+    return scoped("constant_float", mtf.constant, params.mesh, value, shape, tf.float32)
 
 
 def constant_int(params: ModelParameter, value: typing.Union[int, float], shape: OPT_SHAPE = None) -> mtf.Tensor:
-    return scoped("constant", mtf.constant, params.mesh, value, shape, tf.int32)
+    return scoped("constant_int", mtf.constant, params.mesh, value, shape, tf.int32)
 
 
 def constant_scalar(params: ModelParameter, value: typing.Union[int, float], dtype: tf.TypeSpec = None) -> mtf.Tensor:
@@ -105,6 +128,10 @@ def equal(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None) -> mtf
 
 def mod(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None) -> mtf.Tensor:
     return scoped("mod", mtf.mod, x1, x2, output_shape)
+
+
+def floordiv(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None) -> mtf.Tensor:
+    return scoped("floordiv", mtf.floordiv, x1, x2, output_shape)
 
 
 def mtf_range(mesh: mtf.Mesh, dim: DIM, dtype: tf.dtypes) -> mtf.Tensor:
@@ -359,7 +386,7 @@ def anonymize(inp: mtf.Tensor,
             name = dim.name
         else:
             name = '-'.join(dim_name(d) for d in dim)
-        with tf.variable_scope(f"anonymize_{name}"):
+        with tf1.variable_scope(f"anonymize_{name}"):
             return mtf.reshape(inp, shape)
     return inp
 
@@ -409,7 +436,7 @@ def activate(name_extras: typing.Union[typing.List[str], str], block_input: mtf.
     for fn_name in name_extras:
         if fn_name not in ACTIVATIONS:
             continue
-        with tf.variable_scope(fn_name):
+        with tf1.variable_scope(fn_name):
             return ACTIVATIONS[fn_name](block_input)
     print(f'No activation function found for "{name_extras}". Falling back to identity. '
           f'Known functions: {list(ACTIVATIONS.keys())}')

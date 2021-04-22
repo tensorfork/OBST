@@ -214,7 +214,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                         elif features_used:
                             fan_in = var.shape.dims[:2]
                         else:
-                            fan_in = var.shape.dims[0]
+                            fan_in = var.shape.dims[:1]
                         if params.gradient_clip > 0 and params.adaptive_gradient_clipping:
                             grd_norm = sqrt(einsum([grad, grad], reduced_dims=fan_in) + 1e-5)
                             wgt_norm = sqrt(einsum([var.value, var.value], reduced_dims=fan_in) + 1e-3)

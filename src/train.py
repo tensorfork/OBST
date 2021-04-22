@@ -8,7 +8,7 @@ import typing
 
 import mesh_tensorflow as mtf
 import numpy as np
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 from tensorflow.compat.v1.data import Dataset
 from tensorflow.python.data.experimental.ops.distribute_options import AutoShardPolicy
 from tensorflow.python.framework import ops
@@ -21,7 +21,9 @@ from .dataclass import ModelParameter
 from .model import build
 from .optimizers import get_optimizer
 from .utils_core import color_print
-from .utils_mtf import pad, to_float, weighted_add, concat, slice
+from .utils_mtf import argmax, concat, constant_scalar, log, pad, slice, to_float, weighted_add
+
+tf1 = tf.compat.v1
 
 
 class CheckpointLoaderHook(tf.estimator.SessionRunHook):
@@ -31,7 +33,7 @@ class CheckpointLoaderHook(tf.estimator.SessionRunHook):
         self.checkpoint_dir = checkpoint_dir
 
     def after_create_session(self, session, coord):
-        saver_collection = tf.get_collection(tf.GraphKeys.SAVERS)
+        saver_collection = tf1.get_collection(tf1.GraphKeys.SAVERS)
         if saver_collection:
             check_point = tf.train.latest_checkpoint(self.checkpoint_dir)
             if check_point:
@@ -80,9 +82,9 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
     tf.config.optimizer.set_experimental_options(params.tensorflow_optimization_settings)
 
     def _model_fn(*args):
-        manual_global_step = tf.get_variable("manual_global_step", [], tf.int64, initializer=tf.zeros_initializer(),
-                                             trainable=False,
-                                             aggregation=variables.VariableAggregation.ONLY_FIRST_REPLICA)
+        manual_global_step = tf1.get_variable("manual_global_step", [], tf.int64, initializer=tf.zeros_initializer(),
+                                              trainable=False,
+                                              aggregation=variables.VariableAggregation.ONLY_FIRST_REPLICA)
         # Construct mtf graph + mesh from params
         graph = mtf.Graph()
 
@@ -134,7 +136,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 # todo: fix token shift for video (Jan).
                 tkn_per_frame = mtf.Dimension("language_token_per_frame",
                                               params.language_token_per_frame)
-                shape = [params.batch_dim, params.sequence_dim, tkn_per_frame, params.vocab_dim]
+                shape = [params.batch_dim, params.sequence_dim, tkn_per_frame] + params.vocab_dims
                 steps = params.time_patch_size
 
                 def body_fn(position, token_x_input, token_y_input, frame_input,
@@ -155,7 +157,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
                     if params.use_language:
                         one_hot_sequence = mtf.one_hot(position, params.sequence_dim, dtype=tf.float32)
-                        token_out = mtf.argmax(mtf.reshape(token_out, new_shape=shape), reduced_dim=params.vocab_dim)
+                        token_out = argmax(mtf.reshape(token_out, new_shape=shape), params.vocab_dims)
                         padding_token = to_float(mtf.equal(token_out, params.padding_token))
 
                         token_x_input = weighted_add(mtf.reshape(token_out, new_shape=params.token_dim_shape),
@@ -203,14 +205,18 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                         mtf.ones(params.mesh, [], tf.float32))
 
                     one_hot_mask = mtf.one_hot(position, output_dim=params.sequence_dim, dtype=tf.int32)
-                    token_out = mtf.sample_with_temperature(token_out, params.vocab_dim, params.sampling_temperature)
+                    if params.sampling_temperature != 0.0:
+                        token_out += (log(-log(mtf.random_uniform(params.mesh, token_out.shape, maxval=1,
+                                                                  minval=1e-9, dtype=tf.float32))),
+                                      *constant_scalar(params, -params.sampling_temperature))
+                    token_out = argmax(token_out, params.vocab_dims)
                     token_out = mtf.shift(token_out, offset=1, dim=params.sequence_dim, wrap=False)
 
                     return (position + 1, weighted_add(token_out, token_x, one_hot_mask), token_y)
 
                 initial_pos = mtf.constant(params.mesh, value=params.initial_autoregressive_position, dtype=tf.int32)
                 token_initial_pos_mask = mtf.less_equal(mtf.range(params.mesh, params.sequence_dim, dtype=tf.int32),
-                                                  initial_pos)
+                                                        initial_pos)
                 token_initial_pos_mask = mtf.cast(token_initial_pos_mask, tf.int32)
 
                 if params.debug_sample:
@@ -245,7 +251,6 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
             update_ops, learning_rate, debug_gradients_dict = get_optimizer(loss_list, params, manual_global_step)
         else:
-
             if params.use_language:
                 token_out = mtf.anonymize(token_out)
             if params.use_video:
@@ -308,9 +313,9 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             if accuracy is not None:
                 log_dict['accuracy'] = tf.cast(lowering.export_to_tf_tensor(accuracy), tf.float32)
 
-            global_step = tf.train.get_or_create_global_step()
+            global_step = tf1.train.get_or_create_global_step()
 
-            step = tf.mod(manual_global_step + 1, tf.constant(params.grad_accumulation, dtype=tf.int64))
+            step = tf.math.mod(manual_global_step + 1, tf.constant(params.grad_accumulation, dtype=tf.int64))
             step = tf.equal(step, tf.constant(0, dtype=tf.int64))
             step = tf.cast(step, tf.int64)
 
@@ -326,30 +331,29 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 comput_ops.append(add_histogram(tf_loss=tf_loss, value=debug_gradients_dict,
                                                 global_step=global_step))
 
-            comput_ops.extend([tf.assign_add(global_step, step),
-                               tf.assign_add(manual_global_step, tf.constant(1, dtype=tf.int64, shape=[]))])
+            comput_ops.extend([tf1.assign_add(global_step, step),
+                               tf1.assign_add(manual_global_step, tf.constant(1, dtype=tf.int64, shape=[]))])
 
             comput_ops = comput_ops + [lowering.lowered_operation(op) for op in update_ops]
 
             hooks.append(mtf.MtfRestoreHook(lowering))
             with mtf.utils.outside_all_rewrites():
                 if params.use_checkpointing:
-                    saver = tf.train.Saver(tf.global_variables(),
-                                           sharded=True,
-                                           max_to_keep=params.max_checkpoints_keep,
-                                           defer_build=False,
-                                           save_relative_paths=True)
-                    tf.add_to_collection(tf.GraphKeys.SAVERS, saver)
-                    hooks.append(tf.train.CheckpointSaverHook(params.model_path,
-                                                              save_steps=params.steps_per_checkpoint,
-                                                              saver=saver,
-                                                              listeners=[mtf.MtfCheckpointSaverListener(lowering)],
-                                                              save_graph_def=params.save_graph))
+                    saver = tf1.train.Saver(tf1.global_variables(),
+                                            sharded=True,
+                                            max_to_keep=params.max_checkpoints_keep,
+                                            defer_build=False,
+                                            save_relative_paths=True)
+                    tf1.add_to_collection(tf1.GraphKeys.SAVERS, saver)
+                    hooks.append(tf1.train.CheckpointSaverHook(params.model_path,
+                                                               save_steps=params.steps_per_checkpoint,
+                                                               saver=saver,
+                                                               listeners=[mtf.MtfCheckpointSaverListener(lowering)],
+                                                               save_graph_def=params.save_graph))
                     ckpt = checkpoint_management.get_checkpoint_state(params.model_path)
                     if ckpt is not None:
                         color_print(params, "Recovering last checkpoints...")
                         saver.recover_last_checkpoints(ckpt.all_model_checkpoint_paths)
-
                 ret = tf.group(comput_ops)
 
         else:  # train == 'sample'
@@ -445,7 +449,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         hosts_to_hold_ds = [num_hosts - 1]
 
     sub_batch_size = batch_size // len(hosts_to_hold_ds)
-    tf.logging.info("MTF sub_batch_size: {}".format(sub_batch_size))
+    tf1.logging.info("MTF sub_batch_size: {}".format(sub_batch_size))
     assert sub_batch_size * len(hosts_to_hold_ds) == batch_size
 
     # Slots for all laidout tensors.
@@ -490,7 +494,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             options.experimental_threading.private_threadpool_size = 48
             options.experimental_distribute.auto_shard_policy = AutoShardPolicy.AUTO
             dataset: Dataset = dataset.with_options(options)
-            _ds_iterator = tf.compat.v1.data.make_initializable_iterator(dataset)
+            _ds_iterator = tf1.data.make_initializable_iterator(dataset)
             ds_iterator.append(_ds_iterator)
             all_input_tensors = _ds_iterator.get_next()
 
@@ -561,10 +565,10 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         # if params.write_summary:
         flush_summary = summary.flush()
 
-        with tf.train.MonitoredTrainingSession(master=cluster_resolver.master(),
-                                               hooks=[ckpt_loader_hook,
-                                                      tf.train.StepCounterHook(every_n_steps=10)] + hooks,
-                                               config=session_config) as sess:
+        with tf1.train.MonitoredTrainingSession(master=cluster_resolver.master(),
+                                                hooks=[ckpt_loader_hook,
+                                                       tf1.train.StepCounterHook(every_n_steps=10)] + hooks,
+                                                config=session_config) as sess:
             color_print(params, f"Connected after {time.time() - start_time:.1f}s")
             color_print(params, 'Compiling computation...')
             now = time.time()
@@ -612,9 +616,9 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     # We don't need output other than from core 0.
                     outfeed_dequeue_ops.append([tf.reduce_mean(x) for x in outfeed_dequeue_op]
                                                if outfeed_dequeue_ops else outfeed_dequeue_op)
-        with tf.train.MonitoredSession(session_creator=tf.train.ChiefSessionCreator(master=cluster_resolver.master(),
-                                                                                    config=session_config),
-                                       hooks=[ckpt_loader_hook, hooks[0]]) as sess:
+        with tf1.train.MonitoredSession(session_creator=tf1.train.ChiefSessionCreator(master=cluster_resolver.master(),
+                                                                                      config=session_config),
+                                        hooks=[ckpt_loader_hook, hooks[0]]) as sess:
             color_print(params, f"Connected after {time.time() - start_time:.1f}s")
 
             color_print(params, "Initializing inputs...")
