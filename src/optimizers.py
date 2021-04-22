@@ -181,7 +181,6 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                                             g_square.append(einsum([g, g], output_shape=[]))
 
                                         grad = add_n(all_grads)
-                                        del first_grad[op.name]
 
                                 elif params.multi_loss_strategy == "mgda":
                                     if 'body' in op.name:
