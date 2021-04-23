@@ -19,5 +19,6 @@ Finally, start a TPU to kick off a training run using `python3 main.py --model c
 * Intial code forked from [Eleuther AI's GPT-Neo](https://github.com/EleutherAI/gpt-neo)
 
 We also want to explicitly thank 
-* [tensorfork](https://www.tensorfork.com/) and [TFRC](https://www.tensorflow.org/tfrc) for providing us with the required compute
-* [Ben Wang (kindiana)](https://github.com/kingoflolz) and [Shawn Presser](https://twitter.com/theshawwn) for their invaluable knowledge about TensorFlow and TPU 
+* [tensorfork](https://www.tensorfork.com/) and [TFRC](https://www.tensorflow.org/tfrc) for providing us with the required compute (TPUs)
+* [Ben Wang (kindiana)](https://github.com/kingoflolz) and [Shawn Presser](https://twitter.com/theshawwn) for their invaluable knowledge about TensorFlow, TPU, and language models 
+* [Tri Songz](https://github.com/trisongz/) and [Aleph Alpha](https://aleph-alpha.de/) for financing our storage and servers
