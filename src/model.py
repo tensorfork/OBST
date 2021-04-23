@@ -413,7 +413,6 @@ def _block_part_fn(params: ModelParameter, block_part_config: BlockConfig, block
 
     return out
 
-
 class RevGradOp(mtf.Operation):
     """Operation to implement custom gradients.
 
@@ -669,7 +668,8 @@ def build(params: ModelParameter,
 
             if params.calc_accuracy:
                 accuracy = einsum([cast(mtf.equal(argmax(mtf.stop_gradient(token_out), params.vocab_dims), txt_tgt),
-                                        tf.float32), txt_msk, cat_msk_tgt, size], output_shape=[])
+                                        params.variable_dtype.activation_dtype), txt_msk, cat_msk_tgt, size],
+                                  output_shape=[])
 
         if params.use_video:
             size = constant_scalar(params, 1 / frame_out.size)
