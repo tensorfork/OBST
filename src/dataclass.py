@@ -62,6 +62,8 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.slice_dtype = "float32"
         self.calculation_dtype = "float32"
         self.train_batch_size = 1
+        self.grad_accumulation = 1
+        self.macro_batching = 1
         self.current_step = 0
         self.batch_splits = 1
         self.head_splits = 32.
@@ -86,7 +88,6 @@ class ModelParameter(typing.Dict[str, typing.Any]):
                                                  }
         self.language_token_per_frame = 0
         self.weight_decay = 0.001
-        self.grad_accumulation = 1
         self.train_steps = 150_000
         self.warmup_steps = 3000
         self.learning_rate_decay_multi = 1
@@ -104,7 +105,6 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.gradient_clip = -1
         self.group_linear_factor = 2
         self.embedding_stddev = 0.04
-        self.summary_flush_interval = 1024
         self.debug_train_step = False
         self.model_mode = 'jannet'
         self.optimizer = 'adam'
@@ -133,6 +133,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.num_hosts = 0
         self.num_cores_per_host = 0
         self.masked_attention_dimensions = [0]
+        self.log_dict_keys = []
 
         if hasattr(config, 'dict'):
             config = config.dict()
@@ -169,6 +170,9 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         if not self.use_video and self.language_token_per_frame != self.n_ctx:
             print(f"language_token_per_frame is unused in language-only mode. Overwriting with n_ctx={self.n_ctx}")
             self.language_token_per_frame = self.n_ctx
+        if self.macro_batching > 1 and self.grad_accumulation > 1 and self.macro_batching % self.grad_accumulation != 0:
+            raise ValueError(f'"macro_batching" needs do be divisible by "grad_accumulation", '
+                             f'{self.macro_batching} is not divisible by {self.grad_accumulation}')
         split_batch = self.batch_splits > 1
         split_heads = self.head_splits > 1
         if not hasattr(self, 'split_vocab'):
