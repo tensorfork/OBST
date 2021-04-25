@@ -101,7 +101,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 for _inp_idx, _inp in enumerate(args):
                     slice_shape = [loop_idx] + [0 for _ in range(len(_inp.shape) - 1)]
                     size_shape = list(_inp.shape)
-                    size_shape[0] = params.train_batch_size
+                    size_shape[0] = params.train_batch_size // params.batch_splits
 
                     args[_inp_idx] = tf.slice(_inp, slice_shape, size_shape)
 
