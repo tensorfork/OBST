@@ -17,7 +17,7 @@ from .utils_core import default
 from .utils_mtf import (ACTIVATIONS, OPT_DIMS, SHAPE, activate, add_n, anonymize, anonymize_dim, argmax, cast, concat,
                         constant_scalar, deduplicate, dropout, einsum, exp, feature_dims_used, log, mtf_range, one_hot,
                         ones, random_name, reciprocal, reduce_max, reduce_mean, reduce_sum, rsqrt, scoped, sigmoid,
-                        sign, slice, text_embed, zeros_like)
+                        sign, slice, text_embed, zeros_like, reduce_logsumexp)
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -557,7 +557,7 @@ def build(params: ModelParameter,
         vid_msk_src = _default_ones(params, vid_msk_src)
         vid_msk_tgt = _default_ones(params, vid_msk_tgt)
         txt_msk = _default_ones(params, txt_msk)
-        if vid is not None:
+        if vid is not None and not params.use_discread_video_loss:
             vid = mtf.cast(vid, params.variable_dtype.activation_dtype)
 
         video_loss: typing.Union[int, mtf.Tensor] = 0
@@ -574,6 +574,15 @@ def build(params: ModelParameter,
             input_features = vid.shape[-1:]
             tgt = slice(vid, 1, context_dimension.size, context_dimension)
             src = slice(vid, 0, context_dimension.size - 1, context_dimension)
+
+            if params.use_discread_video_loss:
+                src = mtf.cast(src, params.variable_dtype.activation_dtype) / (params.color_quantization_value - 1)
+
+                tgt = mtf.reshape(tgt, new_shape=mtf.Shape([params.batch_dim,
+                                                            params.sequence_per_head_dim,
+                                                            params.head_dim]
+                                                           + tgt.shape[2:]))
+
             src = src * vid_msk_src + _embed(params, shape=vid.shape[2:]) * (1 - vid_msk_src)
             src = src * cat_msk_src + _embed(params, shape=vid.shape[2:]) * (1 - cat_msk_src)
 
@@ -644,7 +653,19 @@ def build(params: ModelParameter,
             for config_idx, config in enumerate(params.output_block_config):
                 frame_out = _block_part_fn(params, config, frame_out, f'vid_out{config_idx}')
 
-            frame_out = sigmoid(_linear_from_features(params, frame_out, vid.shape[-1:]))
+            if params.use_discread_video_loss:
+
+                features_dim = mtf.Dimension("features", frame_out.shape[-1].size * frame_out.shape[-2].size)
+                frame_out = mtf.reshape(frame_out, new_shape=mtf.Shape(frame_out.shape[:-2] + [features_dim]))
+                frame_out = mtf.reshape(frame_out, new_shape=mtf.Shape([params.batch_dim,
+                                                                        params.sequence_per_head_dim,
+                                                                        params.head_dim] + frame_out.shape[2:]))
+
+                frame_out = _linear(params, frame_out, old=[features_dim],
+                                                       new=vid.shape[-1:] + [params.discread_color_dim])
+
+            else:
+                frame_out = sigmoid(_linear_from_features(params, frame_out, vid.shape[-1:]))
 
         loss_list = []
         accuracy = None
@@ -672,9 +693,26 @@ def build(params: ModelParameter,
                                   output_shape=[])
 
         if params.use_video:
-            size = constant_scalar(params, 1 / frame_out.size)
-            out = frame_out - tgt
-            video_loss: mtf.Tensor = einsum([out, vid_msk_tgt, cat_msk_tgt, size, sign(out)], output_shape=[])
+
+            if params.use_discread_video_loss:
+
+                mak_per_head_shape = mtf.Shape([params.batch_dim, params.sequence_per_head_dim, params.head_dim])
+                _vid_msk_tgt = mtf.reshape(vid_msk_tgt, new_shape=mak_per_head_shape)
+                _cat_msk_tgt = mtf.reshape(cat_msk_tgt, new_shape=mak_per_head_shape)
+
+                video_size = constant_scalar(params, 1 / tgt.size)
+                video_target = one_hot(tgt, params.discread_color_dim, dtype=params.variable_dtype.activation_dtype)
+                video_loss = einsum([reduce_logsumexp(frame_out, reduced_dim=params.discread_color_dim), video_size,
+                                     _vid_msk_tgt, _cat_msk_tgt], output_shape=[params.head_dim])
+                video_loss += einsum([token_out, video_target, video_size, constant_scalar(params, -1),
+                                      _vid_msk_tgt, _cat_msk_tgt], output_shape=[params.head_dim])
+                video_loss = reduce_sum(video_loss, output_shape=[])
+
+            else:
+                size = constant_scalar(params, 1 / frame_out.size)
+                out = frame_out - tgt
+                video_loss: mtf.Tensor = einsum([out, vid_msk_tgt, cat_msk_tgt, size, sign(out)], output_shape=[])
+
             loss_list.append(video_loss)
 
             if vid_msk_tgt is not None:

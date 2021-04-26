@@ -23,7 +23,8 @@ def split_files(path, slice_index, slice_count, seed):
     return files[slice_index::slice_count]
 
 
-def get_video_decoder(language_token_num_per_frame=0, frame_height=None, frame_width=None, color_channels=None):
+def get_video_decoder(language_token_num_per_frame=0, frame_height=None, frame_width=None, color_channels=None,
+                      color_quantization_value=256):
     '''
     :param language_token_num_per_frame: The number of language tokens per single frame.
     If this is 0 (default) language tokens are disabled.
@@ -65,6 +66,11 @@ def get_video_decoder(language_token_num_per_frame=0, frame_height=None, frame_w
 
         if skip_frame > 0 or concat > 0:
             frame = tf.zeros(shape=(frame_height, frame_width, color_channels), dtype=tf.uint8)
+
+        if color_quantization_value != 256:
+            frame = tf.cast(frame, dtype=tf.float32)
+            frame = tf.round(frame * ((color_quantization_value - 1) / 255))
+            frame = tf.cast(frame, dtype=tf.uint8)
 
         if decode_language_token:
             tokens = sample['tokens']
@@ -310,7 +316,8 @@ def dataset_video(path: str, params: ModelParameter, sub_batch_size: int, slice_
         interleave_func = lambda x, y: tf.data.Dataset.zip((x, y)).batch(n_ctx + time_patch, drop_remainder=True)
 
     frame_decoder = get_video_decoder(language_token_num_per_frame=language_token_per_frame,
-                                      frame_height=frame_height, frame_width=frame_width, color_channels=color_channels)
+                                      frame_height=frame_height, frame_width=frame_width, color_channels=color_channels,
+                                      color_quantization_value=params.color_quantization_value)
 
     data: Dataset = tf.data.Dataset.from_tensor_slices(split_files(path, slice_index, slice_count,
                                                                    params.data_seed * params.shuffle_input_filenames))
@@ -333,7 +340,11 @@ def dataset(params: ModelParameter, sub_batch_size, slice_index, slice_count):
     """
 
     def memory_op(x):
-        x['frame'] = tf.cast(x['frame'], params.calculation_dtype) / 255
+        if not params.use_discread_video_loss:
+            x['frame'] = tf.cast(x['frame'], params.variable_dtype.activation_dtype) / \
+                         (params.color_quantization_value - 1)
+        else:
+            x['frame'] = tf.cast(x['frame'], tf.int32)
         return x
 
     weights = []
