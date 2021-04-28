@@ -704,7 +704,7 @@ def build(params: ModelParameter,
                 video_target = one_hot(tgt, params.discread_color_dim, dtype=params.variable_dtype.activation_dtype)
                 video_loss = einsum([reduce_logsumexp(frame_out, reduced_dim=params.discread_color_dim), video_size,
                                      _vid_msk_tgt, _cat_msk_tgt], output_shape=[params.head_dim])
-                video_loss += einsum([token_out, video_target, video_size, constant_scalar(params, -1),
+                video_loss += einsum([frame_out, video_target, video_size, constant_scalar(params, -1),
                                       _vid_msk_tgt, _cat_msk_tgt], output_shape=[params.head_dim])
                 video_loss = reduce_sum(video_loss, output_shape=[])
 
