@@ -202,7 +202,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.head_dim = mtf.Dimension("heads", self.n_head)
         self.head_dimensions = [self.head_dim]
         self.key_dim = mtf.Dimension("features_per_head", self.n_embd // self.n_head)
-        self.sequence_per_head_dim = mtf.Dimension("sequence_per_head", self.time_patch_size // self.head_splits)
+        self.sequence_per_head_dim = mtf.Dimension("sequence_per_head", self.time_patch_size // self.n_head)
 
         self.feature_dims = self.head_dimensions + [self.key_dim]
 
