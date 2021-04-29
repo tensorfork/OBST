@@ -1,11 +1,10 @@
 import typing
 
 import mesh_tensorflow as mtf
-import numpy as np
 import tensorflow as tf
 
 from .dataclass import ModelParameter
-from .utils_core import default
+from .utils_core import default, int_reduce_mul
 
 tf1 = tf.compat.v1
 _NAME_INDEX = [0]
@@ -56,21 +55,16 @@ def one_hot(indices: mtf.Tensor, output_dim: mtf.Dimension, on_value: float = 1.
     return scoped("one_hot", mtf.one_hot, indices, output_dim, on_value, off_value, dtype)
 
 
-def argmax(tensor: mtf.Tensor, dims: typing.List[mtf.Dimension]) -> mtf.Tensor:
-    sizes = list(np.cumprod([1] + [d.size for d in dims][:-1]))
-    dims = sorted(zip(dims, sizes), key=lambda x: x[0].size)
-    dims.reverse()
-    dim, size = dims.pop(0)
-    val, ind = mtf.top_1(tensor, dim)
-    ind *= size
-    for dim, size in dims:
-        val, ind0 = mtf.top_1(val, dim)
-        ind = mtf.einsum([ind, one_hot(ind0, dim, dtype=ind.dtype)], reduced_dims=[dim])
-        ind += ind0 * size
-    return ind
+def head_argmax(params: ModelParameter, tensor: mtf.Tensor, dims: typing.List[mtf.Dimension]) -> mtf.Tensor:
+    if params.head_dim in dims:
+        new_dim = mtf.Dimension(params.head_dim.name, int_reduce_mul(*(d.size for d in dims)))
+        return mtf.argmax(mtf.reshape(tensor, tensor.shape - dims + new_dim), new_dim)
+    if len(dims) == 1:
+        return mtf.argmax(tensor, dims[0])
+    raise ValueError(f"No known argmax template for tensor with shape {tensor.shape} and dims {dims}")
 
 
-def text_embed(params: ModelParameter, int_tokens: mtf.Tensor) -> typing.Tuple[mtf.Tensor, mtf.Tensor]:
+def head_embed(params: ModelParameter, int_tokens: mtf.Tensor) -> typing.Tuple[mtf.Tensor, mtf.Tensor]:
     return (one_hot(floordiv(int_tokens, params.vocab_size), params.head_dim,
                     dtype=params.variable_dtype.activation_dtype),
             one_hot(mod(int_tokens, params.vocab_size), params.vocab_dim,

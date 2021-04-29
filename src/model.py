@@ -14,10 +14,10 @@ from tensorflow.python.ops.init_ops import Initializer
 
 from .dataclass import BlockConfig, ModelParameter
 from .utils_core import default
-from .utils_mtf import (ACTIVATIONS, OPT_DIMS, SHAPE, activate, add_n, anonymize, anonymize_dim, argmax, cast, concat,
+from .utils_mtf import (ACTIVATIONS, OPT_DIMS, SHAPE, activate, add_n, anonymize, anonymize_dim, head_argmax, cast, concat,
                         constant_scalar, deduplicate, dropout, einsum, exp, feature_dims_used, log, mtf_range, one_hot,
                         ones, random_name, reciprocal, reduce_logsumexp, reduce_max, reduce_mean, reduce_sum, rsqrt,
-                        scoped, sigmoid, sign, slice, text_embed, zeros_like)
+                        scoped, sigmoid, sign, slice, head_embed, zeros_like)
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -595,7 +595,7 @@ def build(params: ModelParameter,
         # Language embedding and initial feed forward.
         if params.use_language:
             txt = einsum([_embed(params, [params.head_dim, params.vocab_dim] + params.intermediate),
-                          *text_embed(params, txt_src)], reduced_dims=[params.vocab_dim, params.head_dim])
+                          *head_embed(params, txt_src)], reduced_dims=[params.vocab_dim, params.head_dim])
 
             if params.input_dropout > 0:
                 txt = dropout(txt, rate=params.input_dropout)
@@ -676,7 +676,7 @@ def build(params: ModelParameter,
             msk = txt_msk * cat_msk_tgt * (1 / txt_tgt.size)
             token_loss = einsum([log(reduce_sum(exp(token_out - max_logit), output_shape=reduced_shape)), msk],
                                 output_shape=[])
-            token_loss += einsum([token_out, *text_embed(params, txt_tgt), constant_scalar(params, -1), msk],
+            token_loss += einsum([token_out, *head_embed(params, txt_tgt), constant_scalar(params, -1), msk],
                                  output_shape=[])
             token_loss += einsum([max_logit, msk], output_shape=[])
             loss_list.append(token_loss)
@@ -687,7 +687,7 @@ def build(params: ModelParameter,
                                      mtf.stop_gradient(token_loss)], output_shape=[])
 
             if params.calc_accuracy:
-                accuracy = einsum([cast(mtf.equal(argmax(mtf.stop_gradient(token_out), params.vocab_dims), txt_tgt),
+                accuracy = einsum([cast(mtf.equal(head_argmax(mtf.stop_gradient(token_out), params.vocab_dims), txt_tgt),
                                         params.variable_dtype.activation_dtype), msk],
                                   output_shape=[])
 

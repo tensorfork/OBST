@@ -12,6 +12,7 @@ import tensorflow as tf
 from tpuapi import TPUServiceAPI
 
 
+
 def str2bool(v: str) -> bool:
     if isinstance(v, bool):
         return v

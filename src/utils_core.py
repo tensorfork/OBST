@@ -1,10 +1,12 @@
 """
 Generic utility functions that are called frequently across modules.
 """
-import typing
+import functools
 import os
-import pytz
+import typing
 from datetime import datetime, timezone
+
+import pytz
 
 from .dataclass import ModelParameter
 
@@ -42,3 +44,9 @@ def timestamp(now=None, tz=None):
 
 def color_print(params: ModelParameter, string):
     print(f"{params.own_color}{timestamp()} {string}{params.other_color}", flush=True)
+
+
+def int_reduce_mul(*integers: typing.Union[typing.List[typing.Iterable[int]], typing.List[int]]) -> int:
+    if isinstance(integers[0], typing.Iterable):
+        integers = integers[0]
+    return functools.reduce(int.__mul__, integers)
