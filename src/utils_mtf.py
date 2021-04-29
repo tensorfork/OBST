@@ -57,7 +57,7 @@ def one_hot(indices: mtf.Tensor, output_dim: mtf.Dimension, on_value: float = 1.
 
 
 def head_argmax(tensor: mtf.Tensor, dims: typing.List[mtf.Dimension]) -> mtf.Tensor:
-    sizes = list(np.cumprod([1] + [d.size for d in dims][1:]))
+    sizes = list(np.cumprod([1] + [d.size for d in dims][:-1]))
     dims = sorted(zip(dims, sizes), key=lambda x: x[0].size)
     dims.reverse()
     dim, size = dims.pop(0)
@@ -65,8 +65,7 @@ def head_argmax(tensor: mtf.Tensor, dims: typing.List[mtf.Dimension]) -> mtf.Ten
     ind *= size
     for dim, size in dims:
         val, ind0 = mtf.top_1(val, dim)
-        ind = mtf.einsum([ind, one_hot(ind0, dim, dtype=ind.dtype)], reduced_dims=[dim])
-        ind += ind0 * size
+        ind = mtf.einsum([ind, one_hot(ind0, dim, dtype=ind.dtype)], reduced_dims=[dim]) * size + ind0
     return ind
 
 
