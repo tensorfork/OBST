@@ -1,7 +1,6 @@
 import typing
 
 import mesh_tensorflow as mtf
-import numpy as np
 import tensorflow as tf
 
 from .dataclass import ModelParameter
@@ -57,15 +56,15 @@ def one_hot(indices: mtf.Tensor, output_dim: mtf.Dimension, on_value: float = 1.
 
 
 def head_argmax(tensor: mtf.Tensor, dims: typing.List[mtf.Dimension]) -> mtf.Tensor:
-    sizes = list(np.cumprod([1] + [d.size for d in dims][:-1]))
-    dims = sorted(zip(dims, sizes), key=lambda x: x[0].size)
+    dims = sorted(dims, key=lambda x: x.size)
     dims.reverse()
-    dim, size = dims.pop(0)
+    dim = dims.pop(0)
     val, ind = mtf.top_1(tensor, dim)
-    ind *= size
-    for dim, size in dims:
+    size = dim.size
+    for dim in dims:
         val, ind0 = mtf.top_1(val, dim)
         ind = mtf.einsum([ind, one_hot(ind0, dim, dtype=ind.dtype)], reduced_dims=[dim]) * size + ind0
+        size = dim.size
     return ind
 
 
