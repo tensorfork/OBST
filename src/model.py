@@ -16,8 +16,8 @@ from .dataclass import BlockConfig, ModelParameter
 from .utils_core import default
 from .utils_mtf import (ACTIVATIONS, OPT_DIMS, SHAPE, activate, add_n, anonymize, anonymize_dim, argmax, cast, concat,
                         constant_scalar, deduplicate, dropout, einsum, exp, feature_dims_used, log, mtf_range, one_hot,
-                        ones, random_name, reciprocal, reduce_max, reduce_mean, reduce_sum, rsqrt, scoped, sigmoid,
-                        sign, slice, text_embed, zeros_like, reduce_logsumexp)
+                        ones, random_name, reciprocal, reduce_logsumexp, reduce_max, reduce_mean, reduce_sum, rsqrt,
+                        scoped, sigmoid, sign, slice, text_embed, zeros_like)
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -413,6 +413,7 @@ def _block_part_fn(params: ModelParameter, block_part_config: BlockConfig, block
 
     return out
 
+
 class RevGradOp(mtf.Operation):
     """Operation to implement custom gradients.
 
@@ -557,7 +558,7 @@ def build(params: ModelParameter,
         vid_msk_src = _default_ones(params, vid_msk_src)
         vid_msk_tgt = _default_ones(params, vid_msk_tgt)
         txt_msk = _default_ones(params, txt_msk)
-        if vid is not None and not params.use_discread_video_loss:
+        if vid is not None and not params.use_discrete_video_loss:
             vid = mtf.cast(vid, params.variable_dtype.activation_dtype)
 
         video_loss: typing.Union[int, mtf.Tensor] = 0
@@ -575,7 +576,7 @@ def build(params: ModelParameter,
             tgt = slice(vid, 1, context_dimension.size, context_dimension)
             src = slice(vid, 0, context_dimension.size - 1, context_dimension)
 
-            if params.use_discread_video_loss:
+            if params.use_discrete_video_loss:
                 src = mtf.cast(src, params.variable_dtype.activation_dtype) / (params.color_quantization_value - 1)
 
                 tgt = mtf.reshape(tgt, new_shape=mtf.Shape([params.batch_dim,
@@ -653,16 +654,15 @@ def build(params: ModelParameter,
             for config_idx, config in enumerate(params.output_block_config):
                 frame_out = _block_part_fn(params, config, frame_out, f'vid_out{config_idx}')
 
-            if params.use_discread_video_loss:
+            if params.use_discrete_video_loss:
 
                 features_dim = mtf.Dimension("features", frame_out.shape[-1].size * frame_out.shape[-2].size)
-                frame_out = mtf.reshape(frame_out, new_shape=mtf.Shape(frame_out.shape[:-2] + [features_dim]))
-                frame_out = mtf.reshape(frame_out, new_shape=mtf.Shape([params.batch_dim,
-                                                                        params.sequence_per_head_dim,
-                                                                        params.head_dim] + frame_out.shape[2:]))
+                frame_out = mtf.reshape(frame_out, frame_out.shape[:-2] + [features_dim])
+                frame_out = mtf.reshape(frame_out,
+                                        [params.batch_dim, params.sequence_per_head_dim, params.head_dim]
+                                        + frame_out.shape[2:])
 
-                frame_out = _linear(params, frame_out, old=[features_dim],
-                                                       new=vid.shape[-1:] + [params.discread_color_dim])
+                frame_out = _linear(params, frame_out, [features_dim], vid.shape[-1:] + [params.discrete_color_dim])
 
             else:
                 frame_out = sigmoid(_linear_from_features(params, frame_out, vid.shape[-1:]))
@@ -671,15 +671,14 @@ def build(params: ModelParameter,
         accuracy = None
 
         if params.use_language:
-            size = constant_scalar(params, 1 / txt_tgt.size)
-
             reduced_shape = token_out.shape - params.vocab_dims
             max_logit = reduce_max(mtf.stop_gradient(token_out), output_shape=reduced_shape)
-            token_loss = einsum([log(reduce_sum(exp(token_out - max_logit), output_shape=reduced_shape)), size, txt_msk,
-                                 cat_msk_tgt], output_shape=[])
-            token_loss += einsum([token_out, *text_embed(params, txt_tgt), size, constant_scalar(params, -1), txt_msk,
-                                  cat_msk_tgt], output_shape=[])
-            token_loss += einsum([max_logit, size, txt_msk, cat_msk_tgt], output_shape=[])
+            msk = txt_msk * cat_msk_tgt * (1 / txt_tgt.size)
+            token_loss = einsum([log(reduce_sum(exp(token_out - max_logit), output_shape=reduced_shape)), msk],
+                                output_shape=[])
+            token_loss += einsum([token_out, *text_embed(params, txt_tgt), constant_scalar(params, -1), msk],
+                                 output_shape=[])
+            token_loss += einsum([max_logit, msk], output_shape=[])
             loss_list.append(token_loss)
 
             if txt_msk is not None:
@@ -689,20 +688,20 @@ def build(params: ModelParameter,
 
             if params.calc_accuracy:
                 accuracy = einsum([cast(mtf.equal(argmax(mtf.stop_gradient(token_out), params.vocab_dims), txt_tgt),
-                                        params.variable_dtype.activation_dtype), txt_msk, cat_msk_tgt, size],
+                                        params.variable_dtype.activation_dtype), msk],
                                   output_shape=[])
 
         if params.use_video:
 
-            if params.use_discread_video_loss:
+            if params.use_discrete_video_loss:
 
                 mak_per_head_shape = mtf.Shape([params.batch_dim, params.sequence_per_head_dim, params.head_dim])
                 _vid_msk_tgt = mtf.reshape(vid_msk_tgt, new_shape=mak_per_head_shape)
                 _cat_msk_tgt = mtf.reshape(cat_msk_tgt, new_shape=mak_per_head_shape)
 
                 video_size = constant_scalar(params, 1 / tgt.size)
-                video_target = one_hot(tgt, params.discread_color_dim, dtype=params.variable_dtype.activation_dtype)
-                video_loss = einsum([reduce_logsumexp(frame_out, reduced_dim=params.discread_color_dim), video_size,
+                video_target = one_hot(tgt, params.discrete_color_dim, dtype=params.variable_dtype.activation_dtype)
+                video_loss = einsum([reduce_logsumexp(frame_out, reduced_dim=params.discrete_color_dim), video_size,
                                      _vid_msk_tgt, _cat_msk_tgt], output_shape=[params.head_dim])
                 video_loss += einsum([frame_out, video_target, video_size, constant_scalar(params, -1),
                                       _vid_msk_tgt, _cat_msk_tgt], output_shape=[params.head_dim])

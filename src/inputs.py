@@ -340,7 +340,7 @@ def dataset(params: ModelParameter, sub_batch_size, slice_index, slice_count):
     """
 
     def memory_op(x):
-        if not params.use_discread_video_loss:
+        if not params.use_discrete_video_loss:
             x['frame'] = tf.cast(x['frame'], params.variable_dtype.activation_dtype) / \
                          (params.color_quantization_value - 1)
         else:

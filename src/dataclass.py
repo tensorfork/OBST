@@ -106,7 +106,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.group_linear_factor = 2
         self.embedding_stddev = 0.04
         self.color_quantization_value = 256
-        self.use_discread_video_loss = False
+        self.use_discrete_video_loss = False
         self.debug_train_step = False
         self.model_mode = 'jannet'
         self.optimizer = 'adam'
@@ -247,8 +247,8 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             self.input_pipeline_shape['vid_msk_src'] = self.frame_mask_shape
             self.input_pipeline_shape['vid_msk_tgt'] = self.frame_mask_shape
 
-            self.discread_dim = [mtf.Dimension("discread", self.channel_color_size * self.color_quantization_value)]
-            self.discread_color_dim = mtf.Dimension("color_quantization", self.color_quantization_value)
+            self.discrete_dim = [mtf.Dimension("discrete", self.channel_color_size * self.color_quantization_value)]
+            self.discrete_color_dim = mtf.Dimension("color_quantization", self.color_quantization_value)
 
         if self.use_language:
             self.input_pipeline_shape['token_x'] = self.token_dim_shape
