@@ -21,7 +21,7 @@ from .dataclass import ModelParameter
 from .model import build
 from .optimizers import get_optimizer
 from .utils_core import color_print
-from .utils_mtf import head_argmax, concat, constant_scalar, log, pad, slice, to_float, weighted_add
+from .utils_mtf import concat, constant_scalar, head_argmax, log, pad, slice, to_float, weighted_add
 
 tf1 = tf.compat.v1
 
@@ -183,10 +183,12 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                        to_float(mtf.argmax(padding_token, reduced_dim=tkn_per_frame)),
                                                        output_shape=token_out.shape)
 
-                            token_mask = weighted_add(mtf.reshape(to_float(token_pad), new_shape=params.token_dim_shape),
-                                                      to_float(token_mask), one_hot_sequence)
+                            token_mask = weighted_add(
+                                mtf.reshape(to_float(token_pad), new_shape=params.token_dim_shape),
+                                to_float(token_mask), one_hot_sequence)
 
-                            frame_pad = to_float(mtf.greater(mtf.reduce_sum(padding_token, reduced_dim=tkn_per_frame), 0))
+                            frame_pad = to_float(
+                                mtf.greater(mtf.reduce_sum(padding_token, reduced_dim=tkn_per_frame), 0))
                             token_x_input = weighted_add(frame_pad, to_float(token_x_input), one_hot_sequence)
 
                             token_x_input = mtf.cast(token_x_input, dtype=tf.int32)
@@ -222,14 +224,15 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                         one_hot_mask = mtf.one_hot(position, output_dim=params.sequence_dim, dtype=tf.int32)
                         if params.sampling_temperature != 0.0:
                             token_out += (log(-log(mtf.random_uniform(params.mesh, token_out.shape, maxval=1,
-                                                                      minval=1e-9, dtype=tf.float32))),
-                                          *constant_scalar(params, -params.sampling_temperature))
+                                                                      minval=1e-9, dtype=tf.float32)))
+                                          * constant_scalar(params, -params.sampling_temperature))
                         token_out = head_argmax(token_out, params.vocab_dims)
                         token_out = mtf.shift(token_out, offset=1, dim=params.sequence_dim, wrap=False)
 
                         return (position + 1, weighted_add(token_out, token_x, one_hot_mask), token_y)
 
-                    initial_pos = mtf.constant(params.mesh, value=params.initial_autoregressive_position, dtype=tf.int32)
+                    initial_pos = mtf.constant(params.mesh, value=params.initial_autoregressive_position,
+                                               dtype=tf.int32)
                     token_initial_pos_mask = mtf.less_equal(mtf.range(params.mesh, params.sequence_dim, dtype=tf.int32),
                                                             initial_pos)
                     token_initial_pos_mask = mtf.cast(token_initial_pos_mask, tf.int32)
@@ -246,7 +249,8 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 def cond_fn(position, *states):
                     is_done = mtf.greater_equal(position, steps)
                     is_done = mtf.logical_or(is_done,
-                                             mtf.greater_equal(position - params.initial_autoregressive_position, steps))
+                                             mtf.greater_equal(position - params.initial_autoregressive_position,
+                                                               steps))
                     is_done = mtf.reduce_sum(is_done)
 
                     return mtf.logical_not(is_done)
@@ -355,7 +359,6 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     comput_ops.extend([tf1.assign_add(global_step, step),
                                        tf1.assign_add(manual_global_step, tf.constant(1, dtype=tf.int64, shape=[]))])
 
-
                 hooks.append(mtf.MtfRestoreHook(lowering))
                 with mtf.utils.outside_all_rewrites():
                     if params.use_checkpointing:
@@ -392,16 +395,17 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     predictions['token_out'] = lowering.export_to_tf_tensor(token_out)
                     predictions['token_tgt'] = args[1 + int(params.use_video) * 5]
 
-                predictions = [val if val.dtype == tf.float32 else tf.cast(val, tf.float32) for val in predictions.values()]
+                predictions = [val if val.dtype == tf.float32 else tf.cast(val, tf.float32) for val in
+                               predictions.values()]
                 output_shapes.extend([pred.shape for pred in predictions])
                 hooks.append(mtf.MtfRestoreHook(lowering))
                 return tpu_ops.outfeed_enqueue_tuple(predictions)
 
-
         if params.train and params.macro_batching > 1:
             log_len = int(params.use_language) + int(params.use_video) + int(params.calc_accuracy) + 1
             loop_inputs = [tf.constant(0, dtype=tf.int32, shape=[]), tf.constant(0, dtype=tf.float32, shape=[])]
-            loop_inputs = loop_inputs + [tf.constant(0, dtype=tf.float32, shape=[]) for _ in range(log_len)] + list(args)
+            loop_inputs = loop_inputs + [tf.constant(0, dtype=tf.float32, shape=[]) for _ in range(log_len)] + list(
+                args)
 
             def con(i, *args):
                 return tf.less(i, tf.constant(params.macro_batching, dtype=tf.int32, shape=[]))
@@ -644,7 +648,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
                 sess.run(computation)
                 if params.debug_train_step or i < first_print_threshold:
-                    color_print(params, f"Current global step: {i//params.grad_accumulation}"
+                    color_print(params, f"Current global step: {i // params.grad_accumulation}"
                                         f"   accumulation step: {i % params.grad_accumulation}")
 
                 sess.run(enqueue_ops)
