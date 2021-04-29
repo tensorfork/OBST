@@ -662,7 +662,7 @@ def build(params: ModelParameter,
                                                                         params.head_dim] + frame_out.shape[2:]))
 
                 frame_out = _linear(params, frame_out, old=[features_dim],
-                                                       new=vid.shape[-1:] + [params.discread_color_dim])
+                                                       new=[vid.shape[-1], params.discread_color_dim])
 
             else:
                 frame_out = sigmoid(_linear_from_features(params, frame_out, vid.shape[-1:]))
