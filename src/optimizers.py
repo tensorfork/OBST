@@ -220,7 +220,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                             grad = weighted_add(grd_norm / wgt_norm * params.gradient_clip * grad, grad,
                                                 cast(greater(wgt_norm / grd_norm, params.gradient_clip), dtype))
                         elif params.gradient_clip > 0:
-                            grad = einsum([maximum(rsqrt(einsum([grad, grad], []) + 1e-6), 1 / params.gradient_clip),
+                            grad = einsum([minimum(rsqrt(einsum([grad, grad], []) + 1e-6), 1 / params.gradient_clip),
                                            grad, constant_scalar(params, params.gradient_clip)], grad.shape)
                         if var.shape.ndims <= 1 or params.optimizer == 'adam':
                             exp_avg_p2_ptr = variable(var, 'exp_avg_p2', var.shape)
