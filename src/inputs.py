@@ -85,7 +85,7 @@ def get_video_decoder(language_token_num_per_frame=0, frame_height=None, frame_w
     return tf.function(frame_decoder, experimental_compile=False)
 
 
-def _text_decoder(decoder, data: tf.Tensor, ctx: int, patch_size: int, chunk_size: int):
+def _text_decoder(decoder, data: tf.Tensor, ctx: int, patch_size: int, chunk_size: int, shuffle_buffer: int = 0):
     """
     Read a given tfrecord and windowed text dataset out of it.
     :param data: protobuf object to decode
@@ -99,10 +99,12 @@ def _text_decoder(decoder, data: tf.Tensor, ctx: int, patch_size: int, chunk_siz
         if chunk_size > 0:
             data = data.batch(chunk_size)
         data = data.window(size=ctx + patch_size, shift=ctx, stride=1, drop_remainder=True)
-        data = data.interleave(lambda x: x.batch(ctx + patch_size, drop_remainder=True))
+        if shuffle_buffer > 0:
+            data = data.shuffle(shuffle_buffer, reshuffle_each_iteration=True)
+        data = data.interleave(lambda x: x.batch(ctx + patch_size, drop_remainder=True), cycle_length=1)
         return data
 
-    return tf.data.TFRecordDataset(filenames=data).interleave(chunk)
+    return tf.data.TFRecordDataset(filenames=data).interleave(chunk, cycle_length=1)
 
 
 @tf.function
@@ -212,7 +214,7 @@ def dataset_text(path: str, params: ModelParameter, sub_batch_size: int, slice_i
                                                    patch_size=language_token_per_frame - 1,
                                                    chunk_size=-1))
 
-    data = data.shuffle(params.shuffle_buffer, seed=params.data_seed)
+    data = data.shuffle(params.shuffle_buffer, seed=(params.data_seed if not params.use_random_dataloader else None))
     data = tf.data.Dataset.zip((data, padding_token, padding_frame, padding_frame_mask, padding_cat_mask))
     data = data.batch(sub_batch_size)
     data = data.map(_memory_func, num_parallel_calls=tf.data.experimental.AUTOTUNE)
@@ -466,11 +468,12 @@ def gpt_neo_input(params, sub_batch_size, slice_index, slice_count):
 
     decoder = decode_intstring if 'int64' in filenames[0] else decode_bytestring
     dset = dset.interleave(lambda x: _text_decoder(decoder, x, params.n_ctx,
-                                                   params.token_patch_size * params.output_offset, -1),
+                                                   params.token_patch_size * params.output_offset, -1,
+                                                   params.shuffle_buffer * int(params.use_random_dataloader)),
                            cycle_length=params.interleaved_datasets,
                            num_parallel_calls=tf.data.experimental.AUTOTUNE)
 
-    dset = dset.shuffle(params.shuffle_buffer, seed=params.data_seed)
+    dset = dset.shuffle(params.shuffle_buffer, seed=(params.data_seed if not params.use_random_dataloader else None))
     dset = dset.batch(sub_batch_size)
     dset = dset.map(_memory_func)
     dset = dset.map(align_tensor_op)

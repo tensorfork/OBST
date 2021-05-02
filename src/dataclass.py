@@ -45,6 +45,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.three_axes = True
         self.dataset_configs = []
         self.data_seed = 456772
+        self.use_random_dataloader = False
         self.train = True
         self.debug_sample = False
         self.padding_token = 0
@@ -177,10 +178,8 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             raise ValueError(f'"macro_batching" needs do be divisible by "grad_accumulation", '
                              f'{self.macro_batching} is not divisible by {self.grad_accumulation}')
 
-        self.inf_data = False
-        if self.data_seed == 0:
+        if not self.use_random_dataloader:
             print('WARNING: Use random dataset seed')
-            self.inf_data = True
             for _ in range(random.randint(0, 1000)):
                 self.data_seed = random.randint(0, 1000000)
 
