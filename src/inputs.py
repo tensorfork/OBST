@@ -360,14 +360,14 @@ def dataset(params: ModelParameter, sub_batch_size, slice_index, slice_count):
 
         if dtype == 'video':
             datasets.append(dataset_video(path, params, sub_batch_size, slice_index, slice_count))
-        elif dtype == 'text':
+        elif dtype == 'text' and params.use_language:
             datasets.append(dataset_text(path, params, sub_batch_size, slice_index, slice_count))
 
         weights.append(weight)
 
     if len(datasets) > 1:
         weights = tf.convert_to_tensor(weights, dtype=tf.float32)
-        dset = tf.data.experimental.sample_from_datasets(datasets, weights=weights, seed=params.data_seed)
+        dset = tf.data.experimental.sample_from_datasets(datasets, weights=weights)
     else:
         dset = datasets[0]
 
