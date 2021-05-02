@@ -525,7 +525,8 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
         with ops.device(f"/job:worker/task:{host_id}/device:CPU:0"):
             dataset = input_fn(params, sub_batch_size, sub_batch_i, len(hosts_to_hold_ds))
-            dataset = dataset.skip(params.current_step//params.macro_batching)
+            if not params.inf_data:
+                dataset = dataset.skip(params.current_step//params.macro_batching)
             dataset = dataset.prefetch(params.buffer_size)
             options = tf.data.Options()
             options.experimental_deterministic = not params.train
