@@ -10,28 +10,114 @@ tf1 = tf.compat.v1
 _NAME_INDEX = [0]
 
 
-def _silu_derivative(op, dy):
-    return [dy * weighted_add(1, op.outputs[0], mtf.sigmoid(op.inputs[0]))]
+class MishForward(mtf.Operation):
+    def __init__(self, x: mtf.Tensor):
+        super().__init__([x], name=random_name("mish_forward"))
+        self._outputs = [mtf.Tensor(self, x.shape, x.dtype)]
+
+    def gradient(self, grad_ys):
+        return MishBackward(self.inputs[0], grad_ys[0]).outputs
+
+    def lower(self, lowering):
+        mesh_impl = lowering.mesh_impl(self)
+
+        def slicewise_fn(x):
+            return x * tf.tanh(tf.math.softplus(x))
+
+        y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]])
+        lowering.set_tensor_lowering(self.outputs[0], y)
 
 
-def _mish_derivative(op, dy):
-    inp = op.inputs[0]
-    gte = mtf.tanh(mtf.softplus(inp))
-    return [dy * (gte + (1 - mtf.square(gte)) * inp * mtf.sigmoid(inp))]
+class MishBackward(mtf.Operation):
+    def __init__(self, x: mtf.Tensor, dy: mtf.Tensor):
+        super().__init__([x, dy], name=random_name("mish_backward"))
+        self._outputs = [mtf.Tensor(self, x.shape, x.dtype)]
+
+    def lower(self, lowering):
+        mesh_impl = lowering.mesh_impl(self)
+
+        def slicewise_fn(x, dy):
+            gte = tf.math.tanh(tf.math.softplus(x))
+            return dy * (gte + (1 - tf.math.square(gte)) * x * tf.math.sigmoid(x))
+
+        y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]], lowering.tensors[self.inputs[1]])
+        lowering.set_tensor_lowering(self.outputs[0], y)
 
 
-ACTIVATIONS = {'relu':     mtf.relu,
-               'sigmoid':  mtf.sigmoid,
-               'tanh':     mtf.tanh,
-               'selu':     mtf.selu,
-               'gelu':     mtf.gelu,
-               'elu':      mtf.elu,
-               'softplus': mtf.softplus,
-               'silu':     lambda x: mtf.cwise(lambda x: x * tf.sigmoid(x), [x], name=random_name("silu"),
-                                               grad_function=_silu_derivative),
-               'mish':     lambda x: mtf.cwise(lambda x: x * tf.tanh(tf.math.softplus(x)), [x],
-                                               name=random_name("mish"),
-                                               grad_function=_mish_derivative),
+class SiluForward(mtf.Operation):
+    def __init__(self, x: mtf.Tensor):
+        super().__init__([x], name=random_name("silu_forward"))
+        self._outputs = [mtf.Tensor(self, x.shape, x.dtype)]
+
+    def gradient(self, grad_ys):
+        return SiluBackward(self.inputs[0], grad_ys[0]).outputs
+
+    def lower(self, lowering):
+        mesh_impl = lowering.mesh_impl(self)
+
+        def slicewise_fn(x):
+            return x * tf.math.sigmoid(x)
+
+        y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]])
+        lowering.set_tensor_lowering(self.outputs[0], y)
+
+
+class SiluBackward(mtf.Operation):
+    def __init__(self, x: mtf.Tensor, dy: mtf.Tensor):
+        super().__init__([x, dy], name=random_name("silu_backward"))
+        self._outputs = [mtf.Tensor(self, x.shape, x.dtype)]
+
+    def lower(self, lowering):
+        mesh_impl = lowering.mesh_impl(self)
+
+        def slicewise_fn(x, dy):
+            gte = tf.math.sigmoid(x)
+            return [dy * (x * gte + (1 - gte))]
+
+        y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]], lowering.tensors[self.inputs[1]])
+        lowering.set_tensor_lowering(self.outputs[0], y)
+
+
+class LeCunTanhForward(mtf.Operation):
+    def __init__(self, x: mtf.Tensor):
+        super().__init__([x], name=random_name("lecun_tanh_forward"))
+        self._outputs = [mtf.Tensor(self, x.shape, x.dtype)]
+
+    def gradient(self, grad_ys):
+        return SiluBackward(self.inputs[0], grad_ys[0]).outputs
+
+    def lower(self, lowering):
+        mesh_impl = lowering.mesh_impl(self)
+
+        def slicewise_fn(x):
+            return tf.math.tanh(x) + x * 0.1
+
+        y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]])
+        lowering.set_tensor_lowering(self.outputs[0], y)
+
+
+class LeCunTanhBackward(mtf.Operation):
+    def __init__(self, x: mtf.Tensor, dy: mtf.Tensor):
+        super().__init__([x, dy], name=random_name("lecun_tanh_backward"))
+        self._outputs = [mtf.Tensor(self, x.shape, x.dtype)]
+
+    def lower(self, lowering):
+        mesh_impl = lowering.mesh_impl(self)
+
+        def slicewise_fn(x, dy):
+            return dy * (1.1 - tf.math.square(tf.math.tanh(x)))
+
+        y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]], lowering.tensors[self.inputs[1]])
+        lowering.set_tensor_lowering(self.outputs[0], y)
+
+
+ACTIVATIONS = {'relu':       mtf.relu,
+               'sigmoid':    mtf.sigmoid,
+               'tanh':       mtf.tanh,
+               'gelu':       mtf.gelu,
+               'lecun_tanh': LeCunTanhForward,
+               'silu':       SiluForward,
+               'mish':       MishForward,
                }
 DIM = typing.Union[mtf.Dimension, str]
 DIM_LIST = typing.List[mtf.Dimension]
