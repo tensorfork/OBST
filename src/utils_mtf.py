@@ -84,7 +84,7 @@ class LeCunTanhForward(mtf.Operation):
         self._outputs = [mtf.Tensor(self, x.shape, x.dtype)]
 
     def gradient(self, grad_ys):
-        return SiluBackward(self.inputs[0], grad_ys[0]).outputs
+        return LeCunTanhBackward(self.inputs[0], grad_ys[0]).outputs
 
     def lower(self, lowering):
         mesh_impl = lowering.mesh_impl(self)
@@ -111,6 +111,39 @@ class LeCunTanhBackward(mtf.Operation):
         lowering.set_tensor_lowering(self.outputs[0], y)
 
 
+class SoftsignForward(mtf.Operation):
+    def __init__(self, x: mtf.Tensor):
+        super().__init__([x], name=random_name("softsign_forward"))
+        self._outputs = [mtf.Tensor(self, x.shape, x.dtype)]
+
+    def gradient(self, grad_ys):
+        return SoftsignBackward(self.inputs[0], grad_ys[0]).outputs
+
+    def lower(self, lowering):
+        mesh_impl = lowering.mesh_impl(self)
+
+        def slicewise_fn(x):
+            return x / (1 + tf.math.abs(x))
+
+        y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]])
+        lowering.set_tensor_lowering(self.outputs[0], y)
+
+
+class SoftsignBackward(mtf.Operation):
+    def __init__(self, x: mtf.Tensor, dy: mtf.Tensor):
+        super().__init__([x, dy], name=random_name("softsign_backward"))
+        self._outputs = [mtf.Tensor(self, x.shape, x.dtype)]
+
+    def lower(self, lowering):
+        mesh_impl = lowering.mesh_impl(self)
+
+        def slicewise_fn(x, dy):
+            return dy / tf.math.square(1 + tf.math.abs(x))
+
+        y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]], lowering.tensors[self.inputs[1]])
+        lowering.set_tensor_lowering(self.outputs[0], y)
+
+
 ACTIVATIONS = {'relu':       mtf.relu,
                'sigmoid':    mtf.sigmoid,
                'tanh':       mtf.tanh,
@@ -118,6 +151,7 @@ ACTIVATIONS = {'relu':       mtf.relu,
                'lecun_tanh': LeCunTanhForward,
                'silu':       SiluForward,
                'mish':       MishForward,
+               'softsign':   SoftsignForward
                }
 DIM = typing.Union[mtf.Dimension, str]
 DIM_LIST = typing.List[mtf.Dimension]
