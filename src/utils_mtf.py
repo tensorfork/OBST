@@ -145,7 +145,7 @@ class SoftsignBackward(mtf.Operation):
 
 
 def _output0(op):
-    if not isinstance(op, mtf.Operation):
+    if not issubclass(op, mtf.Operation):
         raise ValueError
 
     def _wrapped(*args, **kwargs):
