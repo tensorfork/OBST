@@ -144,14 +144,24 @@ class SoftsignBackward(mtf.Operation):
         lowering.set_tensor_lowering(self.outputs[0], y)
 
 
+def _output0(op):
+    if not isinstance(op, mtf.Operation):
+        raise ValueError
+
+    def _wrapped(*args, **kwargs):
+        return op(*args, **kwargs).outputs[0]
+
+    return _wrapped
+
+
 ACTIVATIONS = {'relu':       mtf.relu,
                'sigmoid':    mtf.sigmoid,
                'tanh':       mtf.tanh,
                'gelu':       mtf.gelu,
-               'lecun_tanh': LeCunTanhForward,
-               'silu':       SiluForward,
-               'mish':       MishForward,
-               'softsign':   SoftsignForward
+               'lecun_tanh': _output0(LeCunTanhForward),
+               'silu':       _output0(SiluForward),
+               'mish':       _output0(MishForward),
+               'softsign':   _output0(SoftsignForward)
                }
 DIM = typing.Union[mtf.Dimension, str]
 DIM_LIST = typing.List[mtf.Dimension]

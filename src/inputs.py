@@ -420,7 +420,7 @@ def _get_skip_index(all_files, n_batches):
     return skip_idx, remainder
 
 
-def gpt_neo_input(params, sub_batch_size, slice_index, slice_count):
+def gpt_neo_input(params: ModelParameter, sub_batch_size: int, slice_index: int, slice_count: int):
     """
     Input fn that reads tfrecords encoded with a fixed chunk size (== n_ctx + 1), and that either:
 
