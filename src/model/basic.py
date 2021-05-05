@@ -8,8 +8,8 @@ import tensorflow as tf
 from .activation import activate_util
 from .backend import get_attention_dim, get_variable, linear_from_features, linear_to_features, normal_var
 from ..dataclass import ModelParameter
-from ..mtf_wrapper import (add_n, constant_scalar, einsum, exp, mod, mtf_range, one_hot, reduce_mean, rsqrt, scoped,
-                           sigmoid, sin)
+from ..mtf_wrapper import (add_n, constant_scalar, dropout as utils_dropout, einsum, exp, mod, mtf_range, one_hot,
+                           reduce_mean, rsqrt, scoped, sigmoid, sin)
 from ..utils_mtf import DIM_LIST, SHAPE, anonymize_dim, shape_size
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
@@ -133,3 +133,11 @@ def feed_forward(params: ModelParameter, block_input: mtf.Tensor, name_extras: t
     if 'glu_add' in name_extras:
         mid += activate_util(name_extras, _from_feat())
     return linear_to_features(params, mid, intermediate)
+
+
+def dropout(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.List[str]):
+    keep = 1
+    for extra in name_extras:
+        if extra.startswith('rate'):
+            keep = 1 - float(extra[len('rate'):])
+    return utils_dropout(block_input, keep)
