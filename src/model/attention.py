@@ -5,7 +5,7 @@ import tensorflow as tf
 
 from .activation import activate_util
 from .backend import communicating_linear, get_attention_dim, linear_from_features
-from .basic import embed
+from .basic import embed, dropout
 from ..dataclass import ModelParameter
 from ..mtf_wrapper import einsum
 from ..utils_mtf import anonymize, anonymize_dim
@@ -85,7 +85,7 @@ class SoftmaxForward(mtf.Operation):
 def attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.List[str]):
     idx, dim = get_attention_dim(params, block_input)
     params.attention_idx += 1
-    base = activate_util(name_extras, linear_from_features(params, block_input))
+    base = dropout(params, activate_util(name_extras, linear_from_features(params, block_input)), name_extras)
     linear = 'linear' in name_extras
     masked = idx in params.masked_attention_dimensions
 

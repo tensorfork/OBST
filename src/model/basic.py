@@ -117,6 +117,14 @@ def all_mean(params: ModelParameter, block_input: mtf.Tensor, name_extras: typin
                   reduced_dims=[params.head_dim])
 
 
+def dropout(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.List[str]):
+    keep = 1
+    for extra in name_extras:
+        if extra.startswith('dropout_rate'):
+            keep = 1 - float(extra[len('dropout_rate'):])
+    return utils_dropout(block_input, keep)
+
+
 def feed_forward(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.List[str]) -> mtf.Tensor:
     if 'group' in name_extras:
         intermediate = [params.head_dim,
@@ -127,17 +135,9 @@ def feed_forward(params: ModelParameter, block_input: mtf.Tensor, name_extras: t
     def _from_feat():
         return linear_from_features(params, block_input, intermediate)
 
-    mid = activate_util(name_extras, _from_feat())
+    mid = dropout(params, activate_util(name_extras, _from_feat()), name_extras)
     if 'glu' in name_extras or 'glu_add' in name_extras:
         mid *= sigmoid(_from_feat())
     if 'glu_add' in name_extras:
         mid += activate_util(name_extras, _from_feat())
     return linear_to_features(params, mid, intermediate)
-
-
-def dropout(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.List[str]):
-    keep = 1
-    for extra in name_extras:
-        if extra.startswith('rate'):
-            keep = 1 - float(extra[len('rate'):])
-    return utils_dropout(block_input, keep)
