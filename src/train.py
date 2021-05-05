@@ -9,7 +9,6 @@ import typing
 import mesh_tensorflow as mtf
 import numpy as np
 import tensorflow as tf
-from tensorflow.compat.v1.data import Dataset
 from tensorflow.python.data.experimental.ops.distribute_options import AutoShardPolicy
 from tensorflow.python.framework import ops
 from tensorflow.python.ops import summary_ops_v2 as summary, variables
@@ -24,6 +23,7 @@ from .utils_core import color_print
 from .utils_mtf import concat, constant_scalar, head_argmax, log, pad, slice, to_float, weighted_add
 
 tf1 = tf.compat.v1
+Dataset = tf1.data.Dataset
 
 
 class CheckpointLoaderHook(tf.estimator.SessionRunHook):
@@ -184,11 +184,11 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                        output_shape=token_out.shape)
 
                             token_mask = weighted_add(
-                                mtf.reshape(to_float(token_pad), new_shape=params.token_dim_shape),
-                                to_float(token_mask), one_hot_sequence)
+                                    mtf.reshape(to_float(token_pad), new_shape=params.token_dim_shape),
+                                    to_float(token_mask), one_hot_sequence)
 
                             frame_pad = to_float(
-                                mtf.greater(mtf.reduce_sum(padding_token, reduced_dim=tkn_per_frame), 0))
+                                    mtf.greater(mtf.reduce_sum(padding_token, reduced_dim=tkn_per_frame), 0))
                             token_x_input = weighted_add(frame_pad, to_float(token_x_input), one_hot_sequence)
 
                             token_x_input = mtf.cast(token_x_input, dtype=tf.int32)
@@ -405,7 +405,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             log_len = int(params.use_language) + int(params.use_video) + int(params.calc_accuracy) + 1
             loop_inputs = [tf.constant(0, dtype=tf.int32, shape=[]), tf.constant(0, dtype=tf.float32, shape=[])]
             loop_inputs = loop_inputs + [tf.constant(0, dtype=tf.float32, shape=[]) for _ in range(log_len)] + list(
-                args)
+                    args)
 
             def con(i, *args):
                 return tf.less(i, tf.constant(params.macro_batching, dtype=tf.int32, shape=[]))
@@ -526,7 +526,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         with ops.device(f"/job:worker/task:{host_id}/device:CPU:0"):
             dataset = input_fn(params, sub_batch_size, sub_batch_i, len(hosts_to_hold_ds))
             if not params.use_random_dataloader:
-                dataset = dataset.skip(params.current_step//params.macro_batching)
+                dataset = dataset.skip(params.current_step // params.macro_batching)
             dataset = dataset.prefetch(params.buffer_size)
             options = tf.data.Options()
             options.experimental_deterministic = not params.train

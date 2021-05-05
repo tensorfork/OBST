@@ -9,9 +9,9 @@ import numpy as np
 import tensorflow.compat.v1 as tf
 
 from .dataclass import ModelParameter
-from .model import RevGradOp
+from src.model.model import RevGradOp
 from .utils_mtf import (add_n, anonymize, anonymize_dim, cast, constant_float, constant_scalar, einsum, equal,
-                        feature_dims_used, greater, greater_equal, maximum, minimum, mod, reduce_max,
+                        feature_dims_used, greater, greater_equal, minimum, mod, reduce_max,
                         reduce_mean, reduce_sum, rsqrt, sqrt, square, to_float, weighted_add)
 
 

@@ -6,12 +6,10 @@ import argparse
 import json
 import re
 import time
-from functools import partial
 
 import mesh_tensorflow as mtf
 import numpy as np
-import tensorflow.compat.v1 as tf
-from tensorflow.compat.v1 import tpu
+import tensorflow as tf2
 from tensorflow.python.ops import summary_ops_v2 as summary
 from tensorflow.python.tpu.device_assignment import device_assignment
 from tensorflow.python.tpu.topology import Topology
@@ -21,6 +19,9 @@ from .dataclass import ModelParameter
 from .eval import gen_sample_fn
 from .inputs import dataset, gpt_neo_input
 from .train import computation_func
+
+tf = tf2.compat.v1
+tpu = tf.tpu
 
 
 def main(args: argparse.Namespace) -> None:
