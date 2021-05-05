@@ -58,12 +58,12 @@ def embed(params: ModelParameter, shape: SHAPE) -> mtf.Tensor:
     feature_count = shape_size(feature_dims)
 
     op = mtf.add if 'additive' in params.position_embedding else mtf.multiply
-    absolute = 'absolute' in params.position_embedding
     split = 'split' in params.position_embedding
+    absolute = 'absolute' in params.position_embedding
     relative = 'relative' in params.position_embedding
+    axial = 'axial' in params.position_embedding
     learned = 'learned' in params.position_embedding
     cosine = 'cosine' in params.position_embedding
-    axial = 'axial' in params.position_embedding
 
     out = None
 
