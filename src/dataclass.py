@@ -1,8 +1,8 @@
 """
 Contains a class as a datastore for model parameters
 """
-import typing
 import random
+import typing
 
 import mesh_tensorflow as mtf
 import tensorflow.compat.v1 as tf
@@ -23,6 +23,8 @@ class ModelParameter(typing.Dict[str, typing.Any]):
     def __init__(self, config: typing.Dict[str, typing.Any]):
         super().__init__()
 
+        self.position_embedding = "relative"  # or "absolute" or "shared"
+        self.shared_position_embedding = False
         self.use_video = True
         self.save_graph = False
         self.use_language = True

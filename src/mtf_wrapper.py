@@ -80,8 +80,12 @@ def equal(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None) -> mtf
     return scoped("equal", mtf.equal, x1, x2, output_shape)
 
 
-def mod(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None) -> mtf.Tensor:
+def mod(x1: mtf.Tensor, x2: typing.Union[mtf.Tensor, int], output_shape: OPT_SHAPE = None) -> mtf.Tensor:
     return scoped("mod", mtf.mod, x1, x2, output_shape)
+
+
+def sin(x: mtf.Tensor):
+    return scoped("sin", mtf.sin, x)
 
 
 def floordiv(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None) -> mtf.Tensor:
