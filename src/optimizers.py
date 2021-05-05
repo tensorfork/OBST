@@ -10,8 +10,8 @@ import tensorflow as tf2
 
 from src.model.revnet import RevGradOp
 from .dataclass import ModelParameter
-from .mtf_wrapper import (add_n, cast, constant_float, constant_scalar, einsum, equal, greater_equal, minimum, mod,
-                          reduce_max, reduce_mean, reduce_sum, rsqrt, sqrt, square)
+from .mtf_wrapper import (add_n, cast, constant_float, constant_scalar, einsum, equal, greater, greater_equal, minimum,
+                          mod, reduce_max, reduce_mean, reduce_sum, rsqrt, sqrt, square)
 from .utils_mtf import anonymize, anonymize_dim, feature_dims_used, to_float, weighted_add
 
 tf = tf2.compat.v1
