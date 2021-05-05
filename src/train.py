@@ -21,7 +21,7 @@ from .model import build
 from .mtf_wrapper import constant_scalar, log
 from .optimizers import get_optimizer
 from .utils_core import color_print
-from .utils_mtf import concat, head_argmax, pad, slice, to_float, weighted_add
+from .utils_mtf import concat, head_argmax, pad, slice, to_fp32, weighted_add
 
 tf1 = tf.compat.v1
 Dataset = tf1.data.Dataset
@@ -174,23 +174,23 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                         if params.use_language:
                             one_hot_sequence = mtf.one_hot(position, params.sequence_dim, dtype=tf.float32)
                             token_out = head_argmax(mtf.reshape(token_out, new_shape=shape), params.vocab_dims)
-                            padding_token = to_float(mtf.equal(token_out, params.padding_token))
+                            padding_token = to_fp32(mtf.equal(token_out, params.padding_token))
 
                             token_x_input = weighted_add(mtf.reshape(token_out, new_shape=params.token_dim_shape),
                                                          token_x_input,
                                                          mtf.one_hot(position, params.sequence_dim, dtype=tf.int32))
 
                             token_pad = mtf.less_equal(mtf.range(params.mesh, tkn_per_frame, dtype=tf.float32),
-                                                       to_float(mtf.argmax(padding_token, reduced_dim=tkn_per_frame)),
+                                                       to_fp32(mtf.argmax(padding_token, reduced_dim=tkn_per_frame)),
                                                        output_shape=token_out.shape)
 
                             token_mask = weighted_add(
-                                    mtf.reshape(to_float(token_pad), new_shape=params.token_dim_shape),
-                                    to_float(token_mask), one_hot_sequence)
+                                    mtf.reshape(to_fp32(token_pad), new_shape=params.token_dim_shape),
+                                    to_fp32(token_mask), one_hot_sequence)
 
-                            frame_pad = to_float(
+                            frame_pad = to_fp32(
                                     mtf.greater(mtf.reduce_sum(padding_token, reduced_dim=tkn_per_frame), 0))
-                            token_x_input = weighted_add(frame_pad, to_float(token_x_input), one_hot_sequence)
+                            token_x_input = weighted_add(frame_pad, to_fp32(token_x_input), one_hot_sequence)
 
                             token_x_input = mtf.cast(token_x_input, dtype=tf.int32)
 
@@ -198,11 +198,11 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                frame_mask_tag, token_mask
 
                     if token_mask is not None:
-                        token_mask = to_float(token_mask)
+                        token_mask = to_fp32(token_mask)
                     if frame_mask_src is not None:
-                        frame_mask_src = to_float(frame_mask_src)
+                        frame_mask_src = to_fp32(frame_mask_src)
                     if frame_mask_tag is not None:
-                        frame_mask_tag = to_float(frame_mask_tag)
+                        frame_mask_tag = to_fp32(frame_mask_tag)
 
                     while_loop_inputs = [mtf.zeros(params.mesh, [], tf.int32) + params.initial_autoregressive_position,
                                          token_x_input, token_y_input, frame_input, frame_mask_src, frame_mask_tag,

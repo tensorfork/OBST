@@ -12,7 +12,7 @@ from src.model.revnet import RevGradOp
 from .dataclass import ModelParameter
 from .mtf_wrapper import (add_n, cast, constant_float, constant_scalar, einsum, equal, greater, greater_equal, minimum,
                           mod, reduce_max, reduce_mean, reduce_sum, rsqrt, sqrt, square)
-from .utils_mtf import anonymize, anonymize_dim, feature_dims_used, to_float, weighted_add
+from .utils_mtf import anonymize, anonymize_dim, feature_dims_used, to_fp32, weighted_add
 
 tf = tf2.compat.v1
 
@@ -27,10 +27,10 @@ def sum_dim(inp: mtf.Tensor, dims: typing.List[mtf.Dimension]):
 
 def _min_norm_element_from2(params: ModelParameter, v1v1: mtf.Tensor, v1v2: mtf.Tensor,
                             v2v2: mtf.Tensor, min_gamma: float = 0.001):
-    gamma = constant_float(params, value=(1 - min_gamma), shape=[]) * to_float(greater_equal(v1v2, v1v1))
+    gamma = constant_float(params, value=(1 - min_gamma), shape=[]) * to_fp32(greater_equal(v1v2, v1v1))
     gamma += constant_float(params, value=min_gamma, shape=[]) * \
-             to_float(greater_equal(v1v2, v2v2)) * to_float(equal(gamma, 0))
-    gamma += (-1.0 * ((v1v2 - v2v2) / (v1v1 + v2v2 - 2 * v1v2))) * to_float(equal(gamma, 0))
+             to_fp32(greater_equal(v1v2, v2v2)) * to_fp32(equal(gamma, 0))
+    gamma += (-1.0 * ((v1v2 - v2v2) / (v1v1 + v2v2 - 2 * v1v2))) * to_fp32(equal(gamma, 0))
 
     return gamma
 

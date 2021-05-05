@@ -145,7 +145,7 @@ def pad(tensor: mtf.Tensor, dim: typing.Union[mtf.Dimension, str], padding: typi
 
 
 
-def to_float(tensor: mtf.Tensor) -> mtf.Tensor:
+def to_fp32(tensor: mtf.Tensor) -> mtf.Tensor:
     """
     Cast a tensor to float
     :param tensor: tensor to be casted
