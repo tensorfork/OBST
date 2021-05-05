@@ -3,8 +3,8 @@ import typing
 import mesh_tensorflow as mtf
 import tensorflow as tf
 
-from src.utils_mtf import random_name
 from .frontend import block_part_fn
+from ..utils_core import random_name
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 

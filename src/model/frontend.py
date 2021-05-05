@@ -3,11 +3,13 @@ import typing
 import mesh_tensorflow as mtf
 import tensorflow as tf
 
-from src.dataclass import BlockConfig, ModelParameter
-from src.utils_mtf import random_name, scoped
+from .activation import activate
 from .attention import attention
-from .basic import activate, all_mean, embed, feed_forward, norm, rezero
+from .basic import all_mean, embed, feed_forward, norm, rezero
 from .convolution import convolution
+from ..dataclass import BlockConfig, ModelParameter
+from ..mtf_wrapper import scoped
+from ..utils_core import random_name
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -20,7 +22,7 @@ LAYER_FUNCTIONS = {'feed_forward': feed_forward,
                    'embed':        embed,
                    'all_mean':     all_mean,
                    'activation':   activate,
-                   'convolution': convolution
+                   'convolution':  convolution
                    }
 
 

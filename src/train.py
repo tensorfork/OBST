@@ -18,9 +18,10 @@ from tensorflow.python.training import checkpoint_management
 
 from .dataclass import ModelParameter
 from .model import build
+from .mtf_wrapper import constant_scalar, log
 from .optimizers import get_optimizer
 from .utils_core import color_print
-from .utils_mtf import concat, constant_scalar, head_argmax, log, pad, slice, to_float, weighted_add
+from .utils_mtf import concat, head_argmax, pad, slice, to_float, weighted_add
 
 tf1 = tf.compat.v1
 Dataset = tf1.data.Dataset

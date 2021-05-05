@@ -6,7 +6,7 @@ import tensorflow as tf
 
 from .backend import OrthogonalInit, get_attention_dim, get_variable
 from ..dataclass import ModelParameter
-from ..utils_mtf import random_name
+from ..utils_core import random_name
 
 tf1 = tf.compat.v1
 

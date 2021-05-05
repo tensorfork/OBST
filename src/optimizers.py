@@ -6,13 +6,15 @@ import typing
 
 import mesh_tensorflow as mtf
 import numpy as np
-import tensorflow.compat.v1 as tf
+import tensorflow as tf2
 
+from src.model.revnet import RevGradOp
 from .dataclass import ModelParameter
-from src.model.model import RevGradOp
-from .utils_mtf import (add_n, anonymize, anonymize_dim, cast, constant_float, constant_scalar, einsum, equal,
-                        feature_dims_used, greater, greater_equal, minimum, mod, reduce_max,
-                        reduce_mean, reduce_sum, rsqrt, sqrt, square, to_float, weighted_add)
+from .mtf_wrapper import (add_n, cast, constant_float, constant_scalar, einsum, equal, greater_equal, minimum, mod,
+                          reduce_max, reduce_mean, reduce_sum, rsqrt, sqrt, square)
+from .utils_mtf import anonymize, anonymize_dim, feature_dims_used, to_float, weighted_add
+
+tf = tf2.compat.v1
 
 
 def import_float(imported):

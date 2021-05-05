@@ -12,6 +12,8 @@ from .dataclass import ModelParameter
 
 TZ = pytz.timezone(os.environ.get('TZ', 'US/Pacific'))
 
+_NAME_INDEX = [0]
+
 
 def default(value: typing.Any, default_value: typing.Any) -> typing.Any:
     """
@@ -50,3 +52,14 @@ def int_reduce_mul(*integers: typing.Union[typing.List[typing.Iterable[int]], ty
     if isinstance(integers[0], typing.Iterable):
         integers = integers[0]
     return functools.reduce(int.__mul__, integers)
+
+
+def random_name(prefix="") -> str:
+    """
+    Generates a random name based on the globally set seed using python's random module.
+    Each name has 256 bits of entropy and a final length of 44 base64 encoded characters.
+    For the sake of convenience, special characters are removed from the final string.
+    :return: random string
+    """
+    _NAME_INDEX[0] += 1
+    return f'{prefix}{_NAME_INDEX[0]}'

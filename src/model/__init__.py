@@ -3,14 +3,14 @@ import typing
 import mesh_tensorflow as mtf
 import tensorflow as tf
 
-from src.dataclass import BlockConfig, ModelParameter
-from src.utils_core import default
-from src.utils_mtf import (add_n, cast, concat, constant_scalar, dropout, einsum, exp, head_argmax, head_embed, log,
-                           one_hot, ones, reciprocal, reduce_logsumexp, reduce_max, reduce_sum, sigmoid, sign, slice,
-                           zeros_like)
 from .backend import linear, linear_from_features, linear_to_features
 from .frontend import block_part_fn, embed
 from .revnet import RevGradOp
+from ..dataclass import BlockConfig, ModelParameter
+from ..mtf_wrapper import (add_n, cast, constant_scalar, dropout, einsum, exp, log, one_hot, ones, reciprocal,
+                           reduce_logsumexp, reduce_max, reduce_sum, sigmoid, sign, zeros_like)
+from ..utils_core import default
+from ..utils_mtf import concat, head_argmax, head_embed, slice
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 

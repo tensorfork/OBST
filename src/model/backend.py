@@ -7,9 +7,11 @@ import tensorflow as tf
 from tensorflow.python.ops import array_ops, gen_linalg_ops, math_ops, random_ops
 from tensorflow.python.ops.init_ops import Initializer
 
-from src.dataclass import ModelParameter
-from src.utils_core import default
-from src.utils_mtf import (OPT_DIMS, SHAPE, deduplicate, einsum, feature_dims_used, random_name, scoped)
+from ..dataclass import ModelParameter
+from ..utils_core import default
+from ..utils_mtf import OPT_DIMS, SHAPE, deduplicate, feature_dims_used
+from ..utils_core import random_name
+from ..mtf_wrapper import einsum, scoped
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 

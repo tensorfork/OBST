@@ -3,11 +3,11 @@ import typing
 import mesh_tensorflow as mtf
 import tensorflow as tf
 
-from src.dataclass import ModelParameter
-from src.utils_mtf import (SHAPE, activate as utils_activate, anonymize_dim, constant_scalar, einsum, one_hot,
-                           reduce_mean, rsqrt,
-                           scoped, sigmoid)
+from .activation import activate_util
 from .backend import get_attention_dim, get_variable, linear_from_features, linear_to_features, normal_var
+from ..dataclass import ModelParameter
+from ..mtf_wrapper import constant_scalar, einsum, one_hot, reduce_mean, rsqrt, scoped, sigmoid
+from ..utils_mtf import SHAPE, anonymize_dim
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -61,10 +61,9 @@ def feed_forward(params: ModelParameter, block_input: mtf.Tensor, name_extras: t
     def _from_feat():
         return linear_from_features(params, block_input, intermediate)
 
-    mid = utils_activate(name_extras, _from_feat())
+    mid = activate_util(name_extras, _from_feat())
     if 'glu' in name_extras or 'glu_add' in name_extras:
         mid *= sigmoid(_from_feat())
     if 'glu_add' in name_extras:
-        mid += utils_activate(name_extras, _from_feat())
+        mid += activate_util(name_extras, _from_feat())
     return linear_to_features(params, mid, intermediate)
-

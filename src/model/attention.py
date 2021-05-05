@@ -3,11 +3,13 @@ import typing
 import mesh_tensorflow as mtf
 import tensorflow as tf
 
-from src.dataclass import ModelParameter
-from src.utils_mtf import anonymize, anonymize_dim, einsum, random_name
 from .activation import activate_util
 from .backend import communicating_linear, get_attention_dim, linear_from_features
 from .basic import embed
+from ..dataclass import ModelParameter
+from ..mtf_wrapper import einsum
+from ..utils_mtf import anonymize, anonymize_dim
+from ..utils_core import random_name
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
