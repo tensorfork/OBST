@@ -68,6 +68,3 @@ def feed_forward(params: ModelParameter, block_input: mtf.Tensor, name_extras: t
         mid += utils_activate(name_extras, _from_feat())
     return linear_to_features(params, mid, intermediate)
 
-
-def activate(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.List[str]):
-    return utils_activate(name_extras, block_input)

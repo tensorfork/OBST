@@ -4,7 +4,8 @@ import mesh_tensorflow as mtf
 import tensorflow as tf
 
 from src.dataclass import ModelParameter
-from src.utils_mtf import (activate, anonymize, anonymize_dim, einsum, random_name)
+from src.utils_mtf import anonymize, anonymize_dim, einsum, random_name
+from .activation import activate_util
 from .backend import communicating_linear, get_attention_dim, linear_from_features
 from .basic import embed
 
@@ -82,8 +83,7 @@ class SoftmaxForward(mtf.Operation):
 def attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.List[str]):
     idx, dim = get_attention_dim(params, block_input)
     params.attention_idx += 1
-    tmp = anonymize_dim(dim)
-    base = activate(name_extras, linear_from_features(params, block_input))
+    base = activate_util(name_extras, linear_from_features(params, block_input))
     linear = 'linear' in name_extras
     masked = idx in params.masked_attention_dimensions
 
@@ -95,11 +95,11 @@ def attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typi
     val = communicating_linear(params, base)
     qry = communicating_linear(params, base)
     if 'activate_val' in name_extras:
-        val = activate(name_extras, val)
+        val = activate_util(name_extras, val)
     if 'activate_key' in name_extras:
-        key = activate(name_extras, key)
+        key = activate_util(name_extras, key)
     if 'activate_qry' in name_extras:
-        qry = activate(name_extras, qry)
+        qry = activate_util(name_extras, qry)
     val_dim = params.key_dim if linear else dim
     key = anonymize(key, dim)
     val = anonymize(val, val_dim)
