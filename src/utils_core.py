@@ -12,7 +12,7 @@ from .dataclass import ModelParameter
 
 TZ = pytz.timezone(os.environ.get('TZ', 'US/Pacific'))
 
-_NAME_INDEX = [0]
+_NAME_INDICES = {}
 
 
 def default(value: typing.Any, default_value: typing.Any) -> typing.Any:
@@ -61,5 +61,7 @@ def random_name(prefix="") -> str:
     For the sake of convenience, special characters are removed from the final string.
     :return: random string
     """
-    _NAME_INDEX[0] += 1
-    return f'{prefix}{_NAME_INDEX[0]}'
+    if prefix not in _NAME_INDICES:
+        _NAME_INDICES[prefix] = -1
+    _NAME_INDICES[prefix]  += 1
+    return f'{prefix}{_NAME_INDICES[prefix]}'
