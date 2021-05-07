@@ -52,7 +52,7 @@ _EMBEDDINGS = {}
 
 
 def embed(params: ModelParameter, shape: SHAPE) -> mtf.Tensor:
-    position_dims: SHAPE = shape - params.feature_dims - params.intermediate
+    position_dims: SHAPE = (shape - params.feature_dims) - params.intermediate
     feature_dims = list(set(shape.dims).union(set(params.feature_dims + params.intermediate)))
     position_count = shape_size(position_dims)
     feature_count = shape_size(feature_dims)
