@@ -403,10 +403,11 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 return tpu_ops.outfeed_enqueue_tuple(predictions)
 
         if params.train and params.macro_batching > 1:
-            log_len = int(params.use_language) + int(params.use_video) + int(params.calc_accuracy) + 1
+            log_len = int(params.use_language) + int(params.use_video) +\
+                      int(params.calc_accuracy) * int(params.use_language) + 1
             loop_inputs = [tf.constant(0, dtype=tf.int32, shape=[]), tf.constant(0, dtype=tf.float32, shape=[])]
-            loop_inputs = loop_inputs + [tf.constant(0, dtype=tf.float32, shape=[]) for _ in range(log_len)] + list(
-                    args)
+            loop_inputs = loop_inputs + [tf.constant(0, dtype=tf.float32, shape=[]) for _ in range(log_len)]\
+                          + list(args)
 
             def con(i, *args):
                 return tf.less(i, tf.constant(params.macro_batching, dtype=tf.int32, shape=[]))

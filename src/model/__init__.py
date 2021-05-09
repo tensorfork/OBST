@@ -54,7 +54,7 @@ def build(params: ModelParameter,
         vid_msk_src = _default_ones(params, vid_msk_src)
         vid_msk_tgt = _default_ones(params, vid_msk_tgt)
         txt_msk = _default_ones(params, txt_msk)
-        if vid is not None and not params.use_discrete_video_loss:
+        if vid is not None and not params.use_discrete_video_loss and not params.use_bit_fold_input_pipeline:
             vid = mtf.cast(vid, params.variable_dtype.activation_dtype)
 
         video_loss: typing.Union[int, mtf.Tensor] = 0
@@ -67,6 +67,23 @@ def build(params: ModelParameter,
         if params.use_video and params.input_dropout > 0:
             vid = dropout(vid, rate=params.input_dropout)
         if params.use_video:
+
+            if params.use_bit_fold_input_pipeline:
+                vid = mtf.cast(vid, dtype=tf.int64)
+
+                concat_list = []
+                for unfold_idx in range(params.fold_count):
+                    var = mtf.mod(mtf.floordiv(vid, (2 ** params.bit_fold_value) ** unfold_idx),
+                                  (2 ** params.bit_fold_value))
+                    var = mtf.cast(var, dtype=tf.uint8)
+
+                    concat_list.append(var)
+
+                vid = mtf.concat(concat_list, 'color_channels')
+
+            if not params.use_discrete_video_loss:
+                vid = mtf.cast(vid, params.variable_dtype.activation_dtype) / 255
+
             context_dimension = vid.shape[1]
             input_features = vid.shape[-1:]
             tgt = slice(vid, 1, context_dimension.size, context_dimension)

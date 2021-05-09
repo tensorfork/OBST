@@ -7,7 +7,9 @@ import re
 from itertools import cycle
 
 import tensorflow.compat.v1 as tf
+import tensorflow as tf2
 from tensorflow.data import Dataset
+import numpy as np
 
 from .dataclass import ModelParameter, align_tensor_op
 
@@ -23,7 +25,7 @@ def split_files(path, slice_index, slice_count, seed):
     return files[slice_index::slice_count]
 
 
-def get_video_decoder(language_token_num_per_frame=0, frame_height=None, frame_width=None, color_channels=None,
+def get_video_decoder(params, language_token_num_per_frame=0, frame_height=None, frame_width=None, color_channels=None,
                       color_quantization_value=256):
     '''
     :param language_token_num_per_frame: The number of language tokens per single frame.
@@ -51,6 +53,48 @@ def get_video_decoder(language_token_num_per_frame=0, frame_height=None, frame_w
                 'mask':   tf.FixedLenFeature([], tf.int64)
                 })
 
+
+    three_axes = params.three_axes
+
+    color_channels = params.color_channels
+    patch_size = params.patch_size
+    channel_color_size = params.channel_color_size
+
+    frame_height_patch = params.frame_height_patch
+    frame_width_patch = params.frame_width_patch
+
+    frame_shape = [frame_height_patch, frame_width_patch]
+    if not three_axes:
+        frame_shape = [np.prod(frame_shape)]
+    frame_shape.append(channel_color_size)
+
+    out_frame_shape = frame_shape.copy()
+    if params.use_bit_fold_input_pipeline:
+        out_frame_shape.insert(-1, params.fold_count)
+
+    multi = [1]
+    for _ in range(params.fold_count - 1):
+        multi.append(multi[-1] * (2 ** params.bit_fold_value))
+
+    def op_decod(frame):
+
+        if color_quantization_value != 256:
+            frame = tf2.cast(frame, dtype=tf2.float32)
+            frame = tf2.round(frame * ((color_quantization_value - 1) / 255))
+            frame = tf2.cast(frame, dtype=(tf2.int64 if params.use_bit_fold_input_pipeline else tf2.uint8))
+
+        frame = tf2.reshape(frame, (frame_height_patch, patch_size, frame_width_patch, patch_size, color_channels))
+        frame = tf2.transpose(frame, [1, 3, 0, 2, 4])
+
+        frame = tf2.reshape(frame, out_frame_shape)
+
+        if params.use_bit_fold_input_pipeline:
+            _multi = tf2.expand_dims(tf2.expand_dims(tf2.constant(multi, dtype=tf2.int64), axis=-1), axis=0)
+            frame = tf2.reduce_sum((frame * _multi), axis=-2)
+            frame = tf2.cast(frame, tf.uint32)
+
+        return frame
+
     def frame_decoder(proto):
         '''
         :param proto: Proto buffer to be decoded.
@@ -60,17 +104,14 @@ def get_video_decoder(language_token_num_per_frame=0, frame_height=None, frame_w
         '''
 
         sample = tf.parse_single_example(proto, features)
-        frame = tf.image.decode_image(sample['frame'])
         concat = sample['concat']
         skip_frame = sample['skip_frame']
 
         if skip_frame > 0 or concat > 0:
-            frame = tf.zeros(shape=(frame_height, frame_width, color_channels), dtype=tf.uint8)
-
-        if color_quantization_value != 256:
-            frame = tf.cast(frame, dtype=tf.float32)
-            frame = tf.round(frame * ((color_quantization_value - 1) / 255))
-            frame = tf.cast(frame, dtype=tf.uint8)
+            frame = tf.zeros(shape=frame_shape, dtype=(tf.uint32 if params.use_bit_fold_input_pipeline else tf.uint8))
+        else:
+            frame = tf.image.decode_image(sample['frame'])
+            frame = op_decod(frame)
 
         if decode_language_token:
             tokens = sample['tokens']
@@ -82,7 +123,7 @@ def get_video_decoder(language_token_num_per_frame=0, frame_height=None, frame_w
 
         return frame, concat, skip_frame
 
-    return tf.function(frame_decoder, experimental_compile=False)
+    return tf.function(frame_decoder)
 
 
 def _text_decoder(decoder, data: tf.Tensor, ctx: int, patch_size: int, chunk_size: int, shuffle_buffer: int = 0):
@@ -269,10 +310,10 @@ def dataset_video(path: str, params: ModelParameter, sub_batch_size: int, slice_
         if params.use_language:
             token, token_mask, *args = args
 
-        frame = tf.reshape(frame, (sub_batch_size, time_patch_size + 1, time_patch, frame_height_patch, patch_size,
-                                   frame_width_patch, patch_size, color_channels))
+        #frame = tf.reshape(frame, (sub_batch_size, time_patch_size + 1, time_patch, frame_height_patch, patch_size,
+        #                           frame_width_patch, patch_size, color_channels))
 
-        frame = tf.transpose(frame, [0, 1, 3, 5, 2, 4, 6, 7])
+        #frame = tf.transpose(frame, [0, 1, 3, 5, 2, 4, 6, 7])
 
         if three_axes:
             out_frame = tf.reshape(frame, (sub_batch_size, time_patch_size + 1, frame_height_patch, frame_width_patch,
@@ -317,8 +358,10 @@ def dataset_video(path: str, params: ModelParameter, sub_batch_size: int, slice_
     else:
         interleave_func = lambda x, y: tf.data.Dataset.zip((x, y)).batch(n_ctx + time_patch, drop_remainder=True)
 
-    frame_decoder = get_video_decoder(language_token_num_per_frame=language_token_per_frame,
-                                      frame_height=frame_height, frame_width=frame_width, color_channels=color_channels,
+    frame_decoder = get_video_decoder(params,
+                                      language_token_num_per_frame=language_token_per_frame,
+                                      frame_height=frame_height, frame_width=frame_width,
+                                      color_channels=color_channels,
                                       color_quantization_value=params.color_quantization_value)
 
     data: Dataset = tf.data.Dataset.from_tensor_slices(split_files(path, slice_index, slice_count,
@@ -373,7 +416,8 @@ def dataset(params: ModelParameter, sub_batch_size, slice_index, slice_count):
     else:
         dset = datasets[0]
 
-    dset = dset.map(memory_op)
+    if not params.use_bit_fold_input_pipeline:
+        dset = dset.map(memory_op)
     dset = dset.map(align_tensor_op)
 
     return dset
