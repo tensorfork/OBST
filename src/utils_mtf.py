@@ -1,6 +1,7 @@
 import typing
 
 import mesh_tensorflow as mtf
+import numpy as np
 import tensorflow as tf
 
 from .dataclass import ModelParameter
@@ -143,8 +144,6 @@ def pad(tensor: mtf.Tensor, dim: typing.Union[mtf.Dimension, str], padding: typi
     return mtf.pad(anonymize(tensor, dim), padding, anonymize_dim(dim))
 
 
-
-
 def to_fp32(tensor: mtf.Tensor) -> mtf.Tensor:
     """
     Cast a tensor to float
@@ -272,3 +271,11 @@ def feature_dims_used(params: ModelParameter, shape: typing.Union[SHAPE, mtf.Ten
     if dims is None:
         dims = params.feature_dims
     return all(f in shape for f in dims)
+
+
+def shape_size(shape: typing.Union[SHAPE, mtf.Tensor, mtf.Variable, typing.List[mtf.Dimension]]):
+    if isinstance(shape, (mtf.Tensor, mtf.Variable)):
+        shape = shape.shape
+    if isinstance(shape, mtf.Shape):
+        shape = shape.dims
+    return np.prod([d.size for d in shape])

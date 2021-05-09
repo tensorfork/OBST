@@ -1,13 +1,16 @@
+import math
 import typing
 
 import mesh_tensorflow as mtf
+import numpy as np
 import tensorflow as tf
 
 from .activation import activate_util
 from .backend import get_attention_dim, get_variable, linear_from_features, linear_to_features, normal_var
 from ..dataclass import ModelParameter
-from ..mtf_wrapper import constant_scalar, einsum, one_hot, reduce_mean, rsqrt, scoped, sigmoid
-from ..utils_mtf import SHAPE, anonymize_dim
+from ..mtf_wrapper import (add_n, constant_scalar, dropout as utils_dropout, einsum, exp, mod, mtf_range, one_hot,
+                           reduce_mean, rsqrt, scoped, sigmoid, sin)
+from ..utils_mtf import DIM_LIST, SHAPE, anonymize_dim, shape_size
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -40,8 +43,73 @@ def rezero(params, block_input: mtf.Tensor, name_extras: typing.List[str]) -> mt
     return block_input * get_variable(params, [], tf.constant_initializer(0))
 
 
+def _multi_dim_range(params: ModelParameter, dims: DIM_LIST) -> mtf.Tensor:
+    return add_n([mtf_range(params.mesh, dim, params.variable_dtype.activation_dtype) * size
+                  for dim, size in zip(dims, np.cumprod([1] + [d.size for d in dims[:-1]]))])
+
+
+_EMBEDDINGS = {}
+
+
 def embed(params: ModelParameter, shape: SHAPE) -> mtf.Tensor:
-    return scoped("embed", normal_var, params, shape, params.embedding_stddev)
+    if isinstance(shape, list):
+        shape = mtf.Shape(shape)
+    position_dims: SHAPE = (shape - params.feature_dims) - params.intermediate
+    feature_dims = list(set(shape.dims).union(set(params.feature_dims + params.intermediate)))
+    position_count = shape_size(position_dims)
+    feature_count = shape_size(feature_dims)
+
+    op = mtf.add if 'additive' in params.position_embedding else mtf.multiply
+    split = 'split' in params.position_embedding
+    absolute = 'absolute' in params.position_embedding
+    relative = 'relative' in params.position_embedding
+    axial = 'axial' in params.position_embedding
+    learned = 'learned' in params.position_embedding
+    cosine = 'cosine' in params.position_embedding
+
+    out = None
+
+    if params.shared_position_embedding and shape in _EMBEDDINGS:
+        return _EMBEDDINGS[shape]
+
+    if absolute and split:
+        out = op(normal_var(params, position_dims, params.embedding_stddev),
+                 normal_var(params, feature_dims, params.embedding_stddev))
+    if absolute:
+        out = scoped("absolute_posembed", normal_var, params, shape, params.embedding_stddev)
+
+    if relative and learned and split:
+        positions = _multi_dim_range(params, position_dims)
+        out = op(positions, normal_var(params, feature_dims, 1 / position_count))
+    elif relative:
+        positions = _multi_dim_range(params, position_dims)
+        features = _multi_dim_range(params, feature_dims)
+        additive = 0
+        if cosine:
+            additive = mod(features, 2)
+            features = (features - additive) / 2
+            additive *= math.pi / 2
+            feature_count /= 2
+        features -= math.log(math.pi * 2 / position_count) - feature_count / 2
+        features *= feature_count ** -0.5
+        out = sin(op(positions, exp(features) + additive)) * params.embedding_stddev
+        if learned:
+            out *= normal_var(params, feature_dims, 1)
+
+    if axial and split:
+        feature_dims = []
+        position_dims = shape.dims
+    if axial:
+        out = normal_var(params, [position_dims.pop(0)] + feature_dims, params.embedding_stddev)
+        for dim in position_dims:
+            out = op(out, normal_var(params, [dim] + feature_dims, params.embedding_stddev))
+
+    if out is None:
+        raise ValueError
+    if params.shared_position_embedding:
+        _EMBEDDINGS[shape] = out
+
+    return out
 
 
 def all_mean(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple):
@@ -49,6 +117,14 @@ def all_mean(params: ModelParameter, block_input: mtf.Tensor, name_extras: typin
                    one_hot(constant_scalar(params, get_attention_dim(params, block_input).index / block_input.size),
                            params.head_dim)],
                   reduced_dims=[params.head_dim])
+
+
+def dropout(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.List[str]):
+    keep = 1
+    for extra in name_extras:
+        if extra.startswith('dropout_rate'):
+            keep = 1 - float(extra[len('dropout_rate'):])
+    return utils_dropout(block_input, keep)
 
 
 def feed_forward(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.List[str]) -> mtf.Tensor:
@@ -61,7 +137,7 @@ def feed_forward(params: ModelParameter, block_input: mtf.Tensor, name_extras: t
     def _from_feat():
         return linear_from_features(params, block_input, intermediate)
 
-    mid = activate_util(name_extras, _from_feat())
+    mid = dropout(params, activate_util(name_extras, _from_feat()), name_extras)
     if 'glu' in name_extras or 'glu_add' in name_extras:
         mid *= sigmoid(_from_feat())
     if 'glu_add' in name_extras:
