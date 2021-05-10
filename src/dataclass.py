@@ -210,7 +210,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.frame_width_patch = self.frame_width // self.patch_size
         self.channel_color_size = self.color_channels * self.time_patch * self.patch_size ** 2
         self.fold_count = 32 // self.bit_fold_value
-        if 2 ** self.bit_fold_value > self.color_quantization_value and self.use_bit_fold_input_pipeline:
+        if 2 ** self.bit_fold_value < self.color_quantization_value and self.use_bit_fold_input_pipeline:
             raise ValueError("when folding the input, the fold value must be qual or lager then the color bit value")
         self.language_token_patch = self.language_token_per_frame // self.token_patch_size
         if self.use_bit_fold_input_pipeline:
