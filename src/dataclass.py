@@ -23,7 +23,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
     def __init__(self, config: typing.Dict[str, typing.Any]):
         super().__init__()
 
-        self.position_embedding = "relative"  # or "absolute" or "shared"
+        self.position_embedding = "absolute"  # or "relative" or "shared"
         self.shared_position_embedding = False
         self.use_video = True
         self.save_graph = False
