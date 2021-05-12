@@ -10,7 +10,7 @@ from ..dataclass import BlockConfig, ModelParameter
 from ..mtf_wrapper import (add_n, cast, constant_scalar, dropout, einsum, exp, log, one_hot, ones, reciprocal,
                            reduce_logsumexp, reduce_max, reduce_sum, sigmoid, sign, zeros_like)
 from ..utils_core import default
-from ..utils_mtf import concat, head_argmax, head_embed, slice
+from ..utils_mtf import concat, head_argmax, head_embed, slice, guarantee_const
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 

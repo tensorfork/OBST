@@ -9,8 +9,8 @@ from .activation import activate_util
 from .backend import get_attention_dim, get_variable, linear_from_features, linear_to_features, normal_var
 from ..dataclass import ModelParameter
 from ..mtf_wrapper import (add_n, constant_scalar, dropout as utils_dropout, einsum, exp, mod, mtf_range, one_hot,
-                           reduce_mean, rsqrt, scoped, sigmoid, sin)
-from ..utils_mtf import DIM_LIST, SHAPE, anonymize_dim, shape_size
+                           reduce_mean, rsqrt, sigmoid, sin)
+from ..utils_mtf import DIM_LIST, SHAPE, anonymize_dim, guarantee_const, shape_size
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -44,8 +44,8 @@ def rezero(params, block_input: mtf.Tensor, name_extras: typing.List[str]) -> mt
 
 
 def _multi_dim_range(params: ModelParameter, dims: DIM_LIST) -> mtf.Tensor:
-    return add_n([mtf_range(params.mesh, dim, params.variable_dtype.activation_dtype) * size
-                  for dim, size in zip(dims, np.cumprod([1] + [d.size for d in dims[:-1]]))])
+    return guarantee_const(add_n([mtf_range(params.mesh, dim, params.variable_dtype.activation_dtype) * size
+                                  for dim, size in zip(dims, np.cumprod([1] + [d.size for d in dims[:-1]]))]))
 
 
 _EMBEDDINGS = {}
@@ -72,15 +72,18 @@ def embed(params: ModelParameter, shape: SHAPE) -> mtf.Tensor:
     if params.shared_position_embedding and shape in _EMBEDDINGS:
         return _EMBEDDINGS[shape]
 
-    if absolute and split:
-        out = op(normal_var(params, position_dims, params.embedding_stddev),
-                 normal_var(params, feature_dims, params.embedding_stddev))
-    if absolute:
-        out = scoped("absolute_posembed", normal_var, params, shape, params.embedding_stddev)
-
-    if relative and learned and split:
-        positions = _multi_dim_range(params, position_dims)
-        out = op(positions, normal_var(params, feature_dims, 1 / position_count))
+    if split:
+        if absolute:
+            out = op(normal_var(params, position_dims, params.embedding_stddev),
+                     normal_var(params, feature_dims, params.embedding_stddev))
+        elif relative and learned:
+            positions = _multi_dim_range(params, position_dims)
+            out = op(positions, normal_var(params, feature_dims, 1 / position_count))
+        elif axial:
+            feature_dims = []
+            position_dims = shape.dims
+    elif absolute:
+        out = normal_var(params, shape, params.embedding_stddev)
     elif relative:
         positions = _multi_dim_range(params, position_dims)
         features = _multi_dim_range(params, feature_dims)
@@ -92,13 +95,9 @@ def embed(params: ModelParameter, shape: SHAPE) -> mtf.Tensor:
             feature_count /= 2
         features -= math.log(math.pi * 2 / position_count) - feature_count / 2
         features *= feature_count ** -0.5
-        out = sin(op(positions, exp(features) + additive)) * params.embedding_stddev
+        out = guarantee_const(sin(op(positions, exp(features) + additive)) * params.embedding_stddev)
         if learned:
             out *= normal_var(params, feature_dims, 1)
-
-    if axial and split:
-        feature_dims = []
-        position_dims = shape.dims
     if axial:
         out = normal_var(params, [position_dims.pop(0)] + feature_dims, params.embedding_stddev)
         for dim in position_dims:
@@ -113,10 +112,8 @@ def embed(params: ModelParameter, shape: SHAPE) -> mtf.Tensor:
 
 
 def all_mean(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple):
-    return einsum([block_input,
-                   one_hot(constant_scalar(params, get_attention_dim(params, block_input).index / block_input.size),
-                           params.head_dim)],
-                  reduced_dims=[params.head_dim])
+    index = constant_scalar(params, get_attention_dim(params, block_input).index / block_input.size)
+    return einsum([block_input, guarantee_const(one_hot(index, params.head_dim))], reduced_dims=[params.head_dim])
 
 
 def dropout(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.List[str]):
