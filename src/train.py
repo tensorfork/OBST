@@ -274,6 +274,8 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 if params.use_language:
                     token_out = mtf.anonymize(token_out)
                 if params.use_video:
+                    if params.use_discrete_video_loss:
+                        frame_out = mtf.argmax(frame_out, reduced_dim=params.discrete_color_dim)
                     frame_out = mtf.anonymize(frame_out)
 
             color_print(params, f"Built in {time.time() - start_time:.1f}s")
@@ -527,7 +529,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
         with ops.device(f"/job:worker/task:{host_id}/device:CPU:0"):
             dataset = input_fn(params, sub_batch_size, sub_batch_i, len(hosts_to_hold_ds))
-            if not params.use_random_dataloader:
+            if not params.use_random_dataloader and params.train:
                 dataset = dataset.skip(params.current_step // params.macro_batching)
             dataset = dataset.prefetch(params.buffer_size)
             options = tf.data.Options()
