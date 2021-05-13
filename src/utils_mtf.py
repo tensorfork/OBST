@@ -30,7 +30,7 @@ class GuaranteeConst(mtf.Operation):
 
     def lower(self, lowering):
         mesh_impl = lowering.mesh_impl(self)
-        y = mesh_impl.slicewise(lambda x: tf.guarantee_const(x), lowering.tensors[self.inputs[0]])
+        y = mesh_impl.slicewise(lambda x: tf.guarantee_const(tf.stop_gradient(x)), lowering.tensors[self.inputs[0]])
         lowering.set_tensor_lowering(self.outputs[0], y)
 
 
