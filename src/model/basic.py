@@ -6,15 +6,54 @@ import numpy as np
 import tensorflow as tf
 
 from .activation import activate_util
-from .backend import get_attention_dim, get_variable, linear_from_features, linear_to_features, normal_var
+from .backend import get_attention_dim, get_variable, linear_from_features, linear_to_features, normal_var, \
+    orthogonal_var
 from ..dataclass import ModelParameter
-from ..mtf_wrapper import (add_n, constant_scalar, dropout as utils_dropout, einsum, exp, mod, mtf_range, one_hot,
-                           reduce_mean, rsqrt, sigmoid, sin)
-from ..utils_mtf import DIM_LIST, SHAPE, anonymize_dim, guarantee_const, shape_size
+from ..mtf_wrapper import (add_n, constant_scalar, dropout as utils_dropout, einsum, exp, mod, mtf_range, reduce_mean,
+                           rsqrt, sigmoid, sin)
+from ..utils_core import random_name
+from ..utils_mtf import DIM_LIST, SHAPE, guarantee_const, shape_size, shape_addition, missing_dims
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
 tf1 = tf.compat.v1
+
+
+class SlicewiseSum(mtf.Operation):
+    """
+    Computes a sum on one slice.
+    """
+
+    def __init__(self, params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.List[str]):
+        self.instance = 'instance' in name_extras
+        self.group = 'group' in name_extras
+        self.mean = 'mean' in name_extras
+        self.std = 'std' in name_extras
+        self.scale = 'scale' in name_extras
+        self.shift = 'shift' in name_extras
+        inputs = [block_input]
+        if self.scale:
+            inputs.append(normal_var(params, params.feature_dims, mean=1))
+        if self.shift:
+            inputs.append(normal_var(params, params.feature_dims, mean=0))
+        super().__init__(inputs, name=random_name("normalize_forward"))
+        self._outputs = [mtf.Tensor(self, block_input.shape, block_input.dtype)]
+
+    def gradient(self, grad_ys):
+        return grad_ys
+
+    def lower(self, lowering: mtf.Lowering):
+        mesh_impl: mtf.simd_mesh_impl.SimdMeshImpl = lowering.mesh_impl(self)
+        dims = shape_addition(*self.inputs)
+        input_formula = ','.join(''.join(chr(dims.index(d)) for d in inp.shape) for inp in self.inputs)
+        output_formula = ''.join(chr(dims.index(d)) for d in self.shape)
+        einsum_formula = f'{input_formula}->{output_formula}'
+
+        def slicewise_fn(left, right):
+            return tf.einsum(einsum_formula, left, right)
+
+        y = mesh_impl.slicewise(slicewise_fn, *(lowering.tensors[inp] for inp in self.inputs))
+        lowering.set_tensor_lowering(self.outputs[0], y)
 
 
 def norm(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.List[str]) -> mtf.Tensor:
@@ -111,11 +150,6 @@ def embed(params: ModelParameter, shape: SHAPE) -> mtf.Tensor:
     return out
 
 
-def all_mean(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.Tuple):
-    index = constant_scalar(params, get_attention_dim(params, block_input).index / block_input.size)
-    return einsum([block_input, guarantee_const(one_hot(index, params.head_dim))], reduced_dims=[params.head_dim])
-
-
 def dropout(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.List[str]):
     keep = 1
     for extra in name_extras:
@@ -124,19 +158,56 @@ def dropout(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing
     return utils_dropout(block_input, keep)
 
 
+class SlicewiseEinsum(mtf.Operation):
+    """
+    Computes an einsum on every slice.
+    There is no communication across slices, meaning that the input and output have to share all dimension NAMES that
+    are split. The dimensions themselves do not have to be shared if they are summed across, allowing the following:
+    [Batch, Features (Split)], [Features (Split), Features (Split)] -> [Batch, Features2 (Split)]
+    """
+
+    def __init__(self, summed_dims: DIM_LIST, *tensors: mtf.Tensor):
+        self.shape: mtf.Shape = shape_addition(*tensors) - summed_dims
+        super().__init__(tensors, name=random_name("slicewise_einsum"))
+        self._outputs = [mtf.Tensor(self, self.shape, tensors[0].dtype)]
+
+    def gradient(self, grad_ys):
+        return [self.__class__(inp, grad_ys, missing_dims(inp, self.shape)) for inp in self.inputs]
+
+    def lower(self, lowering: mtf.Lowering):
+        mesh_impl: mtf.simd_mesh_impl.SimdMeshImpl = lowering.mesh_impl(self)
+        dims = shape_addition(*self.inputs)
+        input_formula = ','.join(''.join(chr(dims.index(d)) for d in inp.shape) for inp in self.inputs)
+        output_formula = ''.join(chr(dims.index(d)) for d in self.shape)
+        einsum_formula = f'{input_formula}->{output_formula}'
+
+        def slicewise_fn(left, right):
+            return tf.einsum(einsum_formula, left, right)
+
+        y = mesh_impl.slicewise(slicewise_fn, *(lowering.tensors[inp] for inp in self.inputs))
+        lowering.set_tensor_lowering(self.outputs[0], y)
+
+
 def feed_forward(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.List[str]) -> mtf.Tensor:
     if 'group' in name_extras:
-        intermediate = [params.head_dim,
-                        anonymize_dim(params.key_dim, params.key_dim.size * params.group_linear_factor)]
-    else:
-        intermediate = params.intermediate
+        intermediate = [mtf.Dimension(params.key_dim.name, params.key_dim.size * params.group_linear_factor)]
+        key_dim = [params.key_dim]
 
-    def _from_feat():
-        return linear_from_features(params, block_input, intermediate)
+        def _from_feat():
+            return SlicewiseEinsum(key_dim, block_input, orthogonal_var(params, key_dim + intermediate))
+
+        def _out(x):
+            return SlicewiseEinsum(intermediate, x, orthogonal_var(params, intermediate + key_dim))
+    else:
+        def _from_feat():
+            return linear_from_features(params, block_input, params.intermediate)
+
+        def _out(x):
+            return linear_to_features(params, x, params.intermediate)
 
     mid = dropout(params, activate_util(name_extras, _from_feat()), name_extras)
     if 'glu' in name_extras or 'glu_add' in name_extras:
         mid *= sigmoid(_from_feat())
     if 'glu_add' in name_extras:
         mid += activate_util(name_extras, _from_feat())
-    return linear_to_features(params, mid, intermediate)
+    return _out(mid)

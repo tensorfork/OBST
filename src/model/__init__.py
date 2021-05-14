@@ -112,7 +112,7 @@ def build(params: ModelParameter,
             txt_tgt = mtf.stop_gradient(txt_tgt)
             txt_src = mtf.stop_gradient(txt_src)
             txt = einsum([embed(params, [params.head_dim, params.vocab_dim] + params.intermediate),
-                          *head_embed(params, txt_src)], reduced_dims=[params.vocab_dim, params.head_dim])
+                          head_embed(params, txt_src)], reduced_dims=[params.vocab_dim, params.head_dim])
 
             if params.input_dropout > 0:
                 txt = dropout(txt, rate=params.input_dropout)
@@ -193,7 +193,7 @@ def build(params: ModelParameter,
             msk = mtf.stop_gradient(txt_msk * cat_msk_tgt * (1 / txt_tgt.size))
             token_loss = einsum([log(reduce_sum(exp(token_out - max_logit), output_shape=reduced_shape)), msk],
                                 output_shape=[])
-            token_loss += einsum([token_out, *head_embed(params, txt_tgt), constant_scalar(params, -1), msk],
+            token_loss += einsum([token_out, head_embed(params, txt_tgt), constant_scalar(params, -1), msk],
                                  output_shape=[])
             token_loss += einsum([max_logit, msk], output_shape=[])
             loss_list.append(token_loss)

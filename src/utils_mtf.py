@@ -16,6 +16,7 @@ SHAPE = typing.Union[mtf.Shape, DIM_LIST]
 TENSORS = typing.List[mtf.Tensor]
 OPT_SHAPE = typing.Optional[SHAPE]
 OPT_DIMS = typing.Optional[DIM_LIST]
+ALL_SHAPES = typing.Union[SHAPE, mtf.Tensor, mtf.Variable]
 
 
 class GuaranteeConst(mtf.Operation):
@@ -51,11 +52,8 @@ def head_argmax(tensor: mtf.Tensor, dims: typing.List[mtf.Dimension]) -> mtf.Ten
     return ind
 
 
-def head_embed(params: ModelParameter, int_tokens: mtf.Tensor) -> typing.Tuple[mtf.Tensor, mtf.Tensor]:
-    return (one_hot(floordiv(int_tokens, params.vocab_size), params.head_dim,
-                    dtype=params.variable_dtype.activation_dtype),
-            one_hot(mod(int_tokens, params.vocab_size), params.vocab_dim,
-                    dtype=params.variable_dtype.activation_dtype))
+def head_embed(params: ModelParameter, int_tokens: mtf.Tensor) -> mtf.Tensor:
+    return one_hot(int_tokens, params.vocab_dim, dtype=params.variable_dtype.activation_dtype)
 
 
 def unanonymize(inp: mtf.Tensor, dim: typing.Union[mtf.Dimension, str]) -> mtf.Tensor:
@@ -293,9 +291,33 @@ def feature_dims_used(params: ModelParameter, shape: typing.Union[SHAPE, mtf.Ten
     return all(f in shape for f in dims)
 
 
-def shape_size(shape: typing.Union[SHAPE, mtf.Tensor, mtf.Variable, typing.List[mtf.Dimension]]):
+def dims_from_shape(shape: ALL_SHAPES) -> DIM_LIST:
     if isinstance(shape, (mtf.Tensor, mtf.Variable)):
         shape = shape.shape
     if isinstance(shape, mtf.Shape):
         shape = shape.dims
-    return np.prod([d.size for d in shape])
+    return shape
+
+
+def shape_size(shape: ALL_SHAPES):
+    return np.prod([d.size for d in dims_from_shape(shape)])
+
+
+def shape_union(*shapes: ALL_SHAPES):
+    out = set(dims_from_shape(shapes[0]))
+    for s in shapes[1:]:
+        out = out.union(set(dims_from_shape(s)))
+    return mtf.Shape(list(out))
+
+
+def shape_addition(*shapes: ALL_SHAPES):
+    dims = []
+    for s in shapes:
+        dims.extend(dims_from_shape(s))
+    return mtf.Shape(deduplicate(s))
+
+
+def missing_dims(self: ALL_SHAPES, other: ALL_SHAPES):
+    self = dims_from_shape(self)
+    other = dims_from_shape(other)
+    return [d for d in other if d not in self]
