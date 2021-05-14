@@ -12,45 +12,61 @@ from ..dataclass import ModelParameter
 from ..mtf_wrapper import (add_n, constant_scalar, dropout as utils_dropout, einsum, exp, mod, mtf_range, reduce_mean,
                            rsqrt, sigmoid, sin)
 from ..utils_core import random_name
-from ..utils_mtf import DIM_LIST, SHAPE, guarantee_const, shape_size, shape_addition, missing_dims
+from ..utils_mtf import DIM_LIST, SHAPE, guarantee_const, shape_size, shape_addition, missing_dims, dims_from_shape
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
 tf1 = tf.compat.v1
 
 
-class SlicewiseSum(mtf.Operation):
+class Normalize(mtf.Operation):
     """
     Computes a sum on one slice.
     """
 
     def __init__(self, params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.List[str]):
-        self.instance = 'instance' in name_extras
-        self.group = 'group' in name_extras
-        self.mean = 'mean' in name_extras
-        self.std = 'std' in name_extras
-        self.scale = 'scale' in name_extras
-        self.shift = 'shift' in name_extras
         inputs = [block_input]
-        if self.scale:
+        if 'scale' in name_extras:
             inputs.append(normal_var(params, params.feature_dims, mean=1))
-        if self.shift:
+        if 'shift' in name_extras:
             inputs.append(normal_var(params, params.feature_dims, mean=0))
         super().__init__(inputs, name=random_name("normalize_forward"))
         self._outputs = [mtf.Tensor(self, block_input.shape, block_input.dtype)]
+        self.attention_dim = get_attention_dim(params, block_input).dim
+        self.name_extras = name_extras
+        self.params = params
 
     def gradient(self, grad_ys):
         return grad_ys
 
     def lower(self, lowering: mtf.Lowering):
         mesh_impl: mtf.simd_mesh_impl.SimdMeshImpl = lowering.mesh_impl(self)
-        dims = shape_addition(*self.inputs)
-        input_formula = ','.join(''.join(chr(dims.index(d)) for d in inp.shape) for inp in self.inputs)
-        output_formula = ''.join(chr(dims.index(d)) for d in self.shape)
-        einsum_formula = f'{input_formula}->{output_formula}'
 
-        def slicewise_fn(left, right):
-            return tf.einsum(einsum_formula, left, right)
+        block_input: mtf.Tensor = self.inputs[0]
+        dims = dims_from_shape(block_input)
+        feature_dim_index = dims.index(self.params.key_dim)
+
+        name_extras = self.name_extras
+        scale = 'scale' in name_extras
+        shift = 'shift' in name_extras
+
+        params = self.params
+
+        def slicewise_fn(*tensors: tf.Tensor):
+            tensors = list(tensors)
+            x = tensors.pop(0)
+            shape = x.shape
+            contract_dims = [feature_dim_index + 1]
+            x = tf.reshape(x,
+                           shape[:feature_dim_index] + [params.n_head, params.n_embd_per_head] +
+                           shape[feature_dim_index + 1:])
+            x -= tf.reduce_mean(x, contract_dims)
+            x /= tf.reduce_mean(tf.square(x))
+            if scale:
+                x *= tensors.pop(0)
+            if shift:
+                x += tensors.pop(0)
+            return x
 
         y = mesh_impl.slicewise(slicewise_fn, *(lowering.tensors[inp] for inp in self.inputs))
         lowering.set_tensor_lowering(self.outputs[0], y)
