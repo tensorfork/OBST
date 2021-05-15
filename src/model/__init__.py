@@ -54,6 +54,9 @@ def build(params: ModelParameter,
         vid_msk_src = _default_ones(params, vid_msk_src)
         vid_msk_tgt = _default_ones(params, vid_msk_tgt)
         txt_msk = _default_ones(params, txt_msk)
+        vid = mtf.stop_gradient(vid)
+        txt_tgt = mtf.stop_gradient(txt_tgt)
+        txt_src = mtf.stop_gradient(txt_src)
         if vid is not None and not params.use_discrete_video_loss and not params.use_bit_fold_input_pipeline:
             vid = mtf.cast(vid, params.variable_dtype.activation_dtype)
 
@@ -64,9 +67,9 @@ def build(params: ModelParameter,
 
         spatial_ctx: mtf.Dimension = txt_tgt.shape[-2] if params.use_language else vid.shape[2]
 
-        if params.use_video:
-            vid = mtf.stop_gradient(vid)
+        if params.use_video and params.input_dropout > 0:
             vid = dropout(vid, rate=params.input_dropout)
+        if params.use_video:
 
             if params.use_bit_fold_input_pipeline:
                 vid = mtf.cast(vid, dtype=tf.int64)
@@ -109,8 +112,6 @@ def build(params: ModelParameter,
 
         # Language embedding and initial feed forward.
         if params.use_language:
-            txt_tgt = mtf.stop_gradient(txt_tgt)
-            txt_src = mtf.stop_gradient(txt_src)
             txt = einsum([embed(params, [params.head_dim, params.vocab_dim] + params.intermediate),
                           *head_embed(params, txt_src)], reduced_dims=[params.vocab_dim, params.head_dim])
 
