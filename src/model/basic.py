@@ -6,7 +6,7 @@ import numpy as np
 import tensorflow as tf
 
 from .activation import activate_util
-from .backend import get_attention_dim, get_variable, linear_from_features, linear_to_features, normal_var, \
+from .backend import get_variable, linear_from_features, linear_to_features, normal_var, \
     orthogonal_var
 from ..dataclass import ModelParameter
 from ..mtf_wrapper import (add_n, constant_scalar, dropout as utils_dropout, einsum, exp, mod, mtf_range, reduce_mean,
@@ -49,10 +49,10 @@ class SlicewiseEinsum(mtf.Operation):
         lowering.set_tensor_lowering(self.outputs[0], y)
 
 
-class NormalizeBackward(mtf.Operation):
+class GroupNormalizeBackward(mtf.Operation):
     def __init__(self, grad_y: mtf.Tensor, params: ModelParameter, name_extras: typing.List[str],
                  tensors: typing.List[mtf.Tensor]):
-        super().__init__([grad_y] + tensors, name=random_name("normalize_backward"))
+        super().__init__([grad_y] + tensors, name=random_name("group_normalize_backward"))
         self._outputs = [mtf.Tensor(self, inp.shape, inp.dtype) for inp in tensors]
         self.name_extras = name_extras
         self.params = params
@@ -97,14 +97,14 @@ class NormalizeBackward(mtf.Operation):
             lowering.set_tensor_lowering(mtf_out, tf_out)
 
 
-class NormalizeForward(mtf.Operation):
+class GroupNormalizeForward(mtf.Operation):
     def __init__(self, params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.List[str]):
         inputs = [block_input]
         if 'scale' in name_extras:
             inputs.append(normal_var(params, params.feature_dims, mean=1))
         if 'shift' in name_extras:
             inputs.append(normal_var(params, params.feature_dims, mean=0))
-        super().__init__(inputs, name=random_name("normalize_forward"))
+        super().__init__(inputs, name=random_name("group_normalize_forward"))
         self._outputs = [mtf.Tensor(self, block_input.shape, block_input.dtype)]
         self.name_extras = name_extras
         self.params = params
@@ -151,22 +151,18 @@ class NormalizeForward(mtf.Operation):
 
 
 def norm(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.List[str]) -> mtf.Tensor:
+    if 'group' in name_extras:
+        return GroupNormalizeForward(params, block_input, name_extras).outputs[0]
+
     normalized_shape = block_input.shape - [params.key_dim]
-    if 'instance' not in name_extras:
-        normalized_shape = normalized_shape - [get_attention_dim(params, block_input).dim]
-    if 'group' not in name_extras:
-        normalized_shape = normalized_shape - [params.head_dim]
-    if 'mean' in name_extras:
-        block_input -= reduce_mean(block_input, output_shape=normalized_shape)
-    scale = []
-    if 'std' in name_extras:
-        scale.append(rsqrt(1e-6 + einsum([block_input, block_input,
-                                          constant_scalar(params, normalized_shape.size / block_input.size)],
-                                         output_shape=normalized_shape)))
+    normalized_shape = normalized_shape - [params.head_dim]
+    block_input -= reduce_mean(block_input, output_shape=normalized_shape)
+    scale = [rsqrt(1e-6 + einsum([block_input, block_input,
+                                  constant_scalar(params, normalized_shape.size / block_input.size)],
+                                 output_shape=normalized_shape))]
     if 'scale' in name_extras:
         scale.append(normal_var(params, params.feature_dims, mean=1))
-    if scale:
-        block_input = mtf.einsum([block_input] + scale, output_shape=block_input.shape)
+    block_input = mtf.einsum([block_input] + scale, output_shape=block_input.shape)
     if 'shift' in name_extras:
         block_input += normal_var(params, params.feature_dims, mean=0)
     return block_input
