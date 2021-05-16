@@ -110,7 +110,7 @@ class GroupNormalizeForward(mtf.Operation):
         self.params = params
 
     def gradient(self, grad_ys):
-        return NormalizeBackward(grad_ys, self.params, self.name_extras, self.inputs).outputs
+        return GroupNormalizeBackward(grad_ys, self.params, self.name_extras, self.inputs).outputs
 
     def lower(self, lowering: mtf.Lowering):
         mesh_impl: mtf.simd_mesh_impl.SimdMeshImpl = lowering.mesh_impl(self)
