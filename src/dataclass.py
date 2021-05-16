@@ -182,7 +182,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             raise ValueError(f'"macro_batching" needs do be divisible by "grad_accumulation", '
                              f'{self.macro_batching} is not divisible by {self.grad_accumulation}')
 
-        if not self.use_random_dataloader:
+        if self.use_random_dataloader:
             print('WARNING: Use random dataset seed')
             for _ in range(random.randint(0, 1000)):
                 self.data_seed = random.randint(0, 1000000)

@@ -320,7 +320,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                           }
 
             if params.train:
-                json.dump(model_size, tf.io.gfile.GFile(f"{params.model_path}/model_size.info", 'w'))
+                json.dump(model_size, tf.io.gfile.GFile(f"{params.model_path}/model_size.info", 'w'), indent=2)
 
             color_print(params, "Lowering graph to TensorFlow...")
             start_time = time.time()
@@ -512,6 +512,39 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
     # Slots for all laidout tensors.
     all_laidout_tensors = [[None] * len(params.input_pipeline_shape) for _ in range(num_cores)]
 
+    log_path = params.model_path + "/DataLog.log"
+    _run_log = []
+    run_log = None
+
+    if params.use_checkpointing:
+        if tf.io.gfile.exists(log_path):
+            _run_log = json.load(tf.io.gfile.GFile(log_path, 'r'))
+
+        curran_stats = {'steps': params.current_step, 'ctx': params.n_ctx,
+                        'slice_count': len(hosts_to_hold_ds),
+                        'interleave_size': params.interleaved_datasets,
+                        'batch_size': params.train_batch_size,
+                        'grad_accumulation': params.grad_accumulation,
+                        'token_patch_size': params.token_patch_size}
+        json.dump((_run_log + [curran_stats]), tf.io.gfile.GFile(log_path, 'w'), indent=2)
+
+        if len(_run_log) > 0 and not params.use_random_dataloader:
+            _run_log = [r for r in _run_log if r['steps'] != params.current_step]
+            if len(_run_log) > 0:
+                run_log = [_run_log.pop(-1)]
+                for r in _run_log[::-1]:
+                    if run_log[-1]['steps'] != r['steps'] and r['steps'] != params.current_step:
+                        run_log.append(r)
+                run_log = run_log[::-1]
+
+                for run_idx in range(len(run_log) - 1):
+                    run_log[run_idx]['steps'] = run_log[run_idx + 1]['steps'] - run_log[run_idx]['steps']
+
+                run_log[-1]['steps'] = params.current_step - run_log[-1]['steps']
+
+                if run_log[-1]['steps'] <= 0:
+                    run_log = None
+
     ds_iterator = []
     # For each sub-batch, create a SubBatchSlicer object.
     for sub_batch_i, host_id in enumerate(hosts_to_hold_ds):
@@ -528,8 +561,8 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             all_sub_batch_pnums = [pnum_map.flatten().tolist() for pnum_map in pnum_maps]
 
         with ops.device(f"/job:worker/task:{host_id}/device:CPU:0"):
-            dataset = input_fn(params, sub_batch_size, sub_batch_i, len(hosts_to_hold_ds))
-            if not params.use_random_dataloader and params.train:
+            dataset = input_fn(params, sub_batch_size, sub_batch_i, len(hosts_to_hold_ds), run_log)
+            if not params.use_random_dataloader and params.train and params.use_video:
                 dataset = dataset.skip(params.current_step // params.macro_batching)
             dataset = dataset.prefetch(params.buffer_size)
             options = tf.data.Options()
@@ -641,8 +674,11 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             color_print(params, "Initializing summary...")
             summary.initialize(session=sess)
 
-            color_print(params, "Enqueueing first batch...")
+            now = time.time()
+            color_print(params, f'Enqueueing first batch...')
             sess.run(enqueue_ops)
+            elapsed = time.time() - now
+            color_print(params, f'Enqueued in {elapsed:.1f}s')
 
             current_step = params.current_step
             color_print(params, f"Starting training loop. Start step: {current_step}")
