@@ -83,7 +83,7 @@ class GroupNormalizeBackward(mtf.Operation):
             x = tf.reshape(x, shape[:feature_dim_index] + [params.n_head, size] + shape[feature_dim_index + 1:])
             sum_square = tf.reduce_sum(tf.square(x), contract_dims)
             divisor = tf.math.rsqrt(size * sum_square - tf.square(tf.reduce_sum(x, contract_dims)))
-            grads = [divisor * size * (3 * sum_square - tf.square(tf.reduce_sum(x, contract_dims) - x))]
+            grads = [grad_y * divisor * size * (3 * sum_square - tf.square(tf.reduce_sum(x, contract_dims) - x))]
             if scale:
                 grads[0] *= tf.reshape(tensors.pop(0), feature_map)
                 grads.append(tf.reduce_sum(grad_y * divisor * (x * size - tf.reduce_sum(x, contract_dims)),
@@ -184,6 +184,7 @@ def embed(params: ModelParameter, shape: SHAPE) -> mtf.Tensor:
     if isinstance(shape, list):
         shape = mtf.Shape(shape)
     position_dims: SHAPE = (shape - params.feature_dims) - params.intermediate
+
     feature_dims = list(set(shape.dims).union(set(params.feature_dims + params.intermediate)))
     position_count = shape_size(position_dims)
     feature_count = shape_size(feature_dims)
