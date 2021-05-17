@@ -82,12 +82,11 @@ class GroupNormalizeBackward(mtf.Operation):
             size = params.n_embd_per_head
             x = tf.reshape(x, shape[:feature_dim_index] + [params.n_head, size] + shape[feature_dim_index + 1:])
             sum_square = tf.reduce_sum(tf.square(x), contract_dims)
-            divisor = tf.math.rsqrt(size * sum_square - tf.square(tf.reduce_sum(x, contract_dims)))
-            grads = [grad_y * divisor * size * (3 * sum_square - tf.square(tf.reduce_sum(x, contract_dims) - x))]
+            divisor = tf.math.rsqrt(size * sum_square - tf.square(tf.reduce_sum(x, contract_dims))) * grad_y
+            grads = [divisor * size * (3 * sum_square - tf.square(tf.reduce_sum(x, contract_dims) - x))]
             if scale:
                 grads[0] *= tf.reshape(tensors.pop(0), feature_map)
-                grads.append(tf.reduce_sum(grad_y * divisor * (x * size - tf.reduce_sum(x, contract_dims)),
-                                           summed_dims))
+                grads.append(tf.reduce_sum(divisor * (x * size - tf.reduce_sum(x, contract_dims)), summed_dims))
             if shift:
                 grads.append(tf.reduce_sum(grad_y, summed_dims))
             return tuple(grads)
