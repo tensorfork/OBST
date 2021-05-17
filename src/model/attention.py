@@ -5,11 +5,11 @@ import tensorflow as tf
 
 from .activation import activate_util
 from .backend import communicating_linear, get_attention_dim, linear_from_features
-from .basic import embed, dropout
+from .basic import dropout, embed
 from ..dataclass import ModelParameter
 from ..mtf_wrapper import einsum
-from ..utils_mtf import anonymize, anonymize_dim
 from ..utils_core import random_name
+from ..utils_mtf import anonymize, anonymize_dim
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 

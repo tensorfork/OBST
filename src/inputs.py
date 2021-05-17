@@ -6,10 +6,10 @@ import random
 import re
 from itertools import cycle
 
-import tensorflow.compat.v1 as tf
-import tensorflow as tf2
-from tensorflow.data import Dataset
 import numpy as np
+import tensorflow as tf2
+import tensorflow.compat.v1 as tf
+from tensorflow.data import Dataset
 
 from .dataclass import ModelParameter, align_tensor_op
 
@@ -157,7 +157,6 @@ def get_video_decoder(params, language_token_num_per_frame=0, frame_height=None,
                 'tokens': tf.FixedLenFeature([language_token_num_per_frame], tf.int64),
                 'mask':   tf.FixedLenFeature([], tf.int64)
                 })
-
 
     three_axes = params.three_axes
 
@@ -419,10 +418,10 @@ def dataset_video(path: str, params: ModelParameter, sub_batch_size: int, slice_
         if params.use_language:
             token, token_mask, *args = args
 
-        #frame = tf.reshape(frame, (sub_batch_size, time_patch_size + 1, time_patch, frame_height_patch, patch_size,
+        # frame = tf.reshape(frame, (sub_batch_size, time_patch_size + 1, time_patch, frame_height_patch, patch_size,
         #                           frame_width_patch, patch_size, color_channels))
 
-        #frame = tf.transpose(frame, [0, 1, 3, 5, 2, 4, 6, 7])
+        # frame = tf.transpose(frame, [0, 1, 3, 5, 2, 4, 6, 7])
 
         if three_axes:
             out_frame = tf.reshape(frame, (sub_batch_size, time_patch_size + 1, frame_height_patch, frame_width_patch,

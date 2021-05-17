@@ -6,7 +6,7 @@ import tensorflow as tf
 
 from .dataclass import ModelParameter
 from .mtf_wrapper import floordiv, mod, one_hot
-from .utils_core import default, random_name
+from .utils_core import default
 
 tf1 = tf.compat.v1
 
@@ -16,26 +16,7 @@ SHAPE = typing.Union[mtf.Shape, DIM_LIST]
 TENSORS = typing.List[mtf.Tensor]
 OPT_SHAPE = typing.Optional[SHAPE]
 OPT_DIMS = typing.Optional[DIM_LIST]
-
-
-class GuaranteeConst(mtf.Operation):
-    """
-    A tensor that always is constant.
-    It acts as a hint to the compiler to optimize a bit better.
-    """
-
-    def __init__(self, value: mtf.Tensor):
-        super().__init__([value], name=random_name("guarantee_const"))
-        self._outputs = [mtf.Tensor(self, value.shape, value.dtype)]
-
-    def lower(self, lowering):
-        mesh_impl = lowering.mesh_impl(self)
-        y = mesh_impl.slicewise(lambda x: tf.guarantee_const(x), lowering.tensors[self.inputs[0]])
-        lowering.set_tensor_lowering(self.outputs[0], y)
-
-
-def guarantee_const(value):
-    return GuaranteeConst(value).outputs[0]
+ALL_SHAPES = typing.Union[SHAPE, mtf.Tensor, mtf.Variable]
 
 
 def head_argmax(tensor: mtf.Tensor, dims: typing.List[mtf.Dimension]) -> mtf.Tensor:
@@ -293,9 +274,33 @@ def feature_dims_used(params: ModelParameter, shape: typing.Union[SHAPE, mtf.Ten
     return all(f in shape for f in dims)
 
 
-def shape_size(shape: typing.Union[SHAPE, mtf.Tensor, mtf.Variable, typing.List[mtf.Dimension]]):
+def dims_from_shape(shape: ALL_SHAPES) -> DIM_LIST:
     if isinstance(shape, (mtf.Tensor, mtf.Variable)):
         shape = shape.shape
     if isinstance(shape, mtf.Shape):
         shape = shape.dims
-    return np.prod([d.size for d in shape])
+    return shape
+
+
+def shape_size(shape: ALL_SHAPES):
+    return np.prod([d.size for d in dims_from_shape(shape)])
+
+
+def shape_union(*shapes: ALL_SHAPES):
+    out = set(dims_from_shape(shapes[0]))
+    for s in shapes[1:]:
+        out = out.union(set(dims_from_shape(s)))
+    return mtf.Shape(list(out))
+
+
+def shape_addition(*shapes: ALL_SHAPES):
+    dims = []
+    for s in shapes:
+        dims.extend(dims_from_shape(s))
+    return mtf.Shape(deduplicate(s))
+
+
+def missing_dims(self: ALL_SHAPES, other: ALL_SHAPES):
+    self = dims_from_shape(self)
+    other = dims_from_shape(other)
+    return [d for d in other if d not in self]
