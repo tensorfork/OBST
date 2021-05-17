@@ -5,7 +5,7 @@ import tensorflow as tf
 
 from .activation import activate
 from .attention import attention
-from .basic import embed, feed_forward, norm, rezero, dropout
+from .basic import dropout, embed, feed_forward, norm, rezero
 from .convolution import convolution
 from ..dataclass import BlockConfig, ModelParameter
 from ..mtf_wrapper import scoped

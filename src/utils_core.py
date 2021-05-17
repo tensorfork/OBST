@@ -63,5 +63,5 @@ def random_name(prefix="") -> str:
     """
     if prefix not in _NAME_INDICES:
         _NAME_INDICES[prefix] = -1
-    _NAME_INDICES[prefix]  += 1
+    _NAME_INDICES[prefix] += 1
     return f'{prefix}{_NAME_INDICES[prefix]}'

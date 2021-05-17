@@ -9,7 +9,7 @@ from .revnet import RevGradOp
 from ..dataclass import BlockConfig, ModelParameter
 from ..mtf_wrapper import (add_n, cast, constant_scalar, dropout, einsum, exp, log, one_hot, ones, reciprocal,
                            reduce_logsumexp, reduce_max, reduce_sum, sigmoid, sign, zeros_like)
-from ..utils_mtf import concat, guarantee_const, head_argmax, head_embed, slice
+from ..utils_mtf import concat, head_argmax, head_embed, slice
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -18,8 +18,8 @@ tf1 = tf.compat.v1
 
 def _default_ones(params: ModelParameter, inp: typing.Optional[mtf.Tensor]) -> mtf.Tensor:
     if inp is None:
-        return guarantee_const(ones(params.mesh, [], params.variable_dtype.activation_dtype))
-    return cast(mtf.stop_gradient(inp), params.variable_dtype.activation_dtype)
+        return ones(params.mesh, [], params.variable_dtype.activation_dtype)
+    return cast(inp, params.variable_dtype.activation_dtype)
 
 
 def build(params: ModelParameter,
@@ -65,7 +65,7 @@ def build(params: ModelParameter,
         spatial_ctx: mtf.Dimension = txt_tgt.shape[-2] if params.use_language else vid.shape[2]
 
         if params.use_video:
-            vid = mtf.stop_gradient(vid)
+
             vid = dropout(vid, rate=params.input_dropout)
 
             if params.use_bit_fold_input_pipeline:
@@ -83,8 +83,6 @@ def build(params: ModelParameter,
 
             if not params.use_discrete_video_loss:
                 vid = mtf.cast(vid, params.variable_dtype.activation_dtype) / 255
-            vid = mtf.stop_gradient(vid)
-
             context_dimension = vid.shape[1]
             input_features = vid.shape[-1:]
             tgt = slice(vid, 1, context_dimension.size, context_dimension)
@@ -97,7 +95,6 @@ def build(params: ModelParameter,
                                                             params.sequence_per_head_dim,
                                                             params.head_dim]
                                                            + tgt.shape[2:]))
-            src = mtf.stop_gradient(src)
 
             src = src * vid_msk_src + embed(params, shape=vid.shape[2:]) * (1 - vid_msk_src)
             src = src * cat_msk_src + embed(params, shape=vid.shape[2:]) * (1 - cat_msk_src)
@@ -109,8 +106,6 @@ def build(params: ModelParameter,
 
         # Language embedding and initial feed forward.
         if params.use_language:
-            txt_tgt = mtf.stop_gradient(txt_tgt)
-            txt_src = mtf.stop_gradient(txt_src)
             txt = einsum([embed(params, [params.head_dim, params.vocab_dim] + params.intermediate),
                           *head_embed(params, txt_src)], reduced_dims=[params.vocab_dim, params.head_dim])
 
@@ -189,8 +184,8 @@ def build(params: ModelParameter,
 
         if params.use_language:
             reduced_shape = token_out.shape - params.vocab_dims
-            max_logit = reduce_max(mtf.stop_gradient(token_out), output_shape=reduced_shape)
-            msk = mtf.stop_gradient(txt_msk * cat_msk_tgt * (1 / txt_tgt.size))
+            max_logit = reduce_max(token_out, output_shape=reduced_shape)
+            msk = txt_msk * cat_msk_tgt * (1 / txt_tgt.size)
             token_loss = einsum([log(reduce_sum(exp(token_out - max_logit), output_shape=reduced_shape)), msk],
                                 output_shape=[])
             token_loss += einsum([token_out, *head_embed(params, txt_tgt), constant_scalar(params, -1), msk],
@@ -201,14 +196,11 @@ def build(params: ModelParameter,
             if txt_msk is not None:
                 token_loss = einsum([constant_scalar(params, txt_msk.size), reciprocal(reduce_sum(txt_msk)),
                                      constant_scalar(params, cat_msk_tgt.size), reciprocal(reduce_sum(cat_msk_tgt)),
-                                     mtf.stop_gradient(token_loss)], output_shape=[])
-            token_loss = mtf.stop_gradient(token_loss)
+                                     token_loss], output_shape=[])
 
             if params.calc_accuracy:
-                accuracy = einsum([cast(mtf.equal(head_argmax(mtf.stop_gradient(token_out), params.vocab_dims),
-                                                  txt_tgt),
+                accuracy = einsum([cast(mtf.equal(head_argmax(token_out, params.vocab_dims), txt_tgt),
                                         params.variable_dtype.activation_dtype), msk], output_shape=[])
-                accuracy = mtf.stop_gradient(accuracy)
 
         if params.use_video:
 
@@ -228,7 +220,7 @@ def build(params: ModelParameter,
 
             else:
                 size = constant_scalar(params, 1 / frame_out.size)
-                out = frame_out - mtf.stop_gradient(tgt)
+                out = frame_out - tgt
                 video_loss: mtf.Tensor = einsum([out, vid_msk_tgt, cat_msk_tgt, size, sign(out)], output_shape=[])
 
             loss_list.append(video_loss)
@@ -236,8 +228,7 @@ def build(params: ModelParameter,
             if vid_msk_tgt is not None:
                 video_loss = einsum([constant_scalar(params, vid_msk_tgt.size), reciprocal(reduce_sum(vid_msk_tgt)),
                                      constant_scalar(params, cat_msk_tgt.size), reciprocal(reduce_sum(cat_msk_tgt)),
-                                     mtf.stop_gradient(video_loss)], output_shape=[])
-            video_loss = mtf.stop_gradient(video_loss)
+                                     video_loss], output_shape=[])
         params.layer_idx = 0
 
         return add_n(loss_list), loss_list, video_loss, accuracy, token_loss, frame_out, token_out

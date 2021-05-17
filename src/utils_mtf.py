@@ -6,7 +6,7 @@ import tensorflow as tf
 
 from .dataclass import ModelParameter
 from .mtf_wrapper import floordiv, mod, one_hot
-from .utils_core import default, random_name
+from .utils_core import default
 
 tf1 = tf.compat.v1
 
@@ -17,26 +17,6 @@ TENSORS = typing.List[mtf.Tensor]
 OPT_SHAPE = typing.Optional[SHAPE]
 OPT_DIMS = typing.Optional[DIM_LIST]
 ALL_SHAPES = typing.Union[SHAPE, mtf.Tensor, mtf.Variable]
-
-
-class GuaranteeConst(mtf.Operation):
-    """
-    A tensor that always is constant.
-    It acts as a hint to the compiler to optimize a bit better.
-    """
-
-    def __init__(self, value: mtf.Tensor):
-        super().__init__([value], name=random_name("guarantee_const"))
-        self._outputs = [mtf.Tensor(self, value.shape, value.dtype)]
-
-    def lower(self, lowering):
-        mesh_impl = lowering.mesh_impl(self)
-        y = mesh_impl.slicewise(lambda x: tf.guarantee_const(tf.stop_gradient(x)), lowering.tensors[self.inputs[0]])
-        lowering.set_tensor_lowering(self.outputs[0], y)
-
-
-def guarantee_const(value):
-    return GuaranteeConst(value).outputs[0]
 
 
 def head_argmax(tensor: mtf.Tensor, dims: typing.List[mtf.Dimension]) -> mtf.Tensor:
@@ -57,6 +37,8 @@ def head_embed(params: ModelParameter, int_tokens: mtf.Tensor) -> typing.Tuple[m
                     dtype=params.variable_dtype.activation_dtype),
             one_hot(mod(int_tokens, params.vocab_size), params.vocab_dim,
                     dtype=params.variable_dtype.activation_dtype))
+
+
 def unanonymize(inp: mtf.Tensor, dim: typing.Union[mtf.Dimension, str]) -> mtf.Tensor:
     """
     Inverse of anonymize. Un-replicates tensor across axis by removing the underscore from the name of a dimension of

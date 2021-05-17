@@ -11,7 +11,7 @@ from ..dataclass import ModelParameter
 from ..mtf_wrapper import (add_n, constant_scalar, dropout as utils_dropout, einsum, exp, mod, mtf_range, reduce_mean,
                            rsqrt, sigmoid, sin)
 from ..utils_core import random_name
-from ..utils_mtf import DIM_LIST, SHAPE, anonymize_dim, dims_from_shape, guarantee_const, shape_size
+from ..utils_mtf import DIM_LIST, SHAPE, anonymize_dim, dims_from_shape, shape_size
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -128,8 +128,8 @@ def rezero(params, block_input: mtf.Tensor, name_extras: typing.List[str]) -> mt
 
 
 def _multi_dim_range(params: ModelParameter, dims: DIM_LIST) -> mtf.Tensor:
-    return guarantee_const(add_n([mtf_range(params.mesh, dim, params.variable_dtype.activation_dtype) * size
-                                  for dim, size in zip(dims, np.cumprod([1] + [d.size for d in dims[:-1]]))]))
+    return add_n([mtf_range(params.mesh, dim, params.variable_dtype.activation_dtype) * size
+                  for dim, size in zip(dims, np.cumprod([1] + [d.size for d in dims[:-1]]))])
 
 
 _EMBEDDINGS = {}
@@ -180,7 +180,7 @@ def embed(params: ModelParameter, shape: SHAPE) -> mtf.Tensor:
             feature_count /= 2
         features -= math.log(math.pi * 2 / position_count) - feature_count / 2
         features *= feature_count ** -0.5
-        out = guarantee_const(sin(op(positions, exp(features) + additive)) * params.embedding_stddev)
+        out = sin(op(positions, exp(features) + additive)) * params.embedding_stddev
         if learned:
             out *= normal_var(params, feature_dims, 1)
     if axial:
