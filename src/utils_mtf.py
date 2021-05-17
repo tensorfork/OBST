@@ -52,10 +52,11 @@ def head_argmax(tensor: mtf.Tensor, dims: typing.List[mtf.Dimension]) -> mtf.Ten
     return ind
 
 
-def head_embed(params: ModelParameter, int_tokens: mtf.Tensor) -> mtf.Tensor:
-    return one_hot(int_tokens, params.vocab_dim, dtype=params.variable_dtype.activation_dtype)
-
-
+def head_embed(params: ModelParameter, int_tokens: mtf.Tensor) -> typing.Tuple[mtf.Tensor, mtf.Tensor]:
+    return (one_hot(floordiv(int_tokens, params.vocab_size), params.head_dim,
+                    dtype=params.variable_dtype.activation_dtype),
+            one_hot(mod(int_tokens, params.vocab_size), params.vocab_dim,
+                    dtype=params.variable_dtype.activation_dtype))
 def unanonymize(inp: mtf.Tensor, dim: typing.Union[mtf.Dimension, str]) -> mtf.Tensor:
     """
     Inverse of anonymize. Un-replicates tensor across axis by removing the underscore from the name of a dimension of
