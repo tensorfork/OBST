@@ -6,80 +6,16 @@ import numpy as np
 import tensorflow as tf
 
 from .activation import activate_util
-from .backend import get_variable, linear_from_features, linear_to_features, normal_var, \
-    orthogonal_var
+from .backend import get_variable, linear_from_features, linear_to_features, normal_var
 from ..dataclass import ModelParameter
 from ..mtf_wrapper import (add_n, constant_scalar, dropout as utils_dropout, einsum, exp, mod, mtf_range, reduce_mean,
                            rsqrt, sigmoid, sin)
 from ..utils_core import random_name
-from ..utils_mtf import (DIM_LIST, SHAPE, anonymize_dim, deduplicate, dims_from_shape, guarantee_const, new_dim,
-                         shape_size)
+from ..utils_mtf import DIM_LIST, SHAPE, anonymize_dim, dims_from_shape, guarantee_const, shape_size
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
 tf1 = tf.compat.v1
-
-
-class GroupFeedForwardForward(mtf.Operation):
-    def __init__(self, params: ModelParameter, block_input: mtf.Tensor):
-        self.params = params
-        shape = [params.key_dim, anonymize_dim(params.key_dim, params.n_embd_per_head * params.group_linear_factor)]
-        new_key = new_dim(params.key_dim, params.n_embd * params.group_linear_factor)
-        super().__init__([block_input, orthogonal_var(params, shape)], name=random_name("gff_forward"))
-        out_shape = block_input.shape
-        if params.key_dim in out_shape.dims:
-            self.input_dim, self.output_dim = params.key_dim, new_key
-        else:
-            self.input_dim, self.output_dim = new_key, params.key_dim
-        self._outputs = [mtf.Tensor(self, out_shape - self.input_dim + self.output_dim, block_input.dtype)]
-
-    def gradient(self, grad_ys):
-        return GroupFeedForwardBackward(grad_ys, self.params, self)
-
-    def lower(self, lowering: mtf.Lowering):
-        mesh_impl: mtf.simd_mesh_impl.SimdMeshImpl = lowering.mesh_impl(self)
-        block_input: mtf.Tensor = self.inputs[0]
-        block_output: mtf.Tensor = self.outputs[0]
-        dims = deduplicate(block_input.shape.dims + self.input_dim + self.output_dim)
-        input_formula = ','.join(''.join(chr(dims.index(d)) for d in inp.shape) for inp in self.inputs)
-        output_formula = ''.join(chr(dims.index(d)) for d in block_output.shape)
-        einsum_formula = f'{input_formula}->{output_formula}'
-
-        def slicewise_fn(left, right):
-            return tf.einsum(einsum_formula, left, right)
-
-        y = mesh_impl.slicewise(slicewise_fn, *(lowering.tensors[inp] for inp in self.inputs))
-        lowering.set_tensor_lowering(block_output, y)
-
-
-class GroupFeedForwardBackward(mtf.Operation):
-    def __init__(self, grad_ys: mtf.Tensor, params: ModelParameter, forward: GroupFeedForwardForward):
-        super().__init__([grad_ys] + forward.inputs, name=random_name("gff_backward"))
-        self.params = params
-        self.input_dim, self.output_dim = forward.input_dim, forward.output_dim
-        self._outputs = [mtf.Tensor(self, inp.shape, inp.dtype) for inp in forward.inputs]
-
-    def lower(self, lowering: mtf.Lowering):
-        mesh_impl: mtf.simd_mesh_impl.SimdMeshImpl = lowering.mesh_impl(self)
-        grad_ys: mtf.Tensor = self.inputs[0]
-        block_input: mtf.Tensor = self.inputs[1]
-        var: mtf.Tensor = self.inputs[2]
-
-        dims = deduplicate(block_input.shape.dims + self.input_dim + self.output_dim)
-
-        input_formula0 = ','.join(''.join(chr(dims.index(d)) for d in inp.shape) for inp in [grad_ys, var])
-        output_formula0 = ''.join(chr(dims.index(d)) for d in block_input.shape)
-        einsum_formula0 = f'{input_formula0}->{output_formula0}'
-        input_formula1 = ','.join(''.join(chr(dims.index(d)) for d in inp.shape) for inp in [grad_ys, block_input])
-        output_formula1 = ''.join(chr(dims.index(d)) for d in var.shape)
-        einsum_formula1 = f'{input_formula1}->{output_formula1}'
-
-        def slicewise_fn(grad, inp, tf_var):
-            return [tf.einsum(einsum_formula0, grad, tf_var), tf.einsum(einsum_formula1, grad, inp)]
-
-        y = mesh_impl.slicewise(slicewise_fn, *(lowering.tensors[inp] for inp in self.inputs))
-        lowering.set_tensor_lowering(self.outputs[0], y[0])
-        lowering.set_tensor_lowering(self.outputs[1], y[1])
 
 
 class GroupNormalizeForward(mtf.Operation):
@@ -108,8 +44,6 @@ class GroupNormalizeForward(mtf.Operation):
         scale = 'scale' in name_extras
         shift = 'shift' in name_extras
 
-        params = self.params
-
         if len(self.inputs) > 1:
             feature_map = [mesh_impl.slice_shape([dim])[0] if dim in block_input.shape.dims else 1
                            for idx, dim in enumerate(self.inputs[1].shape.dims)]
@@ -117,14 +51,8 @@ class GroupNormalizeForward(mtf.Operation):
         def slicewise_fn(*tensors: tf.Tensor):
             tensors = list(tensors)
             x = tensors.pop(0)
-            shape = x.shape.as_list()
-            contract_dims = [feature_dim_index + 1]
-            x = tf.reshape(x,
-                           shape[:feature_dim_index] + [params.n_head, params.n_embd_per_head] +
-                           shape[feature_dim_index + 1:])
-            x -= tf.reduce_mean(x, contract_dims)
-            x /= tf.reduce_mean(tf.square(x), contract_dims)
-            x = tf.reshape(x, shape)
+            x -= tf.reduce_mean(x, feature_dim_index)
+            x /= tf.reduce_mean(tf.square(x), feature_dim_index)
             if scale:
                 x *= tf.reshape(tensors.pop(0), feature_map)
             if shift:
@@ -151,8 +79,6 @@ class GroupNormalizeBackward(mtf.Operation):
         feature_dim_index = dims.index(self.params.key_dim)
 
         if tensors:
-            feature_map = [mesh_impl.slice_shape([dim])[0] if dim in block_input.shape.dims else 1
-                           for idx, dim in enumerate(tensors[0].shape.dims)]
             summed_dims = [idx for idx, dim in enumerate(block_input.shape.dims) if dim not in tensors[0].shape.dims]
 
         name_extras = self.name_extras
@@ -163,16 +89,13 @@ class GroupNormalizeBackward(mtf.Operation):
 
         def slicewise_fn(grad_y: tf.Tensor, x: tf.Tensor, *tensors: tf.Tensor):
             tensors = list(tensors)
-            shape = x.shape.as_list()
-            contract_dims = [feature_dim_index + 1]
             size = params.n_embd_per_head
-            x = tf.reshape(x, shape[:feature_dim_index] + [params.n_head, size] + shape[feature_dim_index + 1:])
-            sum_square = tf.reduce_sum(tf.square(x), contract_dims)
-            divisor = tf.math.rsqrt(size * sum_square - tf.square(tf.reduce_sum(x, contract_dims))) * grad_y
-            grads = [divisor * size * (3 * sum_square - tf.square(tf.reduce_sum(x, contract_dims) - x))]
+            sum_square = tf.reduce_sum(tf.square(x), feature_dim_index)
+            divisor = tf.math.rsqrt(size * sum_square - tf.square(tf.reduce_sum(x, feature_dim_index))) * grad_y
+            grads = [divisor * size * (3 * sum_square - tf.square(tf.reduce_sum(x, feature_dim_index) - x))]
             if scale:
-                grads[0] *= tf.reshape(tensors.pop(0), feature_map)
-                grads.append(tf.reduce_sum(divisor * (x * size - tf.reduce_sum(x, contract_dims)), summed_dims))
+                grads[0] *= tensors.pop(0)
+                grads.append(tf.reduce_sum(divisor * (x * size - tf.reduce_sum(x, feature_dim_index)), summed_dims))
             if shift:
                 grads.append(tf.reduce_sum(grad_y, summed_dims))
             return tuple(grads)
@@ -283,21 +206,17 @@ def dropout(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing
 
 def feed_forward(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.List[str]) -> mtf.Tensor:
     if 'group' in name_extras:
-        def _from_feat():
-            return GroupFeedForwardForward(params, block_input)
-
-        def _out(x):
-            return GroupFeedForwardForward(params, x)
+        intermediate = [params.head_dim,
+                        anonymize_dim(params.key_dim, params.key_dim.size * params.group_linear_factor)]
     else:
-        def _from_feat():
-            return linear_from_features(params, block_input, params.intermediate)
+        intermediate = params.intermediate
 
-        def _out(x):
-            return linear_to_features(params, x, params.intermediate)
+    def _from_feat():
+        return linear_from_features(params, block_input, intermediate)
 
     mid = dropout(params, activate_util(name_extras, _from_feat()), name_extras)
     if 'glu' in name_extras or 'glu_add' in name_extras:
         mid *= sigmoid(_from_feat())
     if 'glu_add' in name_extras:
         mid += activate_util(name_extras, _from_feat())
-    return _out(mid)
+    return linear_to_features(params, mid, intermediate)
