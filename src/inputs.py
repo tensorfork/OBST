@@ -14,15 +14,120 @@ from tensorflow.data import Dataset
 from .dataclass import ModelParameter, align_tensor_op
 
 
-def split_files(path, slice_index, slice_count, seed):
-    filenames = tf.io.gfile.glob(path)
+def split_files(filenames, slice_index, slice_count, seed, runs_log=None):
     if not filenames:
         raise ValueError
     files = sorted(filenames)
     if seed != 0:
         random.seed(seed)
         random.shuffle(files)
-    return files[slice_index::slice_count]
+
+    element_skip = [0] * len(files)
+
+    if runs_log is not None:
+        file_list_skip, element_skip = simulate_data_pipeline(runs_log, files)
+        files = [files[i] for i, s in enumerate(file_list_skip) if not s]
+        element_skip = [element_skip[i] for i, s in enumerate(file_list_skip) if not s]
+
+    return files[slice_index::slice_count], element_skip[slice_index::slice_count]
+
+
+def simulate_data_pipeline(runs_log, file_list):
+    file_list = [int(str(f).split('_')[-1].strip('.tfrecord')) for f in file_list]
+
+    file_list_skip = [False] * len(file_list)
+    element_skip = [0] * len(file_list)
+    file_idx_list = list(range(len(file_list)))
+
+    for run in runs_log:
+
+        # Remove full skip TF-records.
+        _file_list = [file_list[i] for i, s in enumerate(file_list_skip) if not s]
+        # Remove TF-record element skips for full skip remove.
+        _element_skip = [element_skip[i] for i, s in enumerate(file_list_skip) if not s]
+        # Remove TF-record index.
+        _file_idx_list = [file_idx_list[i] for i, s in enumerate(file_list_skip) if not s]
+        # Remove already used elements.
+        _file_list = [_file_list[i] - s for i, s in enumerate(_element_skip)]
+
+        slice_count = run['slice_count']
+        ctx = run['ctx']
+        step_stop_count = run['steps'] * run['grad_accumulation'] * (run['batch_size'] // slice_count)
+        interleave_size = run['interleave_size']
+        token_patch_size = run['token_patch_size']
+
+        for slice_index in range(slice_count):
+            _file_list_slice = _file_list[slice_index::slice_count]
+            _file_idx_list_slice = _file_idx_list[slice_index::slice_count]
+
+            _step_stop_count = step_stop_count
+
+            for interleave_idx in range(0, len(_file_list_slice), interleave_size):
+                # Remove all elements for a TF-record how not fit in to the last sample.
+                # Also remove patch_size element for the X Y sample split.
+                interleave_chunk = [c - ((c - token_patch_size) % ctx) - token_patch_size for c in
+                                    _file_list_slice[interleave_idx:interleave_idx + interleave_size]]
+                _interleave_chunk = interleave_chunk.copy()
+
+                sum_step_in_interleave = sum(interleave_chunk) // ctx
+                if sum_step_in_interleave > _step_stop_count:
+
+                    # Take from interleave until all TF-records in interleave batch are emty
+                    # or until step_stop_count is done.
+                    inter_idx = 0
+                    while sum(interleave_chunk) > 0 and _step_stop_count > 0:
+
+                        # Jump the interleave sample pos to a non depleted TF-record.
+                        while interleave_chunk[inter_idx] <= 0:
+                            inter_idx += 1
+                            # Set the Interleave index back to zero when it has reached the end of the interleave batch.
+                            if inter_idx >= len(interleave_chunk):
+                                inter_idx = 0
+
+                        # Remove n ctx elements from the TF-record.
+                        interleave_chunk[inter_idx] = interleave_chunk[inter_idx] - ctx
+                        _step_stop_count -= 1
+
+                        inter_idx += 1
+                        # Set the Interleave index back to zero when it has reached the end of the interleave batch.
+                        if inter_idx >= len(interleave_chunk):
+                            inter_idx = 0
+
+                    # Calculate how much of a TF-record has been used.
+                    remove = [_inter - inter for _inter, inter in zip(_interleave_chunk, interleave_chunk)]
+
+                    # Find out the actual index of the TF-record and then add the update the element skip for the tfrecord.
+                    # And also determine if one of the used TF-record has been depleted and update the file skip flack.
+                    for c_i in range(len(interleave_chunk)):
+                        file_idx = _file_idx_list_slice[interleave_idx + c_i]
+                        if interleave_chunk[c_i] <= 0:
+                            file_list_skip[file_idx] = True
+                        element_skip[file_idx] = element_skip[file_idx] + remove[c_i]
+
+                    # Brake the interleave sample loop if step_stop_count is done.
+                    if step_stop_count <= 0:
+                        break
+
+                else:
+
+                    _step_stop_count -= sum_step_in_interleave
+                    for c_i in range(len(interleave_chunk)):
+                        file_idx = _file_idx_list_slice[interleave_idx + c_i]
+                        file_list_skip[file_idx] = True
+                        element_skip[file_idx] = _interleave_chunk[c_i]
+
+        # Only skip full tfrecord when there all TF-records in one interleave batch are depleted.
+        for slice_index in range(slice_count):
+            file_list_skip_slice = file_list_skip[slice_index::slice_count]
+            file_idx_list_slice = file_idx_list[slice_index::slice_count]
+
+            for interleave_idx in range(0, len(file_list_skip_slice), interleave_size):
+                full_depleted = sum(
+                    file_list_skip_slice[interleave_idx:interleave_idx + interleave_size]) == interleave_size
+                for idx in file_idx_list_slice[interleave_idx:interleave_idx + interleave_size]:
+                    file_list_skip[idx] = full_depleted
+
+    return file_list_skip, element_skip
 
 
 def get_video_decoder(params, language_token_num_per_frame=0, frame_height=None, frame_width=None, color_channels=None,
@@ -125,7 +230,8 @@ def get_video_decoder(params, language_token_num_per_frame=0, frame_height=None,
     return tf.function(frame_decoder)
 
 
-def _text_decoder(decoder, data: tf.Tensor, ctx: int, patch_size: int, chunk_size: int, shuffle_buffer: int = 0):
+def _text_decoder(decoder, data: tf.Tensor, ctx: int, patch_size: int, chunk_size: int,
+                  shuffle_buffer: int = 0, _skip=None):
     """
     Read a given tfrecord and windowed text dataset out of it.
     :param data: protobuf object to decode
@@ -136,6 +242,8 @@ def _text_decoder(decoder, data: tf.Tensor, ctx: int, patch_size: int, chunk_siz
 
     def chunk(tfrecorddataset):
         data = decoder(tfrecorddataset)
+        if _skip is not None:
+            data = data.skip(tf.cast(_skip, dtype=tf.int64))
         if chunk_size > 0:
             data = data.batch(chunk_size)
         data = data.window(size=ctx + patch_size, shift=ctx, stride=1, drop_remainder=True)
@@ -241,7 +349,8 @@ def dataset_text(path: str, params: ModelParameter, sub_batch_size: int, slice_i
                 'cat_mask_x':  _padding_cat_mask, 'cat_mask_y': _padding_cat_mask
                 }
 
-    data = split_files(path, slice_index, slice_count, params.data_seed * params.shuffle_input_filenames)
+    filenames = tf.io.gfile.glob(path)
+    data, _ = split_files(filenames, slice_index, slice_count, params.data_seed * params.shuffle_input_filenames)
     decoder = decode_intstring if 'int64' in data[0] else decode_bytestring
     print('decode_intstring' if 'int64' in data[0] else 'decode_bytestring', data[0], len(data))
 
@@ -363,8 +472,9 @@ def dataset_video(path: str, params: ModelParameter, sub_batch_size: int, slice_
                                       color_channels=color_channels,
                                       color_quantization_value=params.color_quantization_value)
 
-    data: Dataset = tf.data.Dataset.from_tensor_slices(split_files(path, slice_index, slice_count,
-                                                                   params.data_seed * params.shuffle_input_filenames))
+    filenames = tf.io.gfile.glob(path)
+    data: Dataset = tf.data.Dataset.from_tensor_slices(split_files(filenames, slice_index, slice_count,
+                                                                   params.data_seed * params.shuffle_input_filenames)[0])
 
     data = data.repeat()
     data = data.interleave(lambda x: _decode_func(x),
@@ -376,7 +486,7 @@ def dataset_video(path: str, params: ModelParameter, sub_batch_size: int, slice_
     return data
 
 
-def dataset(params: ModelParameter, sub_batch_size, slice_index, slice_count):
+def dataset(params: ModelParameter, sub_batch_size, slice_index, slice_count, _):
     """
     Creates any dataset containing shuffled and prefetched windows.
     :param params: ModelParameter
@@ -422,82 +532,21 @@ def dataset(params: ModelParameter, sub_batch_size, slice_index, slice_count):
     return dset
 
 
-def _get_number_of_documents(filename):
-    # extracts number of files from a filename formatted "<name>_<num_documents>.tfrecords."
-    # if no pattern is matched, returns None
-    match = re.search("_(\d{1,}).tfrecords$", filename)
-    return int(match.group(1)) if match is not None else match
-
-
-def _get_number_of_documents_by_iteration(filename):
-    # extracts number of files from a tfrecord document in the event it doesn't have metadata in the filename
-    # this could be very slow.
-    logging.warning(
-            "inputs/sequential_input() found no metadata found in filename - iterating through first tfrecord to find global length")
-    count = 0
-    for item in tf.io.tf_record_iterator(filename):
-        count += 1
-    return count
-
-
-def _get_skip_index(all_files, n_batches):
-    prev_cumsum = 0
-    cumsum = 0
-    global_n_documents = None
-    for count, f in cycle(enumerate(all_files)):
-        prev_cumsum = cumsum
-        if _get_number_of_documents(f) is not None:
-            cumsum += _get_number_of_documents(f)
-        elif global_n_documents is None:
-            global_n_documents = _get_number_of_documents_by_iteration(f)
-            cumsum += global_n_documents
-        else:
-            cumsum += global_n_documents
-        if cumsum == n_batches:
-            remainder = 0
-            skip_idx = count + 1
-        elif cumsum > n_batches:
-            remainder = n_batches - prev_cumsum
-            skip_idx = count
-            break
-    return skip_idx, remainder
-
-
-def gpt_neo_input(params: ModelParameter, sub_batch_size: int, slice_index: int, slice_count: int):
-    """
-    Input fn that reads tfrecords encoded with a fixed chunk size (== n_ctx + 1), and that either:
-
-        - has the number of documents for each tfrecord file encoded in the title in the format
-          <name>_<n_documents>.tfrecords.
-
-          OR
-
-        - has a fixed number of documents per tfrecord file.
-
-    If the glob pattern above isn't matched, we assume that each document has the same number of samples as the first
-    tfrecord read.
-    If this isn't the case, it may result in errors, or some samples being missed.
-
-    This means we can calculate the number of samples we've seen so far using the global step,
-    and can use dataset.skip() to iterate through the list of filenames, as opposed to the whole dataset, which is
-    incredibly inefficient.
-
-    If training is starting and stopping often, as with TPU pre-emption, reading the whole dataset sequentially appears
-    to improve model
-    performance, as it results in less repeated data.
-    :param params: serialized dict of ModelParameter instance
-    :return: tensorflow dataset
-    """
+def gpt_neo_input(params: ModelParameter, sub_batch_size: int, slice_index: int, slice_count: int, runs_log=None):
 
     params = ModelParameter(params)
-
     filenames = []
-    for config in params.dataset_configs:
-        filenames.extend(split_files(config['path'], slice_index, slice_count,
-                                     params.shuffle_input_filenames * params.data_seed))
+    for file in params.dataset_configs:
+        filenames.extend(tf.io.gfile.glob(file['path']))
 
-    # repeat filenames to infinity
-    dset: Dataset = tf.data.Dataset.from_tensor_slices(filenames).repeat()
+    filenames, skips = split_files(filenames, slice_index, slice_count,
+                                   params.shuffle_input_filenames * params.data_seed, runs_log)
+
+    dset = tf.data.Dataset.zip((tf.data.Dataset.from_tensor_slices(filenames),
+                                tf.data.Dataset.from_tensor_slices(skips)))
+
+    if params.use_random_dataloader:
+        dset = dset.repeat()
 
     def _memory_func(x):
         shp = (sub_batch_size, params.n_ctx // params.token_patch_size + params.output_offset, params.token_patch_size)
@@ -510,13 +559,16 @@ def gpt_neo_input(params: ModelParameter, sub_batch_size: int, slice_index: int,
         return {'token_x': vals1, 'token_y': vals2}
 
     decoder = decode_intstring if 'int64' in filenames[0] else decode_bytestring
-    dset = dset.interleave(lambda x: _text_decoder(decoder, x, params.n_ctx,
+    dset = dset.interleave(lambda x, _skip: _text_decoder(decoder, x, params.n_ctx,
                                                    params.token_patch_size * params.output_offset, -1,
-                                                   params.shuffle_buffer * int(params.use_random_dataloader)),
+                                                   params.shuffle_buffer * int(params.use_random_dataloader), _skip),
                            cycle_length=params.interleaved_datasets,
                            num_parallel_calls=tf.data.experimental.AUTOTUNE)
 
-    dset = dset.shuffle(params.shuffle_buffer, seed=(params.data_seed if not params.use_random_dataloader else None))
+    if params.use_random_dataloader:
+        dset = dset.shuffle(params.shuffle_buffer,
+                            seed=(params.data_seed if not params.use_random_dataloader else None))
+
     dset = dset.batch(sub_batch_size)
     dset = dset.map(_memory_func)
     dset = dset.map(align_tensor_op)
