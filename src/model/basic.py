@@ -64,9 +64,9 @@ class GroupNormalizeForward(mtf.Operation):
 
 
 class GroupNormalizeBackward(mtf.Operation):
-    def __init__(self, grad_y: mtf.Tensor, params: ModelParameter, name_extras: typing.List[str],
+    def __init__(self, grad_y: typing.List[mtf.Tensor], params: ModelParameter, name_extras: typing.List[str],
                  tensors: typing.List[mtf.Tensor]):
-        super().__init__([grad_y] + tensors, name=random_name("group_normalize_backward"))
+        super().__init__(grad_y + tensors, name=random_name("group_normalize_backward"))
         self._outputs = [mtf.Tensor(self, inp.shape, inp.dtype) for inp in tensors]
         self.name_extras = name_extras
         self.params = params
