@@ -51,8 +51,8 @@ class GroupNormalizeForward(mtf.Operation):
         def slicewise_fn(*tensors: tf.Tensor):
             tensors = list(tensors)
             x = tensors.pop(0)
-            x -= tf.reduce_mean(x, feature_dim_index)
-            x /= tf.reduce_mean(tf.square(x), feature_dim_index)
+            x -= tf.reduce_mean(x, feature_dim_index, keepdims=True)
+            x /= tf.reduce_mean(tf.square(x), feature_dim_index, keepdims=True)
             if scale:
                 x *= tf.reshape(tensors.pop(0), feature_map)
             if shift:
@@ -90,12 +90,15 @@ class GroupNormalizeBackward(mtf.Operation):
         def slicewise_fn(grad_y: tf.Tensor, x: tf.Tensor, *tensors: tf.Tensor):
             tensors = list(tensors)
             size = params.n_embd_per_head
-            sum_square = tf.reduce_sum(tf.square(x), feature_dim_index)
-            divisor = tf.math.rsqrt(size * sum_square - tf.square(tf.reduce_sum(x, feature_dim_index))) * grad_y
-            grads = [divisor * size * (3 * sum_square - tf.square(tf.reduce_sum(x, feature_dim_index) - x))]
+            sum_square = tf.reduce_sum(tf.square(x), feature_dim_index, keepdims=True)
+            divisor = tf.math.rsqrt(size * sum_square - tf.square(tf.reduce_sum(x, feature_dim_index, keepdims=True)))
+            divisor *= grad_y
+            grads = [(3 * sum_square - tf.square(tf.reduce_sum(x, feature_dim_index, keepdims=True) - x))
+                     * divisor * size]
             if scale:
                 grads[0] *= tensors.pop(0)
-                grads.append(tf.reduce_sum(divisor * (x * size - tf.reduce_sum(x, feature_dim_index)), summed_dims))
+                grads.append(tf.reduce_sum(divisor * (x * size - tf.reduce_sum(x, feature_dim_index, keepdims=True)),
+                                           summed_dims))
             if shift:
                 grads.append(tf.reduce_sum(grad_y, summed_dims))
             return tuple(grads)
