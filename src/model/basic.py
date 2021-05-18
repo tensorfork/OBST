@@ -190,10 +190,13 @@ _EMBEDDINGS = {}
 
 
 def embed(params: ModelParameter, shape: SHAPE, name_extras: typing.Union[typing.List[str], str]) -> mtf.Tensor:
+    if isinstance(shape, (list, tuple)):
+        shape = mtf.Shape(shape)
+
     if params.shared_position_embedding and shape in _EMBEDDINGS:
         return _EMBEDDINGS[shape]
 
-    position_dims: SHAPE = (shape - params.feature_dims) - params.intermediate
+    position_dims: mtf.Shape = (shape - params.feature_dims) - params.intermediate
     feature_dims = list(set(shape.dims).union(set(params.feature_dims + params.intermediate)))
 
     if 'absolute' in name_extras:
