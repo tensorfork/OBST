@@ -98,8 +98,6 @@ def attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typi
         key += embed(params, [dim] + params.feature_dims, name_extras)
     val = linear_to_features(params, base, intermediate)
     qry = linear_to_features(params, base, intermediate)
-    if 'activate_attention' in name_extras:
-        key = activate_util(name_extras, key)
     val_dim = params.key_dim if linear else dim
     key = anonymize(key, dim)
     val = anonymize(val, val_dim)
