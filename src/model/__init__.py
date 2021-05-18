@@ -9,7 +9,7 @@ from .revnet import RevGradOp
 from ..dataclass import BlockConfig, ModelParameter
 from ..mtf_wrapper import (add_n, cast, constant_scalar, dropout, einsum, exp, log, one_hot, ones, reciprocal,
                            reduce_logsumexp, reduce_max, reduce_sum, sigmoid, sign, zeros_like)
-from ..utils_mtf import concat, head_argmax, head_embed, slice
+from ..utils_mtf import concat, head_argmax, head_embed, slice, weighted_add
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -96,8 +96,9 @@ def build(params: ModelParameter,
                                                             params.head_dim]
                                                            + tgt.shape[2:]))
 
-            src = src * vid_msk_src + embed(params, shape=vid.shape[2:]) * (1 - vid_msk_src)
-            src = src * cat_msk_src + embed(params, shape=vid.shape[2:]) * (1 - cat_msk_src)
+            if params.empty_frame_embedding is not None:
+                src = weighted_add(src, embed(params, vid.shape[2:], params.empty_frame_embedding), vid_msk_src)
+                src = weighted_add(src, embed(params, vid.shape[2:], params.empty_frame_embedding), cat_msk_src)
 
             src = linear_to_features(params, src, input_features)
 
@@ -106,8 +107,8 @@ def build(params: ModelParameter,
 
         # Language embedding and initial feed forward.
         if params.use_language:
-            txt = einsum([embed(params, [params.head_dim, params.vocab_dim] + params.intermediate),
-                          *head_embed(params, txt_src)], reduced_dims=[params.vocab_dim, params.head_dim])
+            txt_embd = embed(params, [params.head_dim, params.vocab_dim] + params.intermediate, params.token_embedding)
+            txt = einsum([txt_embd, *head_embed(params, txt_src)], reduced_dims=[params.vocab_dim, params.head_dim])
 
             if params.input_dropout > 0:
                 txt = dropout(txt, rate=params.input_dropout)
@@ -125,7 +126,7 @@ def build(params: ModelParameter,
         with tf1.variable_scope('body'):
             if params.use_initial_position_embedding:
                 for dim in (src.shape - params.feature_dims).dims[1:]:
-                    src += embed(params, [dim] + params.feature_dims)
+                    src += embed(params, [dim] + params.feature_dims, params.position_embedding)
 
             if params.use_revnet:
                 out = (src, None, src, None)

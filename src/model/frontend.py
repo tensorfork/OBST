@@ -19,7 +19,6 @@ LAYER_FUNCTIONS = {'feed_forward': feed_forward,
                    'attention':    attention,
                    'norm':         norm,
                    'rezero':       rezero,
-                   'embed':        embed,
                    'activation':   activate,
                    'convolution':  convolution,
                    'dropout':      dropout

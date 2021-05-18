@@ -189,28 +189,28 @@ def _multi_dim_range_tf(params: ModelParameter, dims: DIM_LIST) -> mtf.Tensor:
 _EMBEDDINGS = {}
 
 
-def embed(params: ModelParameter, shape: SHAPE) -> mtf.Tensor:
+def embed(params: ModelParameter, shape: SHAPE, name_extras: typing.Union[typing.List[str], str]) -> mtf.Tensor:
     if params.shared_position_embedding and shape in _EMBEDDINGS:
         return _EMBEDDINGS[shape]
 
     position_dims: SHAPE = (shape - params.feature_dims) - params.intermediate
     feature_dims = list(set(shape.dims).union(set(params.feature_dims + params.intermediate)))
 
-    if 'absolute' in params.position_embedding:
-        if 'split' in params.position_embedding:
+    if 'absolute' in name_extras:
+        if 'split' in name_extras:
             out = normal_var(params, position_dims, params.embedding_stddev)
             out *= normal_var(params, feature_dims, params.embedding_stddev)
         else:
             out = normal_var(params, shape)
-    elif 'axial' in params.position_embedding:
-        if 'split' in params.position_embedding:
+    elif 'axial' in name_extras:
+        if 'split' in name_extras:
             feature_dims = []
             position_dims = shape.dims
         out = einsum([normal_var(params, [dim] + feature_dims, params.embedding_stddev) for dim in position_dims],
                      output_shape=shape)
-    elif 'relative' in params.position_embedding:
+    elif 'relative' in name_extras:
         out = RelativeEmbeddingForward(params, shape).outputs[0]
-        if 'learned':
+        if 'learned' in name_extras:
             out *= normal_var(params, feature_dims, params.embedding_stddev)
     else:
         raise ValueError("relative(-learned) or absolute(-split) or axial(-split)")
