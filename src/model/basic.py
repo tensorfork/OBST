@@ -6,12 +6,12 @@ import numpy as np
 import tensorflow as tf
 
 from .activation import activate_util
-from .backend import get_variable, linear_from_features, linear_to_features, normal_var
+from .backend import get_intermediate, get_variable, linear_from_features, linear_to_features, normal_var
 from ..dataclass import ModelParameter
 from ..mtf_wrapper import (add_n, constant_scalar, dropout as utils_dropout, einsum, mtf_range, reduce_mean,
                            rsqrt, sigmoid)
 from ..utils_core import random_name
-from ..utils_mtf import DIM_LIST, SHAPE, anonymize_dim, dims_from_shape, shape_size
+from ..utils_mtf import DIM_LIST, SHAPE, dims_from_shape, shape_size
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -230,11 +230,7 @@ def dropout(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing
 
 
 def feed_forward(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.List[str]) -> mtf.Tensor:
-    if 'group' in name_extras:
-        intermediate = [params.head_dim,
-                        anonymize_dim(params.key_dim, params.key_dim.size * params.group_linear_factor)]
-    else:
-        intermediate = params.intermediate
+    intermediate = get_intermediate(params, name_extras)
 
     def _from_feat():
         return linear_from_features(params, block_input, intermediate)

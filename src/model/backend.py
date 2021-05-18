@@ -10,7 +10,7 @@ from tensorflow.python.ops.init_ops import Initializer
 from ..dataclass import ModelParameter
 from ..mtf_wrapper import einsum, scoped
 from ..utils_core import default, random_name
-from ..utils_mtf import OPT_DIMS, SHAPE, deduplicate, feature_dims_used
+from ..utils_mtf import OPT_DIMS, SHAPE, anonymize_dim, deduplicate, feature_dims_used
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -93,3 +93,9 @@ def linear_from_features(params: ModelParameter, block_input: mtf.Tensor,
 
 def communicating_linear(params: ModelParameter, block_input: mtf.Tensor):
     return linear_to_features(params, block_input, params.intermediate)
+
+
+def get_intermediate(params: ModelParameter, name_extras: typing.List[str]):
+    if 'group' not in name_extras:
+        return params.intermediate
+    return [params.head_dim, anonymize_dim(params.key_dim, params.key_dim.size * params.group_linear_factor)]
