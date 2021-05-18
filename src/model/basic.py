@@ -152,8 +152,7 @@ class RelativeEmbeddingForward(mtf.Operation):
         features = tf.exp(features) + additive
         out = tf.einsum(f'{position_formula},{feature_formula}->{shape_formula}', positions, features)
         out = tf.math.sin(out) * params.embedding_stddev
-
-        lowering.set_tensor_lowering(self.outputs[0], mesh_impl.LaidOutTensor([out]))
+        lowering.set_tensor_lowering(self.outputs[0], mesh_impl.import_tf_tensor(self.outputs[0], out))
 
 
 def norm(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.List[str]) -> mtf.Tensor:
