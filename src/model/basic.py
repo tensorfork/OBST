@@ -125,7 +125,7 @@ class RelativeEmbeddingForward(mtf.Operation):
         shape = self.shape
 
         position_dims: SHAPE = (shape - params.feature_dims) - params.intermediate
-        feature_dims = list(set(shape.dims).union(set(params.feature_dims + params.intermediate)))
+        feature_dims = list(set(shape.dims) & set(params.feature_dims + params.intermediate))
         position_count = shape_size(position_dims)
 
         cosine = 'cosine' in params.position_embedding
@@ -197,7 +197,7 @@ def embed(params: ModelParameter, shape: SHAPE, name_extras: typing.Union[typing
         return _EMBEDDINGS[shape]
 
     position_dims: mtf.Shape = (shape - params.feature_dims) - params.intermediate
-    feature_dims = list(set(shape.dims).union(set(params.feature_dims + params.intermediate)))
+    feature_dims = list(set(shape.dims) & set(params.feature_dims + params.intermediate))
 
     if 'absolute' in name_extras:
         if 'split' in name_extras:
