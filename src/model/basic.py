@@ -1,16 +1,12 @@
-import math
 import typing
 
 import mesh_tensorflow as mtf
-import numpy as np
 import tensorflow as tf
 
 from .activation import activate_util
-from .backend import get_intermediate, get_variable, linear_from_features, linear_to_features, normal_var
+from .backend import get_intermediate, get_variable, linear_from_features, linear_to_features
 from ..dataclass import ModelParameter
-from ..mtf_wrapper import (add_n, dropout as utils_dropout, einsum, mtf_range, sigmoid)
-from ..utils_core import random_name
-from ..utils_mtf import DIM_LIST, SHAPE, shape_size
+from ..mtf_wrapper import (dropout as utils_dropout, sigmoid)
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -19,8 +15,6 @@ tf1 = tf.compat.v1
 
 def rezero(params, block_input: mtf.Tensor, name_extras: typing.List[str]) -> mtf.Tensor:
     return block_input * get_variable(params, [], tf.constant_initializer(0))
-
-
 
 
 def dropout(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.List[str]):

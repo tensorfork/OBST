@@ -1,10 +1,7 @@
 """
 Contains input pipeline code that generates tensorflow datasets if called
 """
-import logging
 import random
-import re
-from itertools import cycle
 
 import numpy as np
 import tensorflow as tf2
@@ -123,7 +120,7 @@ def simulate_data_pipeline(runs_log, file_list):
 
             for interleave_idx in range(0, len(file_list_skip_slice), interleave_size):
                 full_depleted = sum(
-                    file_list_skip_slice[interleave_idx:interleave_idx + interleave_size]) == interleave_size
+                        file_list_skip_slice[interleave_idx:interleave_idx + interleave_size]) == interleave_size
                 for idx in file_idx_list_slice[interleave_idx:interleave_idx + interleave_size]:
                     file_list_skip[idx] = full_depleted
 
@@ -474,7 +471,8 @@ def dataset_video(path: str, params: ModelParameter, sub_batch_size: int, slice_
 
     filenames = tf.io.gfile.glob(path)
     data: Dataset = tf.data.Dataset.from_tensor_slices(split_files(filenames, slice_index, slice_count,
-                                                                   params.data_seed * params.shuffle_input_filenames)[0])
+                                                                   params.data_seed * params.shuffle_input_filenames)[
+                                                           0])
 
     data = data.repeat()
     data = data.interleave(lambda x: _decode_func(x),
@@ -533,7 +531,6 @@ def dataset(params: ModelParameter, sub_batch_size, slice_index, slice_count, _)
 
 
 def gpt_neo_input(params: ModelParameter, sub_batch_size: int, slice_index: int, slice_count: int, runs_log=None):
-
     params = ModelParameter(params)
     filenames = []
     for file in params.dataset_configs:
@@ -560,8 +557,9 @@ def gpt_neo_input(params: ModelParameter, sub_batch_size: int, slice_index: int,
 
     decoder = decode_intstring if 'int64' in filenames[0] else decode_bytestring
     dset = dset.interleave(lambda x, _skip: _text_decoder(decoder, x, params.n_ctx,
-                                                   params.token_patch_size * params.output_offset, -1,
-                                                   params.shuffle_buffer * int(params.use_random_dataloader), _skip),
+                                                          params.token_patch_size * params.output_offset, -1,
+                                                          params.shuffle_buffer * int(params.use_random_dataloader),
+                                                          _skip),
                            cycle_length=params.interleaved_datasets,
                            num_parallel_calls=tf.data.experimental.AUTOTUNE)
 

@@ -6,11 +6,11 @@ import tensorflow as tf
 from .activation import activate_util
 from .backend import get_attention_dim, get_intermediate, linear_from_features, linear_to_features
 from .basic import dropout
+from .embedding import embed
 from ..dataclass import ModelParameter
 from ..mtf_wrapper import einsum
 from ..utils_core import random_name
 from ..utils_mtf import anonymize, anonymize_dim
-from .embedding import embed
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 

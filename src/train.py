@@ -520,12 +520,13 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         if tf.io.gfile.exists(log_path):
             _run_log = json.load(tf.io.gfile.GFile(log_path, 'r'))
 
-        curran_stats = {'steps': params.current_step, 'ctx': params.n_ctx,
-                        'slice_count': len(hosts_to_hold_ds),
-                        'interleave_size': params.interleaved_datasets,
-                        'batch_size': params.train_batch_size,
+        curran_stats = {'steps':             params.current_step, 'ctx': params.n_ctx,
+                        'slice_count':       len(hosts_to_hold_ds),
+                        'interleave_size':   params.interleaved_datasets,
+                        'batch_size':        params.train_batch_size,
                         'grad_accumulation': params.grad_accumulation,
-                        'token_patch_size': params.token_patch_size}
+                        'token_patch_size':  params.token_patch_size
+                        }
         json.dump((_run_log + [curran_stats]), tf.io.gfile.GFile(log_path, 'w'), indent=2)
 
         if len(_run_log) > 0 and not params.use_random_dataloader:

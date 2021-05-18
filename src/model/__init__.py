@@ -4,8 +4,8 @@ import mesh_tensorflow as mtf
 import tensorflow as tf
 
 from .backend import linear, linear_from_features, linear_to_features
-from .frontend import block_part_fn
 from .embedding import embed
+from .frontend import block_part_fn
 from .revnet import RevGradOp
 from ..dataclass import BlockConfig, ModelParameter
 from ..mtf_wrapper import (add_n, cast, constant_scalar, dropout, einsum, exp, log, one_hot, ones, reciprocal,
