@@ -278,7 +278,9 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             self.input_pipeline_shape['txt_msk'] = self.token_dim_shape
 
         self.input_pipeline_shape = align_tensor_op(self.input_pipeline_shape)
+
         self.attention_idx = 0
+        self.cached_embeddings = {}
 
     def __getitem__(self, key: str) -> typing.Any:
         print(f"Getting {key} via deprecated interface")
