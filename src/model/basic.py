@@ -121,6 +121,8 @@ class RelativeEmbeddingForward(mtf.Operation):
         return False
 
     def lower(self, lowering: mtf.Lowering):
+        mesh_impl: mtf.simd_mesh_impl.SimdMeshImpl = lowering.mesh_impl(self)
+
         params = self.params
         shape = self.shape
 
@@ -151,7 +153,7 @@ class RelativeEmbeddingForward(mtf.Operation):
         out = tf.einsum(f'{position_formula},{feature_formula}->{shape_formula}', positions, features)
         out = tf.math.sin(out) * params.embedding_stddev
 
-        lowering.set_tensor_lowering(self.outputs[0], out)
+        lowering.set_tensor_lowering(self.outputs[0], mesh_impl.LaidOutTensor([out]))
 
 
 def norm(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.List[str]) -> mtf.Tensor:
