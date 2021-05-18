@@ -4,7 +4,7 @@ import mesh_tensorflow as mtf
 import tensorflow as tf
 
 from .activation import activate_util
-from .backend import communicating_linear, get_attention_dim, get_intermediate, linear_from_features
+from .backend import communicating_linear, get_attention_dim, get_intermediate, linear_from_features, linear_to_features
 from .basic import dropout, embed
 from ..dataclass import ModelParameter
 from ..mtf_wrapper import einsum
@@ -93,11 +93,11 @@ def attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typi
 
     key = 0
     if 'embedded' in name_extras or 'context' in name_extras:
-        key = communicating_linear(params, base) * dim.size ** -0.5
+        key = linear_to_features(params, base, intermediate) * dim.size ** -0.5
     if 'embedded' in name_extras or 'positional' in name_extras:
         key += embed(params, [dim] + params.feature_dims, name_extras)
-    val = communicating_linear(params, base)
-    qry = communicating_linear(params, base)
+    val = linear_to_features(params, base, intermediate)
+    qry = linear_to_features(params, base, intermediate)
     if 'activate_attention' in name_extras:
         key = activate_util(name_extras, key)
     val_dim = params.key_dim if linear else dim
