@@ -183,12 +183,12 @@ def _multi_dim_range(params: ModelParameter, dims: DIM_LIST) -> mtf.Tensor:
 
 
 def _multi_dim_range_tf(params: ModelParameter, dims: DIM_LIST) -> mtf.Tensor:
-    out, *items = [tf.reshape(tf.range(0, dim.size * size, size, dtype=params.variable_dtype.activation_dtype),
+    out, *items = [tf.reshape(tf.range(0, dim.size * size, size),
                               [1] * idx + [dim.size] + [1] * (len(dims) - idx - 1))
                    for idx, (dim, size) in enumerate(zip(dims, np.cumprod([1] + [d.size for d in dims[:-1]])))]
     for i in items:
         out += i
-    return out
+    return tf.cast(out, params.variable_dtype.activation_dtype)
 
 
 _EMBEDDINGS = {}
