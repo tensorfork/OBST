@@ -178,8 +178,9 @@ def rezero(params, block_input: mtf.Tensor, name_extras: typing.List[str]) -> mt
 
 
 def _multi_dim_range(params: ModelParameter, dims: DIM_LIST) -> mtf.Tensor:
-    return add_n([mtf_range(params.mesh, dim, params.variable_dtype.activation_dtype) * size
-                  for dim, size in zip(dims, np.cumprod([1] + [d.size for d in dims[:-1]]))])
+    return mtf.cast(add_n([mtf_range(params.mesh, dim, tf.int32) * size
+                           for dim, size in zip(dims, np.cumprod([1] + [d.size for d in dims[:-1]]))]),
+                    params.variable_dtype.activation_dtype)
 
 
 def _multi_dim_range_tf(params: ModelParameter, dims: DIM_LIST) -> mtf.Tensor:
