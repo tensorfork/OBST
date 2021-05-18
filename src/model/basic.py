@@ -148,7 +148,7 @@ class RelativeEmbeddingForward(mtf.Operation):
         features -= math.log(math.pi * 2 / position_count) - feature_count / 2
         features *= feature_count ** 0.5
         features = tf.exp(features) + additive
-        out = tf.einsum(f'{position_formula},{feature_formula},{shape_formula}', positions, features)
+        out = tf.einsum(f'{position_formula},{feature_formula}->{shape_formula}', positions, features)
         out = tf.math.sin(out) * params.embedding_stddev
 
         lowering.set_tensor_lowering(self.outputs[0], out)
