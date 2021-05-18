@@ -110,7 +110,7 @@ class GroupNormalizeBackward(mtf.Operation):
 
 class RelativeEmbeddingForward(mtf.Operation):
     def __init__(self, params: ModelParameter, shape: SHAPE):
-        super().__init__([], name=random_name("rel_embed"))
+        super().__init__([], params.mesh, name=random_name("rel_embed"))
         if isinstance(shape, list):
             shape = mtf.Shape(shape)
         self.params = params

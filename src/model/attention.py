@@ -4,7 +4,7 @@ import mesh_tensorflow as mtf
 import tensorflow as tf
 
 from .activation import activate_util
-from .backend import communicating_linear, get_attention_dim, get_intermediate, linear_from_features, linear_to_features
+from .backend import get_attention_dim, get_intermediate, linear_from_features, linear_to_features
 from .basic import dropout, embed
 from ..dataclass import ModelParameter
 from ..mtf_wrapper import einsum
