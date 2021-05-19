@@ -297,7 +297,7 @@ def shape_addition(*shapes: ALL_SHAPES):
     dims = []
     for s in shapes:
         dims.extend(dims_from_shape(s))
-    return mtf.Shape(deduplicate(s))
+    return mtf.Shape(deduplicate(dims))
 
 
 def missing_dims(self: ALL_SHAPES, other: ALL_SHAPES):
