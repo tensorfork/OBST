@@ -53,17 +53,21 @@ def spatial_mixing(args: BlockArgs) -> mtf.Tensor:
 
     if 'feed_forward' in args:
         args = args(feed_forward_in(args))
-
     if 'norm' in args:
         args = args(norm(args('group')))
 
     mid = anonymize(args.tensor, dim)
     old = [args.params.head_dim, tmp]
     new = [args.params.head_dim, dim]
-    inputs = [mid, args.tensor, orthogonal_var(args.params, old + new)]
+
+    inputs = [mid, orthogonal_var(args.params, old + new)]
     if is_masked(args):
         inputs.append(compare_range(args.params, dim, tmp, greater_equal))
+    if 'multiply_gate' in args:
+        inputs.append(args.tensor)
+
     mid = einsum(inputs, deduplicate((args.tensor.shape - old).dims + new))
+
     if 'feed_forward' not in args:
         return mid
     return feed_forward_out(args(mid))
