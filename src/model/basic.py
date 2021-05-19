@@ -4,11 +4,11 @@ import mesh_tensorflow as mtf
 import tensorflow as tf
 
 from .activation import activate
-from .backend import get_intermediate, get_variable, linear_from_features, linear_to_features, orthogonal_var
+from .backend import get_intermediate, get_variable, linear_from_features, linear_to_features, normal_var
 from .normalization import norm
 from ..dataclass import BlockArgs
 from ..mtf_wrapper import dropout as utils_dropout, einsum, greater_equal, sigmoid
-from ..utils_mtf import anonymize, anonymize_dim, compare_range, deduplicate, get_attention_dim, is_masked
+from ..utils_mtf import anonymize, anonymize_dim, compare_range, get_attention_dim, is_masked
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -57,17 +57,17 @@ def spatial_mixing(args: BlockArgs) -> mtf.Tensor:
         args = args(norm(args))
 
     mid = anonymize(args.tensor, dim)
-    old = [args.params.head_dim, tmp]
-    new = [args.params.head_dim, dim]
+    base = [args.params.head_dim] * ('group' in args)
+    old = base + [tmp]
+    new = base + [dim]
 
-    inputs = [mid, orthogonal_var(args.params, old + new)]
+    inputs = [mid, normal_var(args.params, old + new, stddev=0.02 / dim.size)]
     if is_masked(args):
         inputs.append(compare_range(args.params, dim, tmp, greater_equal))
-    if 'multiply_gate' in args:
-        inputs.append(args.tensor)
 
     mid = einsum(inputs, args.tensor.shape)
-
+    if 'multiply_gate' in args:
+        mid = args.tensor * (mid + normal_var(args.params, new, mean=1))
     if 'feed_forward' not in args:
         return mid
     return feed_forward_out(args(mid))
