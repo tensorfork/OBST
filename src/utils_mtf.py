@@ -315,7 +315,7 @@ def compare_range(params: ModelParameter, dim0: mtf.Dimension, dim1: mtf.Dimensi
 
 
 def get_attention_dim(args: BlockArgs) -> ATTENTION_DIM:
-    attention_dims = (args.tensor.size - args.params.feature_dims - args.params.intermediate)[1:]
+    attention_dims = (args.tensor.shape - args.params.feature_dims - args.params.intermediate)[1:]
     idx = args.params.attention_idx % len(attention_dims)
     dim = attention_dims[idx]
     return ATTENTION_DIM(idx, dim)
