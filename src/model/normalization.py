@@ -22,7 +22,7 @@ class GroupNormalizeForward(mtf.Operation):
         super().__init__(inputs, name=random_name("group_normalize_forward"))
         self._outputs = [mtf.Tensor(self, args.tensor.shape, args.tensor.dtype)]
         self.args = args
-        self.normed_dim = feature_dims - [args.params.head_dim]
+        self.normed_dim = (feature_dims - [args.params.head_dim]).dims[0]
 
     def gradient(self, grad_ys):
         return GroupNormalizeBackward(grad_ys, self).outputs
