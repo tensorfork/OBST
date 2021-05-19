@@ -353,7 +353,8 @@ class BlockArgs:
         return new
 
     def __iter__(self):
-        return self.name_extras
+        for itm in self.name_extras:
+            yield itm
 
     def __len__(self):
         return len(self.name_extras)
