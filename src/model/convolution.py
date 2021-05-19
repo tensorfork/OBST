@@ -1,18 +1,18 @@
-import typing
-
 import mesh_tensorflow as mtf
 import numpy as np
 import tensorflow as tf
 
 from .backend import OrthogonalInit, get_attention_dim, get_variable
-from ..dataclass import ModelParameter
+from ..dataclass import BlockArgs
 from ..utils_core import random_name
 
 tf1 = tf.compat.v1
 
 
 class ConvolutionForward(mtf.Operation):
-    def __init__(self, params: ModelParameter, x: mtf.Tensor, dim: mtf.Dimension, kernel_size: int, masked: bool):
+    def __init__(self, args: BlockArgs, dim: mtf.Dimension, kernel_size: int, masked: bool):
+        params = args.params
+        x = args.tensor
         shape: mtf.Shape = x.shape
         batch = shape.dims[0].size
         self.sizes = sizes = [d.size for d in shape]
@@ -124,10 +124,9 @@ class ConvolutionFilterBackward(mtf.Operation):
         lowering.set_tensor_lowering(self.outputs[1], dw)
 
 
-def convolution(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.List[str]):
-    idx, dim = get_attention_dim(params, block_input)
+def convolution(args: BlockArgs):
+    idx, dim = get_attention_dim(args)
     convolution_size = 16
-    if len(name_extras) > 0 and name_extras[-1].isdigit():
-        convolution_size = int(name_extras[-1])
-    return ConvolutionForward(params, block_input, dim, convolution_size,
-                              idx in params.masked_attention_dimensions).outputs[0]
+    if len(args) > 0 and args[-1].isdigit():
+        convolution_size = int(args[-1])
+    return ConvolutionForward(args, dim, convolution_size, idx in args.params.masked_attention_dimensions).outputs[0]

@@ -153,6 +153,11 @@ class ModelParameter(typing.Dict[str, typing.Any]):
                 print(f"WARNING: Unknown ModelParameter {k}={v!r}")
             self.__dict__[k] = v
 
+        if isinstance(self.position_embedding, str):
+            self.position_embedding = self.position_embedding.split('-')
+            self.token_embedding = self.token_embedding.split('-')
+            self.empty_frame_embedding = self.empty_frame_embedding.split('-')
+
         self.multi_loss_strategy = self.multi_loss_strategy.lower()
         if self.multi_loss_strategy not in ["linear", "pcgrad", "mgda"]:
             print(f'{self.multi_loss_strategy} is not in the support option list for multi loss strategies: '
@@ -349,3 +354,9 @@ class BlockArgs:
 
     def __iter__(self):
         return self.name_extras
+
+    def __len__(self):
+        return len(self.name_extras)
+
+    def __getitem__(self, idx: int):
+        return self.name_extras[idx]

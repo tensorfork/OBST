@@ -7,7 +7,7 @@ from .activation import activate
 from .backend import get_attention_dim, get_intermediate, linear_from_features, linear_to_features
 from .basic import dropout
 from .embedding import embed
-from ..dataclass import ModelParameter,BlockArgs
+from ..dataclass import BlockArgs
 from ..mtf_wrapper import einsum
 from ..utils_core import random_name
 from ..utils_mtf import anonymize, anonymize_dim
@@ -83,25 +83,23 @@ class SoftmaxForward(mtf.Operation):
         lowering.set_tensor_lowering(self.outputs[0], y)
 
 
-def attention(args:BlockArgs):
+def attention(args: BlockArgs):
     idx, dim = get_attention_dim(args)
-    params.attention_idx += 1
-    intermediate = get_intermediate(params, name_extras)
-    base = activate(name_extras, linear_from_features(params, block_input, intermediate))
-    base = dropout(params, base, name_extras)
-    linear = 'linear' in name_extras
-    masked = idx in params.masked_attention_dimensions
+    args.params.attention_idx += 1
+    intermediate = get_intermediate(args)
+    base = args(dropout(args(activate(args(linear_from_features(args, intermediate))))))
+    masked = idx in args.params.masked_attention_dimensions
 
     key = 0
-    if 'embedded' in name_extras or 'context' in name_extras:
-        key = linear_to_features(params, base, intermediate) * dim.size ** -0.5
-    if 'embedded' in name_extras or 'positional' in name_extras:
-        key += embed(params, [dim] + params.feature_dims, name_extras)
-    val = linear_to_features(params, base, intermediate)
-    qry = linear_to_features(params, base, intermediate)
-    val_dim = params.key_dim if linear else dim
+    if 'embedded' in args or 'context' in args:
+        key = linear_to_features(base, intermediate) * dim.size ** -0.5
+    if 'embedded' in args or 'positional' in args:
+        key += embed(args, [dim] + args.params.feature_dims)
+    val = linear_to_features(base, intermediate)
+    qry = linear_to_features(base, intermediate)
+
     key = anonymize(key, dim)
-    val = anonymize(val, val_dim)
-    inputs = [qry, anonymize(key, [params.key_dim] * linear + [dim] * (masked or not linear))]
-    lgt = einsum(inputs, reduced_dims=[dim if linear else params.key_dim])
-    return einsum(SoftmaxForward(lgt, dim, masked).outputs + [val], block_input.shape)
+    val = anonymize(val, dim)
+
+    lgt = einsum([qry, anonymize(key, dim)], reduced_dims=[args.params.key_dim])
+    return einsum(SoftmaxForward(lgt, dim, masked).outputs + [val], args.tensor.shape)

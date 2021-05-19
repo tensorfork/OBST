@@ -7,7 +7,7 @@ from .backend import linear, linear_from_features, linear_to_features
 from .embedding import embed
 from .frontend import block_part_fn
 from .revnet import RevGradOp
-from ..dataclass import BlockConfig, ModelParameter
+from ..dataclass import BlockArgs, BlockConfig, ModelParameter
 from ..mtf_wrapper import (add_n, cast, constant_scalar, dropout, einsum, exp, log, one_hot, ones, reciprocal,
                            reduce_logsumexp, reduce_max, reduce_sum, sigmoid, sign, zeros_like)
 from ..utils_mtf import concat, head_argmax, head_embed, slice, weighted_add
@@ -66,7 +66,7 @@ def build(params: ModelParameter,
         spatial_ctx: mtf.Dimension = txt_tgt.shape[-2] if params.use_language else vid.shape[2]
 
         if params.use_video:
-
+            base_args = BlockArgs(params, vid, [''])
             vid = dropout(vid, rate=params.input_dropout)
 
             if params.use_bit_fold_input_pipeline:
@@ -98,23 +98,25 @@ def build(params: ModelParameter,
                                                            + tgt.shape[2:]))
 
             if params.empty_frame_embedding is not None:
-                src = weighted_add(src, embed(params, vid.shape[2:], params.empty_frame_embedding), vid_msk_src)
-                src = weighted_add(src, embed(params, vid.shape[2:], params.empty_frame_embedding), cat_msk_src)
+                embed_args = base_args(params.empty_frame_embedding)
+                src = weighted_add(src, embed(embed_args, vid.shape[2:]), vid_msk_src)
+                src = weighted_add(src, embed(embed_args, vid.shape[2:]), cat_msk_src)
 
-            src = linear_to_features(params, src, input_features)
+            src = linear_to_features(base_args(src), input_features)
 
             for config_idx, config in enumerate(params.input_block_config):
                 src = block_part_fn(params, config, src, f'vid_inp{config_idx}')
 
         # Language embedding and initial feed forward.
         if params.use_language:
-            txt_embd = embed(params, [params.head_dim, params.vocab_dim] + params.intermediate, params.token_embedding)
+            txt_embd = embed(base_args(params.token_embedding),
+                             [params.head_dim, params.vocab_dim] + params.intermediate)
             txt = einsum([txt_embd, *head_embed(params, txt_src)], reduced_dims=[params.vocab_dim, params.head_dim])
 
             if params.input_dropout > 0:
                 txt = dropout(txt, rate=params.input_dropout)
 
-            txt = linear_to_features(params, txt, [txt_tgt.shape[-1]] + params.intermediate)
+            txt = linear_to_features(base_args(txt), [txt_tgt.shape[-1]] + params.intermediate)
 
             for config_idx, config in enumerate(params.input_block_config):
                 txt = block_part_fn(params, config, txt, f'lang_inp{config_idx}')
@@ -127,7 +129,7 @@ def build(params: ModelParameter,
         with tf1.variable_scope('body'):
             if params.use_initial_position_embedding:
                 for dim in (src.shape - params.feature_dims).dims[1:]:
-                    src += embed(params, [dim] + params.feature_dims, params.position_embedding)
+                    src += embed(base_args(params.position_embedding), [dim] + params.feature_dims)
 
             if params.use_revnet:
                 out = (src, None, src, None)
@@ -160,7 +162,7 @@ def build(params: ModelParameter,
             for config_idx, config in enumerate(params.output_block_config):
                 token_out = block_part_fn(params, config, token_out, f'lang_out{config_idx}')
 
-            token_out = linear_from_features(params, token_out, [txt_tgt.shape[-1]] + params.vocab_dims)
+            token_out = linear_from_features(base_args(token_out), [txt_tgt.shape[-1]] + params.vocab_dims)
 
         if params.use_video:
             frame_out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)
@@ -176,10 +178,10 @@ def build(params: ModelParameter,
                                         [params.batch_dim, params.sequence_per_head_dim, params.head_dim]
                                         + frame_out.shape[2:])
 
-                frame_out = linear(params, frame_out, [features_dim], [vid.shape[-1], params.discrete_color_dim])
+                frame_out = linear(base_args(frame_out), [features_dim], [vid.shape[-1], params.discrete_color_dim])
 
             else:
-                frame_out = sigmoid(linear_from_features(params, frame_out, vid.shape[-1:]))
+                frame_out = sigmoid(linear_from_features(base_args(frame_out), vid.shape[-1:]))
 
         loss_list = []
         accuracy = None

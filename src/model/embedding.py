@@ -6,7 +6,7 @@ import numpy as np
 import tensorflow as tf
 
 from .backend import normal_var
-from ..dataclass import ModelParameter
+from ..dataclass import ModelParameter, BlockArgs
 from ..mtf_wrapper import (einsum)
 from ..utils_core import random_name
 from ..utils_mtf import DIM_LIST, SHAPE, shape_size
@@ -72,36 +72,37 @@ class RelativeEmbeddingForward(mtf.Operation):
         lowering.set_tensor_lowering(self.outputs[0], mesh_impl.import_tf_tensor(self.outputs[0], out))
 
 
-def embed(params: ModelParameter, shape: SHAPE, name_extras: typing.Union[typing.List[str], str]) -> mtf.Tensor:
+def embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
     if isinstance(shape, (list, tuple)):
         shape = mtf.Shape(shape)
 
-    if params.shared_position_embedding and shape in params.cached_embeddings:
-        return params.cached_embeddings[shape]
+    if args.params.shared_position_embedding and shape in args.params.cached_embeddings:
+        return args.params.cached_embeddings[shape]
 
-    position_dims: mtf.Shape = (shape - params.feature_dims) - params.intermediate
-    feature_dims = list(set(shape.dims) & set(params.feature_dims + params.intermediate))
+    position_dims: mtf.Shape = (shape - args.params.feature_dims) - args.params.intermediate
+    feature_dims = list(set(shape.dims) & set(args.params.feature_dims + args.params.intermediate))
 
-    if 'absolute' in name_extras:
-        if 'split' in name_extras:
-            out = normal_var(params, position_dims, params.embedding_stddev)
-            out *= normal_var(params, feature_dims, params.embedding_stddev)
+    if 'absolute' in args:
+        if 'split' in args:
+            out = normal_var(args.params, position_dims, args.params.embedding_stddev)
+            out *= normal_var(args.params, feature_dims, args.params.embedding_stddev)
         else:
-            out = normal_var(params, shape)
-    elif 'axial' in name_extras:
-        if 'split' in name_extras:
+            out = normal_var(args.params, shape)
+    elif 'axial' in args:
+        if 'split' in args:
             feature_dims = []
             position_dims = shape.dims
-        out = einsum([normal_var(params, [dim] + feature_dims, params.embedding_stddev) for dim in position_dims],
+        out = einsum([normal_var(args.params, [dim] + feature_dims, args.params.embedding_stddev)
+                      for dim in position_dims],
                      output_shape=shape)
-    elif 'relative' in name_extras:
-        out = RelativeEmbeddingForward(params, shape).outputs[0]
-        if 'learned' in name_extras:
-            out *= normal_var(params, feature_dims, params.embedding_stddev)
+    elif 'relative' in args:
+        out = RelativeEmbeddingForward(args.params, shape).outputs[0]
+        if 'learned' in args:
+            out *= normal_var(args.params, feature_dims, args.params.embedding_stddev)
     else:
         raise ValueError("relative(-learned) or absolute(-split) or axial(-split)")
 
-    if params.shared_position_embedding:
-        params.cached_embeddings[shape] = out
+    if args.params.shared_position_embedding:
+        args.params.cached_embeddings[shape] = out
 
     return out
