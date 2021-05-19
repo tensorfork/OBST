@@ -52,7 +52,7 @@ def spatial_mixing(args: BlockArgs) -> mtf.Tensor:
     tmp = anonymize_dim(dim)
 
     if 'feed_forward' in args:
-        args = args(feed_forward_in(args))
+        args = args(activate(args(feed_forward_in(args))))
     if 'norm' in args:
         args = args(norm(args))
 
