@@ -3,7 +3,7 @@ import typing
 import mesh_tensorflow as mtf
 import tensorflow as tf
 
-from .backend import normal_var
+from .backend import get_intermediate, normal_var
 from ..dataclass import BlockArgs
 from ..mtf_wrapper import constant_scalar, einsum, reduce_mean, rsqrt
 from ..utils_core import random_name
@@ -13,15 +13,16 @@ tf1 = tf.compat.v1
 
 
 class GroupNormalizeForward(mtf.Operation):
-    def __init__(self, args: BlockArgs):
+    def __init__(self, args: BlockArgs, feature_dims: mtf.Shape):
         inputs = [args.tensor]
         if 'scale' in args:
-            inputs.append(normal_var(args.params, args.params.feature_dims, mean=1))
+            inputs.append(normal_var(args.params, feature_dims, mean=1))
         if 'shift' in args:
-            inputs.append(normal_var(args.params, args.params.feature_dims, mean=0))
+            inputs.append(normal_var(args.params, feature_dims, mean=0))
         super().__init__(inputs, name=random_name("group_normalize_forward"))
         self._outputs = [mtf.Tensor(self, args.tensor.shape, args.tensor.dtype)]
         self.args = args
+        self.normed_dim = feature_dims - [args.params.head_dim]
 
     def gradient(self, grad_ys):
         return GroupNormalizeBackward(grad_ys, self).outputs
@@ -31,7 +32,7 @@ class GroupNormalizeForward(mtf.Operation):
 
         block_input: mtf.Tensor = self.inputs[0]
         dims = dims_from_shape(block_input)
-        feature_dim_index = dims.index(self.args.params.key_dim)
+        feature_dim_index = dims.index(self.normed_dim)
 
         scale = 'scale' in self.args
         shift = 'shift' in self.args
@@ -67,14 +68,14 @@ class GroupNormalizeBackward(mtf.Operation):
         block_input: mtf.Tensor = block_input
         dims = dims_from_shape(block_input)
 
-        params = self.forward.args.params
-        feature_dim_index = dims.index(params.key_dim)
+        feature_dim_index = dims.index(self.forward.normed_dim)
 
         if tensors:
             summed_dims = [idx for idx, dim in enumerate(block_input.shape.dims) if dim not in tensors[0].shape.dims]
 
         scale = 'scale' in self.forward.args
         shift = 'shift' in self.forward.args
+        params = self.forward.args.params
 
         def slicewise_fn(grad_y: tf.Tensor, x: tf.Tensor, *tensors: tf.Tensor):
             tensors = list(tensors)
@@ -98,11 +99,12 @@ class GroupNormalizeBackward(mtf.Operation):
 
 
 def norm(args: BlockArgs) -> mtf.Tensor:
-    if 'group' in args:
-        return GroupNormalizeForward(args).outputs[0]
-
     block_input = args.tensor
-    feature_dims = shape_crossection(block_input.shape, args.params.feature_dims + args.params.intermediate)
+    feature_dims = shape_crossection(block_input.shape, args.params.feature_dims + get_intermediate(args))
+
+    if 'group' in args:
+        return GroupNormalizeForward(args, feature_dims).outputs[0]
+
     normalized_shape = block_input.shape - feature_dims
     block_input -= reduce_mean(block_input, output_shape=normalized_shape)
     scale = [rsqrt(1e-6 + einsum([block_input, block_input,
