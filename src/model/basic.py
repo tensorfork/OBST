@@ -66,7 +66,7 @@ def spatial_mixing(args: BlockArgs) -> mtf.Tensor:
     if 'multiply_gate' in args:
         inputs.append(args.tensor)
 
-    mid = einsum(inputs, deduplicate((args.tensor.shape - old).dims + new))
+    mid = einsum(inputs, args.tensor.shape)
 
     if 'feed_forward' not in args:
         return mid
