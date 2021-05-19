@@ -1,12 +1,12 @@
 import argparse
 import io
-import multiprocessing
 import os
 import shutil
 import string
 
 import ftfy
 import jsonlines
+import time
 import jsonpickle
 import requests
 import simdjson
@@ -17,44 +17,43 @@ from tokenizers.pre_tokenizers import Split
 from tokenizers.trainers import BpeTrainer
 
 
-# import ftfy
-
-# tokenizer = Tokenizer.from_file("data/tokenizer-wiki.json")
-
 def file_generator(pid, procs):
     base_url = 'http://eaidata.bmk.sh/data/pile/train/%s.jsonl.zst'
     splits = 30
     parse_fn = simdjson.Parser().parse
     tmp_name = f".tmp.download.{pid}"
-    idx = [0]
+    total = [0]
 
     if not os.path.exists('pile'):
         os.mkdir('pile')
 
-    def _json_parser(x):
+    def _parser(x):
         try:
             return parse_fn(x).as_dict()
         except ValueError:
             return x
 
     def _write(text):
-        with open(f'pile/{pid}_{idx[0]}.txt') as f:
-            f.write(ftfy.fix_text(text).replace('    ', '\t'))
-        idx[0] += 1
+        out = ftfy.fix_text(text).replace('    ', '\t')
+        total[0] += len(out)
+        return out
 
     for i in range(pid, splits, procs):
         with requests.get(base_url.replace("%s", str(i).zfill(2)), stream=True) as r, open(tmp_name, 'wb') as f:
             shutil.copyfileobj(r.raw, f)
         with open(tmp_name, 'rb') as f:
-            for item in jsonlines.Reader(io.BufferedReader(zstandard.ZstdDecompressor().stream_reader(f)),
-                                         loads=_json_parser):
+            read = jsonlines.Reader(io.BufferedReader(zstandard.ZstdDecompressor().stream_reader(f)), loads=_parser)
+            for idx, item in enumerate(read):
                 if isinstance(item, dict):
                     item = item['text']
                 if isinstance(item, list):
                     for itm in item:
-                        _write(itm)
+                        yield _write(itm)
                 else:
-                    _write(item)
+                    yield _write(item)
+                if idx % 1000:
+                    print("Chars: {out} - Took: {time.time().1f}s")
+        print(f"FINISHED {i}")
         os.remove(tmp_name)
 
 
@@ -66,8 +65,6 @@ def main():
     parser.add_argument("--files", type=str, default='',
                         help="List of files to train tokenizer on, split by comma")
     parser.add_argument("--pile", type=bool, default=False, help="Whether to download the pile")
-    parser.add_argument("--procs", type=int, default=8,
-                        help="Number of processes used in pile download. Only used in pile download.")
     parser.add_argument("--vocab_size", type=int, default=65536, help="Items in vocabulary")
     parser.add_argument("--separator", type=int, default=4, help="Separator character")
     parser.add_argument("--cache_capacity", type=int, default=1024 * 1024 * 1024,
@@ -79,31 +76,13 @@ def main():
     regex = Regex(f"""[{chars}]|[^{chars}]+""")
     special_tokens = [chr(i) for i in range(256)]
 
-    # grab files
-    files = args.files.split(',')
-    if args.pile:
-        if files:
-            print("Ignoring --files flag, as --pile is used")
-        if not os.path.exists('pile'):
-            procs = [multiprocessing.Process(target=file_generator, args=(i, args.procs)) for i in range(args.procs)]
-            for p in procs:
-                p.start()
-            for p in procs:
-                p.join()
-        files = list(os.listdir('pile'))
-    for f in files:
-        if os.path.exists(args.fixed_file_prefix + f):
-            continue
-        with open(f, 'r', errors='ignore') as r, open(f'fixed-{f}', 'w', errors='ignore') as w:
-            w.write(ftfy.fix_file(r))
-
     # set up tokenizer
     tokenizer = Tokenizer(BPE(unk_token='\x01', cache_capacity=args.cache_capacity, merges=None, dropout=None))
     trainer = BpeTrainer(special_tokens=special_tokens, vocab_size=args.vocab_size)
     tokenizer.pre_tokenizer = Split(regex, 'isolated')
 
     # train and save
-    tokenizer.train([args.fixed_file_prefix + f for f in files], trainer)
+    tokenizer.train_from_iterator(file_generator(0, 1), trainer)
     tokenizer.save(f".tmp.json")
     with open(f"{args.output}.json", 'w', errors='ignore') as w, open(f".tmp.json", 'r', errors='ignore') as r:
         w.write(jsonpickle.dumps(jsonpickle.loads(r.read()), indent=4))
