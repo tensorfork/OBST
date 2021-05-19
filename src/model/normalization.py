@@ -38,8 +38,8 @@ class GroupNormalizeForward(mtf.Operation):
         shift = 'shift' in self.args
 
         if len(self.inputs) > 1:
-            feature_map = [mesh_impl.slice_shape([dim])[0] if dim in block_input.shape.dims else 1
-                           for idx, dim in enumerate(self.inputs[1].shape.dims)]
+            feature_map = [mesh_impl.slice_shape([dim])[0] if dim in self.inputs[1].shape.dims else 1
+                           for idx, dim in enumerate(block_input.shape.dims)]
 
         def slicewise_fn(*tensors: tf.Tensor):
             tensors = list(tensors)
