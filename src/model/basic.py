@@ -48,7 +48,7 @@ def feed_forward(args: BlockArgs) -> mtf.Tensor:
 
 
 def spatial_mixing(args: BlockArgs) -> mtf.Tensor:
-    dim = get_attention_dim(args)
+    dim = get_attention_dim(args).dim
     tmp = anonymize_dim(dim)
 
     if 'feed_forward' in args:
