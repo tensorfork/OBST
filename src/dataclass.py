@@ -323,3 +323,29 @@ def align_tensor_op(x):
     if 'txt_msk' in x:
         tensors.append(x['txt_msk'])
     return tensors
+
+
+class BlockArgs:
+    def __init__(self, params: ModelParameter, tensor: mtf.Tensor, name_extras: typing.List[str]):
+        self.params = params
+        self.tensor = tensor
+        self.name_extras = name_extras
+
+    def __call__(self, *args: typing.Union[ModelParameter, mtf.Tensor, typing.List[str], str]):
+        new = BlockArgs(self.params, self.tensor, self.name_extras[:])
+        for a in args:
+            if isinstance(a, ModelParameter):
+                new.params = a
+            elif isinstance(a, mtf.Tensor):
+                new.tensor = a
+            elif isinstance(a, list):
+                new.name_extras = a
+            elif isinstance(a, str):
+                new.name_extras.append(str)
+            else:
+                raise ValueError(f"Argument {a} is of unsupported type {type(a)}. "
+                                 f"Only ModelParameter, mtf.Tensor, typing.List[str] and str are supported")
+        return new
+
+    def __iter__(self):
+        return self.name_extras

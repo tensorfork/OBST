@@ -7,7 +7,7 @@ import tensorflow as tf
 from tensorflow.python.ops import array_ops, gen_linalg_ops, math_ops, random_ops
 from tensorflow.python.ops.init_ops import Initializer
 
-from ..dataclass import ModelParameter
+from ..dataclass import BlockArgs, ModelParameter
 from ..mtf_wrapper import einsum, scoped
 from ..utils_core import default, random_name
 from ..utils_mtf import OPT_DIMS, SHAPE, anonymize_dim, deduplicate, feature_dims_used
@@ -66,36 +66,28 @@ def normal_var(params: ModelParameter, shape: SHAPE, stddev: float = 0.02, mean:
     return scoped("normal_var", get_variable, params, shape, tf.random_normal_initializer(stddev=stddev, mean=mean))
 
 
-def get_attention_dim(params: ModelParameter, block_input: typing.Union[mtf.Tensor, mtf.Shape]) -> ATTENTION_DIM:
-    if isinstance(block_input, mtf.Tensor):
-        block_input = block_input.shape
-    attention_dims = (block_input - params.feature_dims - params.intermediate)[1:]  # Ex: Shape[Sequence, Width, Height]
-    idx = params.attention_idx % len(attention_dims)
+def get_attention_dim(args: BlockArgs) -> ATTENTION_DIM:
+    attention_dims = (args.tensor.size - args.params.feature_dims - args.params.intermediate)[1:]
+    idx = args.params.attention_idx % len(attention_dims)
     dim = attention_dims[idx]
     return ATTENTION_DIM(idx, dim)
 
 
-def linear(params: ModelParameter, block_input: mtf.Tensor, old: typing.List[mtf.Dimension],
-           new: typing.List[mtf.Dimension]) -> mtf.Tensor:
-    return einsum([block_input, orthogonal_var(params, old + new)],
-                  deduplicate((block_input.shape - old).dims + new))
+def linear(args: BlockArgs, old: typing.List[mtf.Dimension], new: typing.List[mtf.Dimension]) -> mtf.Tensor:
+    return einsum([args.tensor, orthogonal_var(args.params, old + new)],
+                  deduplicate((args.tensor.shape - old).dims + new))
 
 
-def linear_to_features(params: ModelParameter, block_input: mtf.Tensor,
-                       old: typing.Optional[typing.List[mtf.Dimension]] = None) -> mtf.Tensor:
-    return linear(params, block_input, default(old, params.feature_dims), params.feature_dims)
+def linear_to_features(args: BlockArgs, old: typing.Optional[typing.List[mtf.Dimension]] = None) -> mtf.Tensor:
+    return linear(args, default(old, args.params.feature_dims), args.params.feature_dims)
 
 
-def linear_from_features(params: ModelParameter, block_input: mtf.Tensor,
-                         new: typing.Optional[typing.List[mtf.Dimension]] = None) -> mtf.Tensor:
-    return linear(params, block_input, params.feature_dims, default(new, params.intermediate))
+def linear_from_features(args: BlockArgs, new: typing.Optional[typing.List[mtf.Dimension]] = None) -> mtf.Tensor:
+    return linear(args, args.params.feature_dims, default(new, args.params.intermediate))
 
 
-def communicating_linear(params: ModelParameter, block_input: mtf.Tensor):
-    return linear_to_features(params, block_input, params.intermediate)
-
-
-def get_intermediate(params: ModelParameter, name_extras: typing.List[str]):
-    if 'group' not in name_extras:
-        return params.intermediate
-    return [params.head_dim, anonymize_dim(params.key_dim, params.key_dim.size * params.group_linear_factor)]
+def get_intermediate(args: BlockArgs):
+    if 'group' not in args:
+        return args.params.intermediate
+    return [args.params.head_dim,
+            anonymize_dim(args.params.key_dim, args.params.key_dim.size * args.params.group_linear_factor)]

@@ -3,11 +3,11 @@ import typing
 import mesh_tensorflow as mtf
 import tensorflow as tf
 
-from .activation import activate_util
+from .activation import activate
 from .backend import get_attention_dim, get_intermediate, linear_from_features, linear_to_features
 from .basic import dropout
 from .embedding import embed
-from ..dataclass import ModelParameter
+from ..dataclass import ModelParameter,BlockArgs
 from ..mtf_wrapper import einsum
 from ..utils_core import random_name
 from ..utils_mtf import anonymize, anonymize_dim
@@ -83,11 +83,11 @@ class SoftmaxForward(mtf.Operation):
         lowering.set_tensor_lowering(self.outputs[0], y)
 
 
-def attention(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.List[str]):
-    idx, dim = get_attention_dim(params, block_input)
+def attention(args:BlockArgs):
+    idx, dim = get_attention_dim(args)
     params.attention_idx += 1
     intermediate = get_intermediate(params, name_extras)
-    base = activate_util(name_extras, linear_from_features(params, block_input, intermediate))
+    base = activate(name_extras, linear_from_features(params, block_input, intermediate))
     base = dropout(params, base, name_extras)
     linear = 'linear' in name_extras
     masked = idx in params.masked_attention_dimensions

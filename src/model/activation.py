@@ -3,7 +3,7 @@ import typing
 import mesh_tensorflow as mtf
 import tensorflow as tf
 
-from ..dataclass import ModelParameter
+from ..dataclass import BlockArgs, ModelParameter
 from ..utils_core import random_name
 
 tf1 = tf.compat.v1
@@ -164,24 +164,15 @@ ACTIVATIONS = {'relu':       mtf.relu,
                }
 
 
-def activate_util(name_extras: typing.Union[typing.List[str], str], block_input: mtf.Tensor) -> mtf.Tensor:
+def activate(args: BlockArgs) -> mtf.Tensor:
     """
     Call activation function on mtf.Tensor.
-    :param name_extras: Tuple containing name of activation function. First occurence is used.
-    :param block_input: mtf.Tensor
-    :return: activated mtf.Tensor
     """
-    if isinstance(name_extras, str):
-        name_extras = [name_extras]
-    for fn_name in name_extras:
+    for fn_name in args:
         if fn_name not in ACTIVATIONS:
             continue
         with tf1.variable_scope(fn_name):
-            return ACTIVATIONS[fn_name](block_input)
-    print(f'No activation function found for "{name_extras}". Falling back to identity. '
+            return ACTIVATIONS[fn_name](args.tensor)
+    print(f'No activation function found for "{args.name_extras}". Falling back to identity. '
           f'Known functions: {list(ACTIVATIONS.keys())}')
-    return block_input
-
-
-def activate(params: ModelParameter, block_input: mtf.Tensor, name_extras: typing.List[str]):
-    return activate_util(name_extras, block_input)
+    return args.tensor
