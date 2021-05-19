@@ -98,7 +98,7 @@ class GroupNormalizeBackward(mtf.Operation):
 
 
 def norm(args: BlockArgs) -> mtf.Tensor:
-    if 'group' in BlockArgs:
+    if 'group' in args:
         return GroupNormalizeForward(args).outputs[0]
 
     block_input = args.tensor
