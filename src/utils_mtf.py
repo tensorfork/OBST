@@ -287,10 +287,10 @@ def shape_size(shape: ALL_SHAPES):
     return np.prod([d.size for d in dims_from_shape(shape)])
 
 
-def shape_union(*shapes: ALL_SHAPES):
+def shape_crossection(*shapes: ALL_SHAPES):
     out = set(dims_from_shape(shapes[0]))
     for s in shapes[1:]:
-        out = out.union(set(dims_from_shape(s)))
+        out = out & set(dims_from_shape(s))
     return mtf.Shape(list(out))
 
 
