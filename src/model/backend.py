@@ -12,7 +12,6 @@ from ..mtf_wrapper import einsum, scoped
 from ..utils_core import default, random_name
 from ..utils_mtf import OPT_DIMS, SHAPE, anonymize_dim, deduplicate, feature_dims_used
 
-ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
 tf1 = tf.compat.v1
 
@@ -65,12 +64,6 @@ def normal_var(params: ModelParameter, shape: SHAPE, stddev: float = 0.02, mean:
     shape = deduplicate(shape)
     return scoped("normal_var", get_variable, params, shape, tf.random_normal_initializer(stddev=stddev, mean=mean))
 
-
-def get_attention_dim(args: BlockArgs) -> ATTENTION_DIM:
-    attention_dims = (args.tensor.size - args.params.feature_dims - args.params.intermediate)[1:]
-    idx = args.params.attention_idx % len(attention_dims)
-    dim = attention_dims[idx]
-    return ATTENTION_DIM(idx, dim)
 
 
 def linear(args: BlockArgs, old: typing.List[mtf.Dimension], new: typing.List[mtf.Dimension]) -> mtf.Tensor:

@@ -6,8 +6,6 @@ import tensorflow as tf
 from .frontend import block_part_fn
 from ..utils_core import random_name
 
-ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
-
 tf1 = tf.compat.v1
 
 

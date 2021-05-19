@@ -4,12 +4,11 @@ import mesh_tensorflow as mtf
 import tensorflow as tf
 
 from .activation import activate
-from .backend import (get_attention_dim, get_intermediate, get_variable, linear_from_features, linear_to_features,
-                      orthogonal_var)
+from .backend import get_intermediate, get_variable, linear_from_features, linear_to_features, orthogonal_var
 from .normalization import norm
 from ..dataclass import BlockArgs
-from ..mtf_wrapper import dropout as utils_dropout, einsum, sigmoid
-from ..utils_mtf import anonymize, anonymize_dim, deduplicate
+from ..mtf_wrapper import dropout as utils_dropout, einsum, greater_equal, sigmoid
+from ..utils_mtf import anonymize, anonymize_dim, compare_range, deduplicate, get_attention_dim, is_masked
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -61,8 +60,10 @@ def spatial_mixing(args: BlockArgs) -> mtf.Tensor:
     mid = anonymize(args.tensor, dim)
     old = [args.params.head_dim, tmp]
     new = [args.params.head_dim, dim]
-    mid = einsum([mid, args.tensor, orthogonal_var(args.params, old + new), range],
-                 deduplicate((args.tensor.shape - old).dims + new))
+    inputs = [mid, args.tensor, orthogonal_var(args.params, old + new)]
+    if is_masked(args):
+        inputs.append(compare_range(args.params, dim, tmp, greater_equal))
+    mid = einsum(inputs, deduplicate((args.tensor.shape - old).dims + new))
     if 'feed_forward' not in args:
         return mid
     return feed_forward_out(args(mid))

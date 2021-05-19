@@ -4,8 +4,8 @@ import mesh_tensorflow as mtf
 import numpy as np
 import tensorflow as tf
 
-from .dataclass import ModelParameter
-from .mtf_wrapper import floordiv, mod, one_hot
+from .dataclass import BlockArgs, ModelParameter
+from .mtf_wrapper import cast, floordiv, mod, mtf_range, one_hot
 from .utils_core import default
 
 tf1 = tf.compat.v1
@@ -17,6 +17,7 @@ TENSORS = typing.List[mtf.Tensor]
 OPT_SHAPE = typing.Optional[SHAPE]
 OPT_DIMS = typing.Optional[DIM_LIST]
 ALL_SHAPES = typing.Union[SHAPE, mtf.Tensor, mtf.Variable]
+ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
 
 def head_argmax(tensor: mtf.Tensor, dims: typing.List[mtf.Dimension]) -> mtf.Tensor:
@@ -304,3 +305,21 @@ def missing_dims(self: ALL_SHAPES, other: ALL_SHAPES):
     self = dims_from_shape(self)
     other = dims_from_shape(other)
     return [d for d in other if d not in self]
+
+
+def compare_range(params: ModelParameter, dim0: mtf.Dimension, dim1: mtf.Dimension, comparison: typing.Callable):
+    with tf1.variable_scope(f"compare{dim0.name}_{dim1.name}"):
+        return cast(comparison(mtf_range(params.mesh, dim0, tf.bfloat16),
+                               mtf_range(params.mesh, dim1, tf.bfloat16)),
+                    params.variable_dtype.activation_dtype)
+
+
+def get_attention_dim(args: BlockArgs) -> ATTENTION_DIM:
+    attention_dims = (args.tensor.size - args.params.feature_dims - args.params.intermediate)[1:]
+    idx = args.params.attention_idx % len(attention_dims)
+    dim = attention_dims[idx]
+    return ATTENTION_DIM(idx, dim)
+
+
+def is_masked(args: BlockArgs):
+    return get_attention_dim(args).index in args.params.masked_attention_dimensions

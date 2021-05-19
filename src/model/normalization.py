@@ -5,12 +5,9 @@ import tensorflow as tf
 
 from .backend import normal_var
 from ..dataclass import BlockArgs
-from ..mtf_wrapper import (constant_scalar, einsum, reduce_mean,
-                           rsqrt)
+from ..mtf_wrapper import constant_scalar, einsum, reduce_mean, rsqrt
 from ..utils_core import random_name
 from ..utils_mtf import dims_from_shape
-
-ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
 tf1 = tf.compat.v1
 

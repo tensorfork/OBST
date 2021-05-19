@@ -4,13 +4,13 @@ import mesh_tensorflow as mtf
 import tensorflow as tf
 
 from .activation import activate
-from .backend import get_attention_dim, get_intermediate, linear_from_features, linear_to_features
+from .backend import get_intermediate, linear_from_features, linear_to_features
 from .basic import dropout
 from .embedding import embed
 from ..dataclass import BlockArgs
 from ..mtf_wrapper import einsum
 from ..utils_core import random_name
-from ..utils_mtf import anonymize, anonymize_dim
+from ..utils_mtf import anonymize, anonymize_dim, get_attention_dim
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 

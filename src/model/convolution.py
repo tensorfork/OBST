@@ -2,9 +2,10 @@ import mesh_tensorflow as mtf
 import numpy as np
 import tensorflow as tf
 
-from .backend import OrthogonalInit, get_attention_dim, get_variable
+from .backend import OrthogonalInit, get_variable
 from ..dataclass import BlockArgs
 from ..utils_core import random_name
+from ..utils_mtf import get_attention_dim
 
 tf1 = tf.compat.v1
 
@@ -129,4 +130,4 @@ def convolution(args: BlockArgs):
     convolution_size = 16
     if len(args) > 0 and args[-1].isdigit():
         convolution_size = int(args[-1])
-    return ConvolutionForward(args, dim, convolution_size, idx in args.params.masked_attention_dimensions).outputs[0]
+    return ConvolutionForward(args, dim, convolution_size, ).outputs[0]
