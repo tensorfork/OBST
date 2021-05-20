@@ -26,7 +26,6 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.position_embedding = "absolute"  # (-split) or "relative"(-learned) or "axial"(-split)
         self.token_embedding = "absolute"
         self.empty_frame_embedding = "absolute"  # embedding options above or None
-        self.shared_position_embedding = False
         self.use_video = True
         self.save_graph = False
         self.use_language = True
