@@ -41,8 +41,6 @@ def file_generator(queue: Queue, lock: threading.Semaphore, pid: int, procs: int
         return out
 
     for i in range(pid, splits, procs):
-        i = 2
-
         def _log(text):
             with open(log_path, 'a') as f:
                 f.write(f'Proc: {pid} | Slice: {i} | Time: {datetime.datetime.now()} | {text}\n')
