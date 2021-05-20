@@ -76,7 +76,7 @@ def _embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
     if isinstance(shape, (list, tuple)):
         shape = mtf.Shape(shape)
 
-    if 'shared' in args and shape in args.params.cached_embeddings:
+    if 'shared' in args and shape.to_string in args.params.cached_embeddings:
         return args.params.cached_embeddings[shape.to_string]
 
     position_dims: mtf.Shape = (shape - args.params.feature_dims) - args.params.intermediate
