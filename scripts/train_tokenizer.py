@@ -83,7 +83,9 @@ def main():
     parser.add_argument("--base_path", type=str, default='E:\\Pile\\', help="Path of data and logs")
     parser.add_argument("--separator", type=int, default=4, help="Separator character")
     parser.add_argument("--cache_capacity", type=int, default=1024 * 1024 * 1024,
-                        help="Number of words to keep in BPE cache")
+                        help="Number of words to keep in BPE cache. Each item has 8 bytes (hash) + Value (likely "
+                             "8 bytes on average but up to 16). The default value of 1G should maximally use 24GiB,"
+                             "meaning that a 32GiB server/64GiB desktop can run it.")
     args = parser.parse_args()
 
     for path in ('', 'download', 'log'):
