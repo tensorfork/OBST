@@ -77,7 +77,7 @@ def _embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
         shape = mtf.Shape(shape)
 
     if 'shared' in args and shape in args.params.cached_embeddings:
-        return args.params.cached_embeddings[shape]
+        return args.params.cached_embeddings[shape.to_string]
 
     position_dims: mtf.Shape = (shape - args.params.feature_dims) - args.params.intermediate
     feature_dims = list(set(shape.dims) & set(args.params.feature_dims + args.params.intermediate))
@@ -101,8 +101,8 @@ def _embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
     else:
         raise ValueError("relative(-learned) or absolute(-split) or axial(-split)")
 
-    if args.params.shared_position_embedding:
-        args.params.cached_embeddings[shape] = out
+    if 'shared' in args:
+        args.params.cached_embeddings[shape.to_string] = out
 
     return out
 
