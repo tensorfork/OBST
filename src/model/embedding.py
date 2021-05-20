@@ -82,27 +82,28 @@ def embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
     position_dims: mtf.Shape = (shape - args.params.feature_dims) - args.params.intermediate
     feature_dims = list(set(shape.dims) & set(args.params.feature_dims + args.params.intermediate))
 
-    if 'absolute' in args:
-        if 'split' in args:
-            out = normal_var(args.params, position_dims, args.params.embedding_stddev)
-            out *= normal_var(args.params, feature_dims, args.params.embedding_stddev)
+    with tf1.variable_scope('embed'):
+        if 'absolute' in args:
+            if 'split' in args:
+                out = normal_var(args.params, position_dims, args.params.embedding_stddev)
+                out *= normal_var(args.params, feature_dims, args.params.embedding_stddev)
+            else:
+                out = normal_var(args.params, shape)
+        elif 'axial' in args:
+            if 'split' in args:
+                feature_dims = []
+                position_dims = shape.dims
+            out = einsum([normal_var(args.params, [dim] + feature_dims, args.params.embedding_stddev)
+                          for dim in position_dims],
+                         output_shape=shape)
+        elif 'relative' in args:
+            out = RelativeEmbeddingForward(args.params, shape).outputs[0]
+            if 'learned' in args:
+                out *= normal_var(args.params, feature_dims, args.params.embedding_stddev)
         else:
-            out = normal_var(args.params, shape)
-    elif 'axial' in args:
-        if 'split' in args:
-            feature_dims = []
-            position_dims = shape.dims
-        out = einsum([normal_var(args.params, [dim] + feature_dims, args.params.embedding_stddev)
-                      for dim in position_dims],
-                     output_shape=shape)
-    elif 'relative' in args:
-        out = RelativeEmbeddingForward(args.params, shape).outputs[0]
-        if 'learned' in args:
-            out *= normal_var(args.params, feature_dims, args.params.embedding_stddev)
-    else:
-        raise ValueError("relative(-learned) or absolute(-split) or axial(-split)")
+            raise ValueError("relative(-learned) or absolute(-split) or axial(-split)")
 
-    if args.params.shared_position_embedding:
-        args.params.cached_embeddings[shape] = out
+        if args.params.shared_position_embedding:
+            args.params.cached_embeddings[shape] = out
 
     return out
