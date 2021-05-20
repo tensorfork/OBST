@@ -30,7 +30,7 @@ def file_generator(pid, procs):
     def _parser(x):
         try:
             return parse_fn(x).as_dict()
-        except ValueError:
+        except:
             return x
 
     def _write(text):
@@ -51,8 +51,8 @@ def file_generator(pid, procs):
                         yield _write(itm)
                 else:
                     yield _write(item)
-                if idx % 1000:
-                    print("Chars: {out} - Took: {time.time().1f}s")
+                if idx % 100000:
+                    print(f"Chars: {total[0]} - Took: {time.time():.1f}s")
         print(f"FINISHED {i}")
         os.remove(tmp_name)
 
