@@ -44,25 +44,12 @@ class GroupNormalizeForward(mtf.Operation):
         def slicewise_fn(*tensors: tf.Tensor):
             tensors = list(tensors)
             x = tensors.pop(0)
-            print("x", x.shape)
-            m = tf.reduce_mean(x, feature_dim_index, keepdims=True)
-            print("mean", m.shape)
-            x -= m
-            print("x", x.shape)
-            d = tf.reduce_mean(tf.square(x), feature_dim_index, keepdims=True)
-            print("divisor", d.shape)
-            x /= d
-            print("x", x.shape)
+            x -= tf.reduce_mean(x, feature_dim_index, keepdims=True)
+            x /= tf.reduce_mean(tf.square(x), feature_dim_index, keepdims=True)
             if scale:
-                f = tf.reshape(tensors.pop(0), feature_map)
-                print("factor", f.shape)
-                x *= f
-                print("x", x.shape)
+                x *= tf.reshape(tensors.pop(0), feature_map)
             if shift:
-                s = tf.reshape(tensors.pop(0), feature_map)
-                print("shift", s.shape)
-                x += s
-                print("x", x.shape)
+                x += tf.reshape(tensors.pop(0), feature_map)
             return x
 
         y = mesh_impl.slicewise(slicewise_fn, *(lowering.tensors[inp] for inp in self.inputs))
@@ -84,6 +71,8 @@ class GroupNormalizeBackward(mtf.Operation):
 
         if tensors:
             summed_dims = [idx for idx, dim in enumerate(block_input.shape.dims) if dim not in tensors[0].shape.dims]
+            feature_map = [mesh_impl.slice_shape([dim])[0] if dim in tensors[1].shape.dims else 1
+                           for idx, dim in enumerate(block_input.shape.dims)]
 
         scale = 'scale' in self.forward.args
         shift = 'shift' in self.forward.args
@@ -98,7 +87,7 @@ class GroupNormalizeBackward(mtf.Operation):
             grads = [(3 * sum_square - tf.square(tf.reduce_sum(x, feature_dim_index, keepdims=True) - x))
                      * divisor * size]
             if scale:
-                grads[0] *= tensors.pop(0)
+                grads[0] *= tf.reshape(tensors.pop(0), feature_map)
                 grads.append(tf.reduce_sum(divisor * (x * size - tf.reduce_sum(x, feature_dim_index, keepdims=True)),
                                            summed_dims))
             if shift:
