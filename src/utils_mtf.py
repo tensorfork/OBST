@@ -288,10 +288,9 @@ def shape_size(shape: ALL_SHAPES):
 
 
 def shape_crossection(*shapes: ALL_SHAPES):
-    out = set(dims_from_shape(shapes[0]))
-    for s in shapes[1:]:
-        out = out & set(dims_from_shape(s))
-    return mtf.Shape(list(out))
+    shapes = [dims_from_shape(s) for s in shapes]
+    out = [dim for dim in shape_addition(*shapes) if all(dim in shape for shape in shapes)]
+    return mtf.Shape(out)
 
 
 def shape_addition(*shapes: ALL_SHAPES):

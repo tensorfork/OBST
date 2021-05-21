@@ -9,7 +9,7 @@ from .backend import normal_var
 from ..dataclass import BlockArgs, ModelParameter
 from ..mtf_wrapper import einsum, scoped
 from ..utils_core import random_name
-from ..utils_mtf import DIM_LIST, SHAPE, shape_size
+from ..utils_mtf import DIM_LIST, SHAPE, shape_crossection, shape_size
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -44,7 +44,7 @@ class RelativeEmbeddingForward(mtf.Operation):
         shape = self.shape
 
         position_dims: SHAPE = (shape - params.feature_dims) - params.intermediate
-        feature_dims = list(set(shape.dims) & set(params.feature_dims + params.intermediate))
+        feature_dims = shape_crossection(shape, params.feature_dims + params.intermediate).dims
         position_count = shape_size(position_dims)
 
         cosine = 'cosine' in params.position_embedding
@@ -80,7 +80,7 @@ def _embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
         return args.params.cached_embeddings[shape.to_string]
 
     position_dims: mtf.Shape = (shape - args.params.feature_dims) - args.params.intermediate
-    feature_dims = list(set(shape.dims) & set(args.params.feature_dims + args.params.intermediate))
+    feature_dims = shape_crossection(shape, args.params.feature_dims + args.params.intermediate).dims
 
     if 'absolute' in args:
         if 'split' in args:

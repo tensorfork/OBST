@@ -44,17 +44,29 @@ class GroupNormalizeForward(mtf.Operation):
         def slicewise_fn(*tensors: tf.Tensor):
             tensors = list(tensors)
             x = tensors.pop(0)
-            x -= tf.reduce_mean(x, feature_dim_index, keepdims=True)
-            x /= tf.reduce_mean(tf.square(x), feature_dim_index, keepdims=True)
+            print("x", x.shape)
+            m = tf.reduce_mean(x, feature_dim_index, keepdims=True)
+            print("mean", m.shape)
+            x -= m
+            print("x", x.shape)
+            d = tf.reduce_mean(tf.square(x), feature_dim_index, keepdims=True)
+            print("divisor", d.shape)
+            x /= d
+            print("x", x.shape)
             if scale:
-                x *= tf.reshape(tensors.pop(0), feature_map)
+                f = tf.reshape(tensors.pop(0), feature_map)
+                print("factor", f.shape)
+                x *= f
+                print("x", x.shape)
             if shift:
-                x += tf.reshape(tensors.pop(0), feature_map)
+                s = tf.reshape(tensors.pop(0), feature_map)
+                print("shift", s.shape)
+                x += s
+                print("x", x.shape)
             return x
 
         y = mesh_impl.slicewise(slicewise_fn, *(lowering.tensors[inp] for inp in self.inputs))
         lowering.set_tensor_lowering(self.outputs[0], y)
-
 
 class GroupNormalizeBackward(mtf.Operation):
     def __init__(self, grad_y: typing.List[mtf.Tensor], forward: GroupNormalizeForward):
