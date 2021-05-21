@@ -55,6 +55,7 @@ class GroupNormalizeForward(mtf.Operation):
         y = mesh_impl.slicewise(slicewise_fn, *(lowering.tensors[inp] for inp in self.inputs))
         lowering.set_tensor_lowering(self.outputs[0], y)
 
+
 class GroupNormalizeBackward(mtf.Operation):
     def __init__(self, grad_y: typing.List[mtf.Tensor], forward: GroupNormalizeForward):
         super().__init__(grad_y + forward.inputs, name=random_name("group_normalize_backward"))
