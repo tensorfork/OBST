@@ -94,7 +94,7 @@ def attention(args: BlockArgs):
     if 'embedded' in args or 'context' in args:
         key = linear_to_features(base, intermediate) * dim.size ** -0.5
     if 'embedded' in args or 'positional' in args:
-        key += embed(args, [dim] + intermediate)
+        key += embed(args, [dim] + args.params.feature_dims)
     val = linear_to_features(base, intermediate)
     qry = linear_to_features(base, intermediate)
 
