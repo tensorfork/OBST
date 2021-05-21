@@ -4,7 +4,7 @@ import mesh_tensorflow as mtf
 import tensorflow as tf
 
 from .activation import activate
-from .backend import get_intermediate, get_variable, linear_from_features, linear_to_features, normal_var
+from .backend import get_intermediate, get_variable, linear_from_features, linear_to_features, normal_var, orthogonal_var
 from .normalization import norm
 from ..dataclass import BlockArgs
 from ..mtf_wrapper import dropout as utils_dropout, einsum, greater_equal, sigmoid
@@ -61,7 +61,7 @@ def spatial_mixing(args: BlockArgs) -> mtf.Tensor:
     old = base + [tmp]
     new = base + [dim]
 
-    inputs = [mid, normal_var(args.params, old + new, stddev=0.02 / dim.size)]
+    inputs = [mid, orthogonal_var(args.params, old + new)]
     if is_masked(args):
         inputs.append(compare_range(args.params, dim, tmp, greater_equal))
 
