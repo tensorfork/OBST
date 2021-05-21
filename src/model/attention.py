@@ -18,7 +18,7 @@ tf1 = tf.compat.v1
 
 
 def tf_softmax(x, masked, dim, dim_index, anonymous_dim_index):
-    x *= (1 / dim.size)
+    x *= dim.size ** -0.5
     if masked:
         arange = tf.range(0, dim.size)
         msk = tf.reshape(arange, (1, dim.size)) > tf.reshape(arange, (dim.size, 1))
@@ -97,7 +97,7 @@ def attention(args: BlockArgs):
     if 'embedded' in args or 'positional' in args:
         key += embed(args, [dim] + args.params.feature_dims)
     val = linear_to_features(base, intermediate)
-    qry = linear_to_features(base, intermediate) * dim.size ** -0.5
+    qry = linear_to_features(base, intermediate)
 
     key = anonymize(key, dim)
     val = anonymize(val, dim)
