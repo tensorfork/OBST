@@ -274,6 +274,8 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                         large_tensor = features_used and len(var.shape.dims) > len(params.feature_dims)
                         large_tensor |= not features_used and len(var.shape.dims) >= 2
                         large_tensor &= var.shape.size > 1
+                        if 'rezero' in var.name:
+                            weight_update *= params.rezero_lr_multiplier
                         if large_tensor and params.weight_decay > 0:
                             weight_update += params.weight_decay * var.value * learning_rate
                         if large_tensor and params.weight_centralisation:

@@ -97,6 +97,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.weight_decay = 0.001
         self.train_steps = 150_000
         self.warmup_steps = 3000
+        self.rezero_lr_multiplier = 0.1
         self.learning_rate_decay_multi = 1
         self.convolution_size = 16
         self.learning_rate_decay_start_step = 100_000
