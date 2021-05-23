@@ -181,7 +181,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         if isinstance(self.calculation_dtype, str):
             self.calculation_dtype = getattr(tf, self.calculation_dtype)
         if self.intermediate_feed_forward_multiplier is None:
-            self.intermediate_feed_forward_multiplier = self.group_linear_factor / self.head_splits
+            self.intermediate_feed_forward_multiplier = self.group_linear_factor / self.n_head
         if not self.use_video and self.language_token_per_frame != self.n_ctx:
             print(f"language_token_per_frame is unused in language-only mode. Overwriting with n_ctx={self.n_ctx}")
             self.language_token_per_frame = self.n_ctx
