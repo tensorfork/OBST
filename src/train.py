@@ -657,11 +657,11 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
     if params.train:
         # if params.write_summary:
         flush_summary = summary.flush()
-
         with tf1.train.MonitoredTrainingSession(master=cluster_resolver.master(),
                                                 hooks=[ckpt_loader_hook,
                                                        tf1.train.StepCounterHook(every_n_steps=10)] + hooks,
                                                 config=session_config) as sess:
+            tf.compat.v1.get_default_graph().finalize()
             color_print(params, f"Connected after {time.time() - start_time:.1f}s")
             color_print(params, 'Compiling computation...')
             now = time.time()
@@ -715,6 +715,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         with tf1.train.MonitoredSession(session_creator=tf1.train.ChiefSessionCreator(master=cluster_resolver.master(),
                                                                                       config=session_config),
                                         hooks=[ckpt_loader_hook, hooks[0]]) as sess:
+            tf.compat.v1.get_default_graph().finalize()
             color_print(params, f"Connected after {time.time() - start_time:.1f}s")
 
             color_print(params, "Initializing inputs...")
