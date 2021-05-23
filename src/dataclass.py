@@ -83,12 +83,12 @@ class ModelParameter(typing.Dict[str, typing.Any]):
                                                  "loop_optimization":             True,
                                                  "function_optimization":         True,
                                                  "debug_stripper":                True,
-                                                 "disable_model_pruning":         False,
                                                  "scoped_allocator_optimization": True,
                                                  "pin_to_host_optimization":      True,
                                                  "implementation_selector":       True,
                                                  "auto_mixed_precision":          True,
                                                  "disable_meta_optimizer":        False,
+                                                 "disable_model_pruning":         False,
                                                  "min_graph_nodes":               0
                                                  }
         self.language_token_per_frame = 0
