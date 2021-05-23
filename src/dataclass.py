@@ -70,6 +70,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.train_batch_size = 1
         self.grad_accumulation = 1
         self.macro_batching = 1
+        self.macro_batch_loss_smoothing = False
         self.current_step = 0
         self.batch_splits = 1
         self.head_splits = 32.
