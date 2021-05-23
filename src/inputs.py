@@ -5,10 +5,11 @@ import random
 
 import numpy as np
 import tensorflow as tf2
-import tensorflow.compat.v1 as tf
-from tensorflow.data import Dataset
 
 from .dataclass import ModelParameter, align_tensor_op
+
+tf = tf2.compat.v1
+Dataset = tf2.data.Dataset
 
 
 def split_files(filenames, slice_index, slice_count, seed, runs_log=None):
@@ -242,11 +243,12 @@ def _text_decoder(decoder, data: tf.Tensor, ctx: int, patch_size: int, chunk_siz
         if _skip is not None:
             data = data.skip(tf.cast(_skip, dtype=tf.int64))
         if chunk_size > 0:
-            data = data.batch(chunk_size)
+            data = data.batch(chunk_size, num_parallel_calls=tf2.data.AUTOTUNE, deterministic=True)
         data = data.window(size=ctx + patch_size, shift=ctx, stride=1, drop_remainder=True)
         if shuffle_buffer > 0:
             data = data.shuffle(shuffle_buffer, reshuffle_each_iteration=True)
-        data = data.interleave(lambda x: x.batch(ctx + patch_size, drop_remainder=True), cycle_length=1)
+        data = data.interleave(lambda x: x.batch(ctx + patch_size, drop_remainder=True, deterministic=True,
+                                                 num_parallel_calls=tf2.data.AUTOTUNE), cycle_length=1)
         return data
 
     return tf.data.TFRecordDataset(filenames=data).interleave(chunk, cycle_length=1)
@@ -362,8 +364,8 @@ def dataset_text(path: str, params: ModelParameter, sub_batch_size: int, slice_i
 
     data = data.shuffle(params.shuffle_buffer, seed=(params.data_seed if not params.use_random_dataloader else None))
     data = tf.data.Dataset.zip((data, padding_token, padding_frame, padding_frame_mask, padding_cat_mask))
-    data = data.batch(sub_batch_size)
-    data = data.map(_memory_func, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+    data = data.batch(sub_batch_size, num_parallel_calls=tf2.data.AUTOTUNE, deterministic=not params.train)
+    data = data.map(_memory_func, num_parallel_calls=tf2.data.AUTOTUNE)
 
     return data
 
@@ -459,9 +461,11 @@ def dataset_video(path: str, params: ModelParameter, sub_batch_size: int, slice_
 
     if language_token_per_frame > 0:
         interleave_func = lambda x, y, z, a, b: tf.data.Dataset.zip((x, y, z, a, b)) \
-            .batch(n_ctx + time_patch, drop_remainder=True)
+            .batch(n_ctx + time_patch, drop_remainder=True, num_parallel_calls=tf2.data.AUTOTUNE, deterministic=True)
     else:
-        interleave_func = lambda x, y: tf.data.Dataset.zip((x, y)).batch(n_ctx + time_patch, drop_remainder=True)
+        interleave_func = lambda x, y: tf.data.Dataset.zip((x, y)).batch(n_ctx + time_patch, drop_remainder=True,
+                                                                         num_parallel_calls=tf2.data.AUTOTUNE,
+                                                                         deterministic=True)
 
     frame_decoder = get_video_decoder(params,
                                       language_token_num_per_frame=language_token_per_frame,
@@ -477,9 +481,9 @@ def dataset_video(path: str, params: ModelParameter, sub_batch_size: int, slice_
     data = data.repeat()
     data = data.interleave(lambda x: _decode_func(x),
                            cycle_length=params.interleaved_datasets,
-                           num_parallel_calls=tf.data.experimental.AUTOTUNE)
-    data = data.batch(sub_batch_size)
-    data = data.map(_pre_func, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+                           num_parallel_calls=tf2.data.AUTOTUNE)
+    data = data.batch(sub_batch_size, num_parallel_calls=tf2.data.AUTOTUNE, deterministic=not params.train)
+    data = data.map(_pre_func, num_parallel_calls=tf2.data.AUTOTUNE)
 
     return data
 
@@ -561,13 +565,12 @@ def gpt_neo_input(params: ModelParameter, sub_batch_size: int, slice_index: int,
                                                           params.shuffle_buffer * int(params.use_random_dataloader),
                                                           _skip),
                            cycle_length=params.interleaved_datasets,
-                           num_parallel_calls=tf.data.experimental.AUTOTUNE)
+                           num_parallel_calls=tf2.data.AUTOTUNE)
 
     if params.use_random_dataloader:
         dset = dset.shuffle(params.shuffle_buffer,
                             seed=(params.data_seed if not params.use_random_dataloader else None))
-
-    dset = dset.batch(sub_batch_size)
+    dset = dset.batch(sub_batch_size, num_parallel_calls=tf2.data.AUTOTUNE, deterministic=not params.train)
     dset = dset.map(_memory_func)
     dset = dset.map(align_tensor_op)
 
