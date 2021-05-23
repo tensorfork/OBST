@@ -67,7 +67,7 @@ def build(params: ModelParameter,
 
         if params.use_video:
             base_args = BlockArgs(params, vid, [''])
-            vid = dropout(vid, rate=params.input_dropout)
+            vid = dropout(vid, params.train, rate=params.input_dropout)
 
             if params.use_bit_fold_input_pipeline:
                 vid = mtf.cast(vid, dtype=tf.int64)
@@ -114,8 +114,7 @@ def build(params: ModelParameter,
                              [params.head_dim, params.vocab_dim] + params.intermediate)
             txt = einsum([txt_embd, *head_embed(params, txt_src)], reduced_dims=[params.vocab_dim, params.head_dim])
 
-            if params.input_dropout > 0:
-                txt = dropout(txt, rate=params.input_dropout)
+            txt = dropout(txt, params.train, rate=params.input_dropout)
 
             txt = linear_to_features(base_args(txt), [txt_tgt.shape[-1]] + params.intermediate)
 

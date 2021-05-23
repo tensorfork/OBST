@@ -25,7 +25,7 @@ def dropout(args: BlockArgs):
     for extra in args.name_extras:
         if extra.startswith('dropout_rate'):
             keep = 1 - float(extra[len('dropout_rate'):])
-    return utils_dropout(args.tensor, keep)
+    return utils_dropout(args.tensor, args.params.train, keep)
 
 
 def feed_forward_in(args: BlockArgs):
