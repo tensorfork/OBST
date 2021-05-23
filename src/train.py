@@ -95,7 +95,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         def _base_model_fn(*args):
 
             if params.macro_batching > 1 and params.train:
-                loop_idx, _, *args = args
+                loop_idx, prev_loss, *args = args
                 args = list(args)[log_len:]
                 inp_args = args.copy()
 
@@ -345,6 +345,8 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     step = tf.cast(step, tf.int64)
 
                     tf_loss = tf.cast(lowering.export_to_tf_tensor(loss), tf.float32)
+                    if params.macro_batch_loss_smoothing:
+                        tf_loss = (tf_loss + prev_loss * loop_idx) / (1 + loop_idx)
 
                     if params.macro_batching > 1 and params.train:
                         params.log_dict_keys = list(log_dict.keys())
