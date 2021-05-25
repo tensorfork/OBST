@@ -49,8 +49,8 @@ def build(params: ModelParameter,
     :param txt_msk: Optional mask to remove loss for certain token positions
     :return: (Generated Video, Total Loss, Video Loss, Token Loss)
     """
-    with (mtf.utils.outside_all_rewrites(),
-          tf1.variable_scope(params.model_mode, reuse=tf1.AUTO_REUSE, use_resource=True)):
+    with mtf.utils.outside_all_rewrites(), tf1.variable_scope(params.model_mode, reuse=tf1.AUTO_REUSE,
+                                                              use_resource=True):
         cat_msk_src = _default_ones(params, cat_msk_src)
         cat_msk_tgt = _default_ones(params, cat_msk_tgt)
         vid_msk_src = _default_ones(params, vid_msk_src)
