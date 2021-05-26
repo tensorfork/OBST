@@ -64,7 +64,6 @@ def normal_var(params: ModelParameter, shape: SHAPE, stddev: float = 0.02, mean:
     return scoped("normal_var", get_variable, params, shape, tf.random_normal_initializer(stddev=stddev, mean=mean))
 
 
-
 def linear(args: BlockArgs, old: typing.List[mtf.Dimension], new: typing.List[mtf.Dimension]) -> mtf.Tensor:
     return einsum([args.tensor, orthogonal_var(args.params, old + new)],
                   deduplicate((args.tensor.shape - old).dims + new))
