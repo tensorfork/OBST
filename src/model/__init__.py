@@ -6,12 +6,12 @@ import tensorflow as tf
 from .backend import linear, linear_from_features, linear_to_features
 from .embedding import embed
 from .frontend import block_part_fn
+from .momentumnet import MomentumOperation
 from .revnet import RevGradOp
 from ..dataclass import BlockArgs, BlockConfig, ModelParameter
 from ..mtf_wrapper import (add_n, cast, constant_scalar, dropout, einsum, exp, log, one_hot, ones, reciprocal,
                            reduce_logsumexp, reduce_max, reduce_sum, sigmoid, sign, zeros_like)
 from ..utils_mtf import concat, head_argmax, head_embed, slice, weighted_add
-from .momentumnet import MomentumOperation
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 

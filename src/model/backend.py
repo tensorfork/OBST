@@ -12,7 +12,6 @@ from ..mtf_wrapper import einsum, scoped
 from ..utils_core import default, random_name
 from ..utils_mtf import OPT_DIMS, SHAPE, anonymize_dim, deduplicate, feature_dims_used
 
-
 tf1 = tf.compat.v1
 
 

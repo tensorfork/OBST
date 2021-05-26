@@ -1,9 +1,7 @@
-import typing
-
 import mesh_tensorflow as mtf
 import tensorflow as tf
 
-from ..dataclass import BlockArgs, ModelParameter
+from ..dataclass import BlockArgs
 from ..utils_core import random_name
 
 tf1 = tf.compat.v1

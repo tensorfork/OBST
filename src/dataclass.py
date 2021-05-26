@@ -6,7 +6,6 @@ import typing
 
 import mesh_tensorflow as mtf
 import tensorflow as tf
-from tensorflow.contrib.layers import rev_block
 from tensorflow.python.tpu.device_assignment import DeviceAssignment
 
 

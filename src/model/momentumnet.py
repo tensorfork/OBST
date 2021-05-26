@@ -4,8 +4,8 @@ import mesh_tensorflow as mtf
 import tensorflow as tf
 
 from .frontend import block_part_fn
-from ..utils_core import random_name
 from ..dataclass import ModelParameter
+from ..utils_core import random_name
 
 tf1 = tf.compat.v1
 
