@@ -11,6 +11,7 @@ from ..dataclass import BlockArgs, BlockConfig, ModelParameter
 from ..mtf_wrapper import (add_n, cast, constant_scalar, dropout, einsum, exp, log, one_hot, ones, reciprocal,
                            reduce_logsumexp, reduce_max, reduce_sum, sigmoid, sign, zeros_like)
 from ..utils_mtf import concat, head_argmax, head_embed, slice, weighted_add
+from .momentumnet import MomentumOperation
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -132,29 +133,34 @@ def build(params: ModelParameter,
                 for dim in (src.shape - params.feature_dims).dims[1:]:
                     src += embed(base_args(params.position_embedding), [dim] + params.feature_dims)
 
-            if params.use_revnet:
-                out = (src, None, src, None)
+            if params.memory_reduction_strategy == "revnet":
+                out = (src, zeros_like(src), src, zeros_like(src))
 
                 def _layer_builder(block_input: typing.Tuple[mtf.Tensor, mtf.Tensor, mtf.Tensor, mtf.Tensor],
                                    block_config: BlockConfig, index: int):
-                    x1, x1_backwards, x2, x2_backwards = block_input
-                    if x1_backwards is None:
-                        x1_backwards = zeros_like(x1)
-                    if x2_backwards is None:
-                        x2_backwards = zeros_like(x2)
-                    return RevGradOp(params, block_config, x1, x1_backwards, x2, x2_backwards, str(index)).outputs
-            else:
+                    return RevGradOp(params, block_config, *block_input, str(index)).outputs
+            elif params.memory_reduction_strategy == 'checkpoint':
                 out = src
 
                 def _layer_builder(block_input: mtf.Tensor, block_config: BlockConfig, index: int):
                     return mtf.recompute_grad(lambda x: block_part_fn(params, block_config, x, str(index)),
                                               [block_input])
+            elif params.memory_reduction_strategy == 'momentum':
+                out = (src, zeros_like(src), src, zeros_like(src))
 
+                def _layer_builder(block_input: typing.Tuple[mtf.Tensor, mtf.Tensor, mtf.Tensor, mtf.Tensor],
+                                   block_config: BlockConfig, index: int):
+                    return MomentumOperation(params, block_config, *block_input, str(index)).outputs
+            elif params.memory_reduction_strategy == 'none':
+                out = src
+
+                def _layer_builder(block_input: mtf.Tensor, block_config: BlockConfig, index: int):
+                    return block_part_fn(params, block_config, block_input, str(index))
             for i in range(params.n_blocks):
                 for block_part in params.block_config:
                     out = _layer_builder(out, block_part, i)
 
-            if params.use_revnet:
+            if params.memory_reduction_strategy in ('revnet', 'momentum'):
                 out = out[0] + out[2]
 
         if params.use_language:

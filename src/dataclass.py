@@ -6,6 +6,7 @@ import typing
 
 import mesh_tensorflow as mtf
 import tensorflow as tf
+from tensorflow.contrib.layers import rev_block
 from tensorflow.python.tpu.device_assignment import DeviceAssignment
 
 
@@ -70,6 +71,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.grad_accumulation = 1
         self.macro_batching = 1
         self.macro_batch_loss_smoothing = False
+        self.momentumnet_alpha = 0.99
         self.current_step = 0
         self.batch_splits = 1
         self.head_splits = 32.
@@ -120,7 +122,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.model_mode = 'jannet'
         self.optimizer = 'adam'
         self.multi_loss_strategy = "linear"
-        self.use_revnet = True
+        self.memory_reduction_strategy = "revnet"
         self.debug_gradients = False
         self.use_initial_position_embedding = False
         self.intermediate_feed_forward_multiplier = None
@@ -210,7 +212,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.layout = ','.join([f"batch:b"] * split_batch +
                                [f"heads:h"] * split_heads)
         self.variable_dtype = mtf.VariableDType(self.storage_dtype, self.slice_dtype, self.calculation_dtype)
-        self.block_config = [BlockConfig(conf, use_revnet=self.use_revnet) for conf in self.block_config]
+        self.block_config = [BlockConfig(conf, use_revnet=self.memory_reduction_strategy) for conf in self.block_config]
         self.input_block_config = [BlockConfig(conf, use_revnet=False) for conf in self.input_block_config]
         self.output_block_config = [BlockConfig(conf, use_revnet=False) for conf in self.output_block_config]
         self.time_patch_size = self.n_ctx // self.time_patch
