@@ -247,8 +247,7 @@ def _text_decoder(decoder, data: tf.Tensor, ctx: int, patch_size: int, chunk_siz
         data = data.window(size=ctx + patch_size, shift=ctx, stride=1, drop_remainder=True)
         if shuffle_buffer > 0:
             data = data.shuffle(shuffle_buffer, reshuffle_each_iteration=True)
-        data = data.interleave(lambda x: x.batch(ctx + patch_size, drop_remainder=True, deterministic=True,
-                                                 num_parallel_calls=tf2.data.AUTOTUNE), cycle_length=1)
+        data = data.interleave(lambda x: x.batch(ctx + patch_size, drop_remainder=True), cycle_length=1)
         return data
 
     return tf.data.TFRecordDataset(filenames=data).interleave(chunk, cycle_length=1)
