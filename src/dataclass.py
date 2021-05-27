@@ -71,6 +71,8 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.grad_accumulation = 1
         self.macro_batching = 1
         self.macro_batch_loss_smoothing = False
+        self.reduce_lr_on_plateau_timespan = 0
+        self.reduce_lr_on_plateau_reduction = 2
         self.momentumnet_alpha = 0.99
         self.current_step = 0
         self.batch_splits = 1
