@@ -533,7 +533,6 @@ def dataset(params: ModelParameter, sub_batch_size, slice_index, slice_count, _)
 
 def gpt_neo_input(params: ModelParameter, sub_batch_size: int, slice_index: int, slice_count: int, runs_log=None):
     params = ModelParameter(params)
-    deterministic = not params.use_random_dataloader and not params.train
     filenames = []
     for file in params.dataset_configs:
         filenames.extend(tf.io.gfile.glob(file['path']))
@@ -561,15 +560,15 @@ def gpt_neo_input(params: ModelParameter, sub_batch_size: int, slice_index: int,
     dset = dset.interleave(lambda x, _skip: _text_decoder(decoder, x, params.n_ctx,
                                                           params.token_patch_size * params.output_offset, -1,
                                                           params.shuffle_buffer * int(params.use_random_dataloader),
-                                                          _skip,
-                                                          deterministic),
+                                                          _skip),
                            cycle_length=params.interleaved_datasets,
                            num_parallel_calls=tf2.data.AUTOTUNE)
 
-    if not deterministic:
-        dset = dset.shuffle(params.shuffle_buffer, seed=params.data_seed)
-    dset = dset.batch(sub_batch_size, num_parallel_calls=params.parallel_batch, deterministic=deterministic)
-    dset = dset.map(_memory_func, deterministic=deterministic, num_parallel_calls=params.parallel_batch)
-    dset = dset.map(align_tensor_op, deterministic=deterministic, num_parallel_calls=params.parallel_batch)
+    if params.use_random_dataloader:
+        dset = dset.shuffle(params.shuffle_buffer,
+                            seed=(params.data_seed if not params.use_random_dataloader else None))
+    dset = dset.batch(sub_batch_size, num_parallel_calls=params.parallel_batch, deterministic=True)
+    dset = dset.map(_memory_func)
+    dset = dset.map(align_tensor_op)
 
     return dset
