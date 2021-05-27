@@ -48,7 +48,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.three_axes = True
         self.dataset_configs = []
         self.data_seed = 456772
-        self.parallel_batch = 1
+        self.parallel_batch = None
         self.use_random_dataloader = False
         self.train = True
         self.debug_sample = False

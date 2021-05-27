@@ -364,7 +364,7 @@ def dataset_text(path: str, params: ModelParameter, sub_batch_size: int, slice_i
 
     data = data.shuffle(params.shuffle_buffer, seed=(params.data_seed if not params.use_random_dataloader else None))
     data = tf.data.Dataset.zip((data, padding_token, padding_frame, padding_frame_mask, padding_cat_mask))
-    data = data.batch(sub_batch_size, num_parallel_calls=params.parallel_batch, deterministic=not params.train)
+    data = data.batch(sub_batch_size, num_parallel_calls=params.parallel_batch, deterministic=True)
     data = data.map(_memory_func, num_parallel_calls=tf2.data.AUTOTUNE)
 
     return data
@@ -483,7 +483,7 @@ def dataset_video(path: str, params: ModelParameter, sub_batch_size: int, slice_
     data = data.interleave(lambda x: _decode_func(x),
                            cycle_length=params.interleaved_datasets,
                            num_parallel_calls=tf2.data.AUTOTUNE)
-    data = data.batch(sub_batch_size, num_parallel_calls=params.parallel_batch, deterministic=not params.train)
+    data = data.batch(sub_batch_size, num_parallel_calls=params.parallel_batch, deterministic=True)
     data = data.map(_pre_func, num_parallel_calls=tf2.data.AUTOTUNE)
 
     return data
@@ -571,7 +571,7 @@ def gpt_neo_input(params: ModelParameter, sub_batch_size: int, slice_index: int,
     if params.use_random_dataloader:
         dset = dset.shuffle(params.shuffle_buffer,
                             seed=(params.data_seed if not params.use_random_dataloader else None))
-    dset = dset.batch(sub_batch_size, num_parallel_calls=params.parallel_batch, deterministic=not params.train)
+    dset = dset.batch(sub_batch_size, num_parallel_calls=params.parallel_batch, deterministic=True)
     dset = dset.map(_memory_func)
     dset = dset.map(align_tensor_op)
 
