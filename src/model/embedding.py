@@ -111,9 +111,9 @@ def _embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
 
         for dim in position_dims:
             base = int(dim.size ** (1 / splits))
-            while dim % base != 0:
+            while dim.size % base != 0:
                 base -= 1
-            final = dim // base ** (splits - 1)
+            final = dim.size // base ** (splits - 1)
             _new_part(final)
             for i in range(1, splits):
                 _new_part(base)
