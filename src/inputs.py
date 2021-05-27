@@ -244,7 +244,9 @@ def _text_decoder(decoder, data: tf.Tensor, ctx: int, patch_size: int, chunk_siz
             data = data.skip(tf.cast(_skip, dtype=tf.int64))
         if chunk_size > 0:
             data = data.batch(chunk_size, num_parallel_calls=parallel_batch, deterministic=True)
-        data = data.batch(ctx + patch_size, drop_remainder=True, deterministic=True, num_parallel_calls=1)
+        data = data.window(size=ctx + patch_size, shift=ctx, stride=1, drop_remainder=True)
+        data = data.interleave(lambda x: x.batch(ctx + patch_size, drop_remainder=True, deterministic=True,
+                                                 num_parallel_calls=1), cycle_length=1)
         return data
 
     return tf.data.TFRecordDataset(filenames=data).interleave(chunk, cycle_length=1)
