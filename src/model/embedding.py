@@ -72,6 +72,10 @@ class RelativeEmbeddingForward(mtf.Operation):
         lowering.set_tensor_lowering(self.outputs[0], mesh_impl.import_tf_tensor(self.outputs[0], out))
 
 
+def _embed_var(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
+    return normal_var(args.params, shape, args.params.embedding_stddev)
+
+
 def _embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
     if isinstance(shape, (list, tuple)):
         shape = mtf.Shape(shape)
@@ -84,20 +88,41 @@ def _embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
 
     if 'absolute' in args:
         if 'split' in args:
-            out = normal_var(args.params, position_dims, args.params.embedding_stddev)
-            out *= normal_var(args.params, feature_dims, args.params.embedding_stddev)
+            out = _embed_var(args, position_dims)
+            out *= _embed_var(args, feature_dims)
         else:
-            out = normal_var(args.params, shape)
+            out = _embed_var(args, shape)
     elif 'axial' in args:
         if 'split' in args:
             feature_dims = []
             position_dims = shape.dims
-        out = einsum([normal_var(args.params, [dim] + feature_dims, args.params.embedding_stddev)
-                      for dim in position_dims], output_shape=shape)
+        splits = 2
+        for a in args:
+            if a.isdigit():
+                splits = int(a)
+                break
+        parts = []
+        tmp_dims = []
+
+        def _new_part(size: int):
+            tmp = mtf.Dimension(f'_{len(tmp_dims)}', size)
+            tmp_dims.append(tmp)
+            parts.append(_embed_var(args, [tmp] + feature_dims))
+
+        for dim in position_dims:
+            base = int(dim.size ** (1 / splits))
+            while dim % base != 0:
+                base -= 1
+            final = dim // base ** (splits - 1)
+            _new_part(final)
+            for i in range(1, splits):
+                _new_part(base)
+        out = mtf.reshape(einsum(parts, output_shape=[tmp_dims] + feature_dims), shape)
+
     elif 'relative' in args:
         out = RelativeEmbeddingForward(args.params, shape).outputs[0]
         if 'learned' in args:
-            out *= normal_var(args.params, feature_dims, args.params.embedding_stddev)
+            out *= _embed_var(args, feature_dims)
     else:
         raise ValueError("relative(-learned) or absolute(-split) or axial(-split)")
 
