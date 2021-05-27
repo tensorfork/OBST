@@ -64,8 +64,8 @@ class RelativeEmbeddingForward(mtf.Operation):
             additive *= math.pi
             feature_count /= 2
 
-        features -= math.log(math.pi * 2 / position_count) - feature_count / 2
-        features *= feature_count ** 0.5
+        features *= 4 / feature_count
+        features -= math.log(position_count / 2 / math.pi) + 2
         features = tf.exp(features) + additive
         out = tf.einsum(f'{position_formula},{feature_formula}->{shape_formula}', positions, features)
         out = tf.math.sin(out) * params.embedding_stddev
