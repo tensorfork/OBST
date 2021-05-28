@@ -11,7 +11,7 @@ from .revnet import RevGradOp
 from ..dataclass import BlockArgs, BlockConfig, ModelParameter
 from ..mtf_wrapper import (add_n, cast, constant_scalar, dropout, einsum, exp, log, one_hot, ones, reciprocal,
                            reduce_logsumexp, reduce_max, reduce_sum, sigmoid, sign, zeros_like)
-from ..utils_mtf import concat, head_argmax, head_embed, slice, weighted_add
+from ..utils_mtf import concat, slice, weighted_add
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -114,7 +114,8 @@ def build(params: ModelParameter,
             base_args = BlockArgs(params, txt_tgt, [''])
             txt_embd = embed(base_args(params.token_embedding),
                              [params.head_dim, params.vocab_dim] + params.intermediate)
-            txt = einsum([txt_embd, *head_embed(params, txt_src)], reduced_dims=[params.vocab_dim, params.head_dim])
+            txt = einsum([txt_embd, *one_hot(txt_src, params.vocab_dim)],
+                         reduced_dims=[params.vocab_dim])
 
             txt = dropout(txt, params.train, rate=params.input_dropout)
 
@@ -169,7 +170,7 @@ def build(params: ModelParameter,
             for config_idx, config in enumerate(params.output_block_config):
                 token_out = block_part_fn(params, config, token_out, f'lang_out{config_idx}')
 
-            token_out = linear_from_features(base_args(token_out), [txt_tgt.shape[-1]] + params.vocab_dims)
+            token_out = linear_from_features(base_args(token_out), [txt_tgt.shape[-1], params.vocab_dim])
 
         if params.use_video:
             frame_out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)
@@ -194,12 +195,12 @@ def build(params: ModelParameter,
         accuracy = None
 
         if params.use_language:
-            reduced_shape = token_out.shape - params.vocab_dims
+            reduced_shape = token_out.shape - [params.vocab_dim]
             max_logit = reduce_max(token_out, output_shape=reduced_shape)
             msk = txt_msk * cat_msk_tgt * (1 / txt_tgt.size)
             token_loss = einsum([log(reduce_sum(exp(token_out - max_logit), output_shape=reduced_shape)), msk],
                                 output_shape=[])
-            token_loss += einsum([token_out, *head_embed(params, txt_tgt), constant_scalar(params, -1), msk],
+            token_loss += einsum([token_out, *one_hot(txt_tgt, params.vocab_dim), constant_scalar(params, -1), msk],
                                  output_shape=[])
             token_loss += einsum([max_logit, msk], output_shape=[])
             loss_list.append(token_loss)
@@ -210,7 +211,7 @@ def build(params: ModelParameter,
                                      token_loss], output_shape=[])
 
             if params.calc_accuracy:
-                accuracy = einsum([cast(mtf.equal(head_argmax(token_out, params.vocab_dims), txt_tgt),
+                accuracy = einsum([cast(mtf.equal(mtf.argmax(token_out, params.vocab_dim), txt_tgt),
                                         params.variable_dtype.activation_dtype), msk], output_shape=[])
 
         if params.use_video:

@@ -21,7 +21,7 @@ from .model import build
 from .mtf_wrapper import constant_scalar, log
 from .optimizers import get_optimizer
 from .utils_core import color_print
-from .utils_mtf import concat, head_argmax, pad, slice, to_fp32, weighted_add
+from .utils_mtf import concat, pad, slice, to_fp32, weighted_add
 
 tf1 = tf.compat.v1
 Dataset = tf1.data.Dataset
@@ -152,7 +152,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     # todo: fix token shift for video (Jan).
                     tkn_per_frame = mtf.Dimension("language_token_per_frame",
                                                   params.language_token_per_frame)
-                    shape = [params.batch_dim, params.sequence_dim, tkn_per_frame] + params.vocab_dims
+                    shape = [params.batch_dim, params.sequence_dim, tkn_per_frame, params.vocab_dim]
                     steps = params.time_patch_size
 
                     def body_fn(position, token_x_input, token_y_input, frame_input,
@@ -173,7 +173,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
                         if params.use_language:
                             one_hot_sequence = mtf.one_hot(position, params.sequence_dim, dtype=tf.float32)
-                            token_out = head_argmax(mtf.reshape(token_out, new_shape=shape), params.vocab_dims)
+                            token_out = mtf.argmax(mtf.reshape(token_out, new_shape=shape), params.vocab_dim)
                             padding_token = to_fp32(mtf.equal(token_out, params.padding_token))
 
                             token_x_input = weighted_add(mtf.reshape(token_out, new_shape=params.token_dim_shape),
@@ -227,7 +227,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                             token_out += (log(-log(mtf.random_uniform(params.mesh, token_out.shape, maxval=1,
                                                                       minval=1e-9, dtype=tf.float32)))
                                           * constant_scalar(params, -params.sampling_temperature))
-                        token_out = head_argmax(token_out, params.vocab_dims)
+                        token_out = mtf.argmax(token_out, params.vocab_dim)
                         token_out = mtf.shift(token_out, offset=1, dim=params.sequence_dim, wrap=False)
 
                         return (position + 1, weighted_add(token_out, token_x, one_hot_mask), token_y)
