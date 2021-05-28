@@ -347,8 +347,8 @@ class BlockArgs:
                 new.params = a
             elif isinstance(a, mtf.Tensor):
                 new.tensor = a
-            elif isinstance(a, list):
-                new.name_extras = a
+            elif isinstance(a, (list, tuple)):
+                new.name_extras = list(a)
             elif isinstance(a, str):
                 new.name_extras.append(str)
             else:

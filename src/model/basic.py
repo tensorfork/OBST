@@ -46,4 +46,3 @@ def feed_forward_out(args: BlockArgs):
 
 def feed_forward(args: BlockArgs) -> mtf.Tensor:
     return feed_forward_out(args(feed_forward_in(args)))
-
