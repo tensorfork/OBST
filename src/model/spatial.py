@@ -4,7 +4,7 @@ import mesh_tensorflow as mtf
 import tensorflow as tf
 
 from .backend import get_intermediate, normal_var, orthogonal_var
-from .basic import feed_forward_out, full_feed_forward_in
+from .basic import feed_forward_out, feed_forward_in
 from .embedding import embed
 from ..dataclass import BlockArgs
 from ..mtf_wrapper import einsum, greater_equal
@@ -93,7 +93,7 @@ def _softmax_attention(args: BlockArgs, val: mtf.Tensor, *lgt_in: mtf.Tensor) ->
 def attention(args: BlockArgs):
     args.params.attention_idx += 1
     dim = get_attention_dim(args).dim
-    base = args(full_feed_forward_in(args))
+    base = args(feed_forward_in(args))
 
     key = 0
     if 'embedded' in args or 'context' in args:
@@ -108,7 +108,7 @@ def spatial_mixing(args: BlockArgs) -> mtf.Tensor:
     tmp = anonymize_dim(dim)
 
     if 'feed_forward' in args:
-        args = args(full_feed_forward_in(args))
+        args = args(feed_forward_in(args))
 
     mid = anonymize(args.tensor, dim)
     base = [args.params.head_dim] * ('group' in args)
@@ -134,6 +134,6 @@ def spatial_mixing(args: BlockArgs) -> mtf.Tensor:
 
 
 def spatial_feed_forward(args: BlockArgs) -> mtf.Tensor:
-    base = args(full_feed_forward_in(args))
+    base = args(feed_forward_in(args))
     var = orthogonal_var(args.params, get_intermediate(base) + [anonymize_dim(get_attention_dim(args).dim)])
     return _softmax_attention(args, feed_forward_out(base), base.tensor, var)

@@ -35,6 +35,8 @@ def feed_forward_in(args: BlockArgs):
         out *= sigmoid(_from_feat())
     if 'glu_add' in args:
         out += activate(args(_from_feat()))
+    if 'norm' in args:
+        out = norm(args(out))
     return out
 
 
@@ -45,7 +47,3 @@ def feed_forward_out(args: BlockArgs):
 def feed_forward(args: BlockArgs) -> mtf.Tensor:
     return feed_forward_out(args(feed_forward_in(args)))
 
-
-def full_feed_forward_in(args: BlockArgs) -> mtf.Tensor:
-    out = activate(args(feed_forward_in(args)))
-    return dropout(args(norm(args(out)) if 'norm' in args else out))
