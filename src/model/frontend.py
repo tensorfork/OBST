@@ -4,10 +4,10 @@ import mesh_tensorflow as mtf
 import tensorflow as tf
 
 from .activation import activate
-from .attention import attention
-from .basic import dropout, feed_forward, rezero, spatial_mixing
+from .basic import dropout, feed_forward, rezero
 from .convolution import convolution
 from .normalization import norm
+from .spatial import attention, spatial_feed_forward, spatial_mixing
 from ..dataclass import BlockArgs, BlockConfig, ModelParameter
 from ..mtf_wrapper import scoped
 from ..utils_core import random_name
@@ -16,14 +16,15 @@ ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.D
 
 tf1 = tf.compat.v1
 
-LAYER_FUNCTIONS = {'feed_forward':   feed_forward,
-                   'attention':      attention,
-                   'norm':           norm,
-                   'rezero':         rezero,
-                   'activation':     activate,
-                   'convolution':    convolution,
-                   'dropout':        dropout,
-                   'spatial_mixing': spatial_mixing
+LAYER_FUNCTIONS = {'feed_forward':         feed_forward,
+                   'attention':            attention,
+                   'norm':                 norm,
+                   'rezero':               rezero,
+                   'activation':           activate,
+                   'convolution':          convolution,
+                   'dropout':              dropout,
+                   'spatial_mixing':       spatial_mixing,
+                   'spatial_feed_forward': spatial_feed_forward
                    }
 
 
