@@ -6,10 +6,10 @@ import numpy as np
 import tensorflow as tf
 
 from .backend import normal_var
-from ..dataclass import ModelParameter, BlockArgs
-from ..mtf_wrapper import (einsum)
+from ..dataclass import BlockArgs, ModelParameter
+from ..mtf_wrapper import einsum, scoped
 from ..utils_core import random_name
-from ..utils_mtf import DIM_LIST, SHAPE, shape_size
+from ..utils_mtf import DIM_LIST, SHAPE, shape_crossection, shape_size
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -44,7 +44,7 @@ class RelativeEmbeddingForward(mtf.Operation):
         shape = self.shape
 
         position_dims: SHAPE = (shape - params.feature_dims) - params.intermediate
-        feature_dims = list(set(shape.dims) & set(params.feature_dims + params.intermediate))
+        feature_dims = shape_crossection(shape, params.feature_dims + params.intermediate).dims
         position_count = shape_size(position_dims)
 
         cosine = 'cosine' in params.position_embedding
@@ -64,45 +64,79 @@ class RelativeEmbeddingForward(mtf.Operation):
             additive *= math.pi
             feature_count /= 2
 
-        features -= math.log(math.pi * 2 / position_count) - feature_count / 2
-        features *= feature_count ** 0.5
+        features *= 4 / feature_count
+        features -= math.log(position_count / 2 / math.pi) + 2
         features = tf.exp(features) + additive
         out = tf.einsum(f'{position_formula},{feature_formula}->{shape_formula}', positions, features)
         out = tf.math.sin(out) * params.embedding_stddev
         lowering.set_tensor_lowering(self.outputs[0], mesh_impl.import_tf_tensor(self.outputs[0], out))
 
 
-def embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
+def _embed_var(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
+    return normal_var(args.params, shape, args.params.embedding_stddev)
+
+
+def _embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
     if isinstance(shape, (list, tuple)):
         shape = mtf.Shape(shape)
 
-    if args.params.shared_position_embedding and shape in args.params.cached_embeddings:
-        return args.params.cached_embeddings[shape]
+    create = 'shared' not in args or shape.to_string not in args.params.cached_embeddings
+    if not create:
+        variables = args.params.cached_embeddings[shape.to_string]
 
+    variables = []
     position_dims: mtf.Shape = (shape - args.params.feature_dims) - args.params.intermediate
-    feature_dims = list(set(shape.dims) & set(args.params.feature_dims + args.params.intermediate))
+    feature_dims = shape_crossection(shape, args.params.feature_dims + args.params.intermediate).dims
 
     if 'absolute' in args:
         if 'split' in args:
-            out = normal_var(args.params, position_dims, args.params.embedding_stddev)
-            out *= normal_var(args.params, feature_dims, args.params.embedding_stddev)
+            if create:
+                variables = [_embed_var(args, position_dims), _embed_var(args, feature_dims)]
+            out = variables[0] * variables[1]
         else:
-            out = normal_var(args.params, shape)
+            out = _embed_var(args, shape)
+            variables = [out]
     elif 'axial' in args:
-        if 'split' in args:
-            feature_dims = []
-            position_dims = shape.dims
-        out = einsum([normal_var(args.params, [dim] + feature_dims, args.params.embedding_stddev)
-                      for dim in position_dims],
-                     output_shape=shape)
+        if create:
+            if 'split' in args:
+                feature_dims = []
+                position_dims = shape.dims
+            splits = 2
+            for a in args:
+                if a.isdigit():
+                    splits = int(a)
+                    break
+            tmp_dims = []
+
+            def _new_part(size: int):
+                tmp = mtf.Dimension(f'_{len(tmp_dims)}', size)
+                tmp_dims.append(tmp)
+                variables.append(_embed_var(args, [tmp] + feature_dims))
+
+            for dim in position_dims:
+                base = int(dim.size ** (1 / splits))
+                while dim.size % base != 0:
+                    base -= 1
+                final = dim.size // base ** (splits - 1)
+                _new_part(final)
+                for i in range(1, splits):
+                    _new_part(base)
+        out = mtf.reshape(einsum(variables, reduced_dims=[]), shape)
+
     elif 'relative' in args:
         out = RelativeEmbeddingForward(args.params, shape).outputs[0]
         if 'learned' in args:
-            out *= normal_var(args.params, feature_dims, args.params.embedding_stddev)
+            if create:
+                variables = [_embed_var(args, feature_dims)]
+            out *= variables[0]
     else:
         raise ValueError("relative(-learned) or absolute(-split) or axial(-split)")
 
-    if args.params.shared_position_embedding:
-        args.params.cached_embeddings[shape] = out
+    if 'shared' in args:
+        args.params.cached_embeddings[shape.to_string] = variables
 
     return out
+
+
+def embed(args: BlockArgs, shape: SHAPE):
+    return scoped('embed', _embed, args, shape)
