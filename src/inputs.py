@@ -243,10 +243,10 @@ def _text_decoder(decoder, data: tf.Tensor, ctx: int, patch_size: int, chunk_siz
         if _skip is not None:
             data = data.skip(tf.cast(_skip, dtype=tf.int64))
         if chunk_size > 0:
-            data = data.batch(chunk_size, num_parallel_calls=parallel_batch, deterministic=True)
+            data = data.batch(chunk_size, deterministic=True)
         data = data.window(size=ctx + patch_size, shift=ctx, stride=1, drop_remainder=True)
-        data = data.interleave(lambda x: x.batch(ctx + patch_size, drop_remainder=True, deterministic=True,
-                                                 num_parallel_calls=1), cycle_length=1)
+        data = data.interleave(lambda x: x.batch(ctx + patch_size, drop_remainder=True, deterministic=True),
+                               cycle_length=1)
         return data
 
     return tf.data.TFRecordDataset(filenames=data).interleave(chunk, cycle_length=1)
@@ -564,7 +564,7 @@ def gpt_neo_input(params: ModelParameter, sub_batch_size: int, slice_index: int,
                                                           params.shuffle_buffer * int(params.use_random_dataloader),
                                                           _skip),
                            cycle_length=params.interleaved_datasets,
-                           num_parallel_calls=tf2.data.AUTOTUNE)
+                           num_parallel_calls=params.parallel_interleave)
 
     if params.use_random_dataloader:
         dset = dset.shuffle(params.shuffle_buffer,
