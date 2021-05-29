@@ -207,7 +207,6 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             if self.split_vocab:
                 full_partition_size = self.head_splits * 128
                 self.vocab_size += full_partition_size - self.vocab_size % full_partition_size
-                self.vocab_size //= self.n_head
             elif self.vocab_size % 256 > 0:
                 self.vocab_size += 256 - self.vocab_size % 256
         self.mesh_shape = ','.join([f"b:{self.batch_splits:.0f}"] * split_batch +
