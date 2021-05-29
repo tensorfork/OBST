@@ -76,6 +76,10 @@ def less(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None) -> mtf.
     return scoped("less", mtf.less, x1, x2, output_shape)
 
 
+def less_equal(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None) -> mtf.Tensor:
+    return scoped("less_equal", mtf.less_equal, x1, x2, output_shape)
+
+
 def equal(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None) -> mtf.Tensor:
     return scoped("equal", mtf.equal, x1, x2, output_shape)
 
