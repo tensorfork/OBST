@@ -3,14 +3,14 @@ import typing
 import mesh_tensorflow as mtf
 import tensorflow as tf
 
-from .backend import linear, linear_from_features, linear_to_features, get_intermediate
+from .backend import get_intermediate, linear, linear_from_features, linear_to_features
 from .embedding import embed
 from .frontend import block_part_fn
 from .momentumnet import MomentumOperation
 from .revnet import RevGradOp
 from ..dataclass import BlockArgs, BlockConfig, ModelParameter
-from ..mtf_wrapper import (add_n, cast, constant_scalar, dropout, einsum, exp, log, one_hot, ones, reciprocal,
-                           reduce_logsumexp, reduce_max, reduce_sum, sigmoid, sign, zeros_like)
+from ..mtf_wrapper import (add_n, cast, constant_scalar, dropout, einsum, one_hot, ones, reciprocal,
+                           reduce_logsumexp, reduce_sum, sigmoid, sign, zeros_like)
 from ..utils_mtf import concat, slice, weighted_add
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
@@ -194,25 +194,11 @@ def build(params: ModelParameter,
         accuracy = None
 
         if params.use_language:
-            reduced_shape = token_out.shape - [params.vocab_dim]
-            max_logit = reduce_max(token_out, output_shape=reduced_shape)
-            msk = txt_msk * cat_msk_tgt * (1 / txt_tgt.size)
-            token_loss = einsum([log(reduce_sum(exp(token_out - max_logit), output_shape=reduced_shape)), msk],
-                                output_shape=[])
-            token_loss += einsum([token_out, constant_scalar(params, -1), msk,
-                                  one_hot(txt_tgt, params.vocab_dim, dtype=params.variable_dtype.activation_dtype)],
-                                 output_shape=[])
-            token_loss += einsum([max_logit, msk], output_shape=[])
+            token_loss = mtf.layers.softmax_cross_entropy_with_logits(token_out, txt_tgt, params.vocab_dim)
             loss_list.append(token_loss)
-
-            if txt_msk is not None:
-                token_loss = einsum([constant_scalar(params, txt_msk.size), reciprocal(reduce_sum(txt_msk)),
-                                     constant_scalar(params, cat_msk_tgt.size), reciprocal(reduce_sum(cat_msk_tgt)),
-                                     token_loss], output_shape=[])
-
             if params.calc_accuracy:
-                accuracy = einsum([cast(mtf.equal(mtf.argmax(token_out, params.vocab_dim), txt_tgt),
-                                        params.variable_dtype.activation_dtype), msk], output_shape=[])
+                accuracy = reduce_sum(mtf.equal(mtf.argmax(token_out, params.vocab_dim), txt_tgt),
+                                      params.variable_dtype.activation_dtype) / txt_tgt.size
 
         if params.use_video:
 
