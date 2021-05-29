@@ -113,7 +113,8 @@ def build(params: ModelParameter,
         if params.use_language:
             base_args = BlockArgs(params, txt_tgt, [''])
             txt_embd = embed(base_args(params.token_embedding), [params.vocab_dim] + params.intermediate)
-            txt = einsum([txt_embd, one_hot(txt_src, params.vocab_dim)], reduced_dims=[params.vocab_dim])
+            txt = einsum([txt_embd, one_hot(txt_src, params.vocab_dim, dtype=params.variable_dtype.activation_dtype)],
+                         reduced_dims=[params.vocab_dim])
 
             txt = dropout(txt, params.train, rate=params.input_dropout)
 
@@ -198,7 +199,8 @@ def build(params: ModelParameter,
             msk = txt_msk * cat_msk_tgt * (1 / txt_tgt.size)
             token_loss = einsum([log(reduce_sum(exp(token_out - max_logit), output_shape=reduced_shape)), msk],
                                 output_shape=[])
-            token_loss += einsum([token_out, one_hot(txt_tgt, params.vocab_dim), constant_scalar(params, -1), msk],
+            token_loss += einsum([token_out, constant_scalar(params, -1), msk,
+                                  one_hot(txt_tgt, params.vocab_dim, dtype=params.variable_dtype.activation_dtype)],
                                  output_shape=[])
             token_loss += einsum([max_logit, msk], output_shape=[])
             loss_list.append(token_loss)
