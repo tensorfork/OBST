@@ -349,7 +349,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     if params.macro_batching > 1 and params.train:
                         if params.macro_batch_loss_smoothing:
                             tf_loss = tf.cast(tf_loss, tf.float32)
-                            tf_loss += tf.cast(prev_loss, tf.float32) * tf.cast(loop_idx, tf.float32)f
+                            tf_loss += tf.cast(prev_loss, tf.float32) * tf.cast(loop_idx, tf.float32)
                             tf_loss /= tf.cast(1 + loop_idx, tf.float32)
                         params.log_dict_keys = list(log_dict.keys())
                     else:
