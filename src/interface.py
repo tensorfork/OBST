@@ -62,7 +62,8 @@ def process_token_output(token_out: np.ndarray, padding_token: int = -1, do_argm
                          bpe_tokenizer: GPT2TokenizerFast = None) -> typing.List[str]:
     _shape = token_out.shape
     if do_argmax:
-        token_out = np.reshape(token_out, newshape=(_shape[0], _shape[1] * _shape[2], _shape[3]))
+        voc_size = _shape[3] * _shape[4] if len(_shape) > 4 else _shape[3]
+        token_out = np.reshape(token_out, newshape=(_shape[0], _shape[1] * _shape[2], voc_size))
         token_out = np.argmax(token_out, axis=2)
     else:
         token_out = np.reshape(token_out, newshape=(_shape[0], _shape[1] * _shape[2]))
@@ -162,7 +163,7 @@ def gen_sample_fn(params: ModelParameter):
             print('target:')
             print(process_token_output(out[1], do_argmax=False, bpe_tokenizer=bpe_tokenizer)[0])
             print('\nsample:')
-            print(process_token_output(out[0], do_argmax=True, bpe_tokenizer=bpe_tokenizer)[0])
+            print(process_token_output(out[0], do_argmax=False, bpe_tokenizer=bpe_tokenizer)[0])
 
         state['sample_index'] += 1
         if state['sample_index'] >= params.num_of_sample:
@@ -171,3 +172,51 @@ def gen_sample_fn(params: ModelParameter):
         print('\n')
 
     return _video_fn if params.model_mode == 'jannet' else _text_fn
+
+def get_command_line_input_and_output_fn(params: ModelParameter):
+    bpe_tokenizer = GPT2TokenizerFast.from_pretrained('gpt2') if params.vocab_size != 256 and \
+                                                                 params.vocab_size > 256 else None
+
+    samp_temp = 0.7
+    end_iter = params.n_ctx
+    _iter_pos = [0]
+    _end_iter = [0]
+
+    def input_fns():
+
+        valid_quary = False
+
+        while not valid_quary:
+            color_print(params, 'Enter Quary:')
+            quary = input()
+
+            if bpe_tokenizer is None:
+                quary = [ord(q) for q in quary]
+            else:
+                quary = bpe_tokenizer.encode(quary)
+
+            if len(quary) < params.n_ctx:
+                valid_quary = True
+            else:
+                color_print(params, f'Quary is to long, the maximum number tokens is '
+                                    f'{params.n_ctx}, but you have {len(quary)} tokens.')
+
+            iter_pos = len(quary) + 1
+            _iter_pos[0] = iter_pos
+
+            _end_iter[0] = end_iter
+
+            quary = quary + [0] * (params.n_ctx - len(quary))
+            quary = np.reshape(np.array(quary, np.int32), newshape=(1, params.n_ctx, 1))
+
+
+        return quary, np.array([iter_pos], np.int32), \
+               np.array([samp_temp], np.float32),  np.array([end_iter], np.int32)
+
+    def output_fn(out):
+        color_print(params, 'Responds:')
+        print(process_token_output(out[0][:, _iter_pos[0]:][:, :_end_iter[0]], do_argmax=False,
+                                   bpe_tokenizer=bpe_tokenizer)[0].rstrip())
+        print('')
+
+    return input_fns, output_fn

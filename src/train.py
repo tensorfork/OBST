@@ -21,7 +21,7 @@ from .model import build
 from .mtf_wrapper import constant_scalar, log
 from .optimizers import get_optimizer
 from .utils_core import color_print
-from .utils_mtf import concat, pad, slice, to_fp32, weighted_add
+from .utils_mtf import concat, pad, slice, to_fp32, weighted_add, anonymize
 
 tf1 = tf.compat.v1
 Dataset = tf1.data.Dataset
@@ -74,7 +74,7 @@ def _import_tensor(params, tensor, shape, name):
 
 
 def computation_func(params: ModelParameter, input_fn: typing.Callable,
-                     session_config, cluster_resolver, callback_fns):
+                     session_config, cluster_resolver, callback_fns, query_input_fns=None):
     # TODO(Lucas): move tf dataset to iterator/queue
     # TODO(Lucas): clean up code + optimize
     host_id_to_tf_device = "/job:worker/task:{:d}/device:CPU:0"
@@ -118,6 +118,9 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             frame_mask_src = None
             frame_mask_tag = None
             token_mask = None
+            initial_pos = None
+            sampling_temperature = None
+            end_iterations = None
 
             start_time = time.time()
             color_print(params, "Building Mesh-TensorFlow graph...")
@@ -136,6 +139,15 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             else:  # params.use_language
                 token_x_input = _import_tensor(params, args[0], params.token_dim_shape, "tkn_src")
                 token_y_input = _import_tensor(params, args[1], params.token_dim_shape, "tkn_tgt")
+
+                if not query_input_fns is None:
+                    initial_pos_dim = mtf.Dimension("_initial_pos_dim", 1)
+                    initial_pos = _import_tensor(params, args[2], mtf.Shape([initial_pos_dim]), "initial_pos")
+                    initial_pos = mtf.reduce_sum(initial_pos, output_shape=[])
+                    sampling_temperature = _import_tensor(params, args[3], mtf.Shape([initial_pos_dim]), "temperature")
+                    sampling_temperature = mtf.reduce_sum(sampling_temperature, output_shape=[])
+                    end_iterations = _import_tensor(params, args[4], mtf.Shape([initial_pos_dim]), "end_iterations")
+                    end_iterations = mtf.reduce_sum(end_iterations, output_shape=[])
 
             if params.train or not params.use_autoregressive_sampling:
                 loss, loss_list, video_loss, accuracy, token_loss, frame_out, token_out = build(params,
@@ -209,9 +221,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                          token_mask]
 
                 else:  # -> params.use_language
-                    steps = params.sequence_dim.size
-
-                    def body_fn(position, token_x, token_y, *states):
+                    def body_fn(position, token_x, token_y, sampling_temperature, *states):
                         _, _, _, _, _, _, token_out = build(params,
                                                             mtf.ones(params.mesh, [], tf.float32),
                                                             mtf.ones(params.mesh, [], tf.float32),
@@ -223,17 +233,20 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                             mtf.ones(params.mesh, [], tf.float32))
 
                         one_hot_mask = mtf.one_hot(position, output_dim=params.sequence_dim, dtype=tf.int32)
-                        if params.sampling_temperature != 0.0:
-                            token_out += (log(-log(mtf.random_uniform(params.mesh, token_out.shape, maxval=1,
+
+                        token_out += (log(-log(mtf.random_uniform(params.mesh, token_out.shape, maxval=1,
                                                                       minval=1e-9, dtype=tf.float32)))
-                                          * constant_scalar(params, -params.sampling_temperature))
+                                          * (-sampling_temperature))
                         token_out = mtf.argmax(token_out, params.vocab_dim)
+
                         token_out = mtf.shift(token_out, offset=1, dim=params.sequence_dim, wrap=False)
 
-                        return (position + 1, weighted_add(token_out, token_x, one_hot_mask), token_y)
+                        return (position + 1, weighted_add(token_out, token_x, one_hot_mask),
+                                token_y, mtf.cast(sampling_temperature, dtype=tf.float32))
 
-                    initial_pos = mtf.constant(params.mesh, value=params.initial_autoregressive_position,
-                                               dtype=tf.int32)
+                    if initial_pos is None:
+                        initial_pos = mtf.constant(params.mesh, value=params.initial_autoregressive_position,
+                                                   dtype=tf.int32)
                     token_initial_pos_mask = mtf.less_equal(mtf.range(params.mesh, params.sequence_dim, dtype=tf.int32),
                                                             initial_pos)
                     token_initial_pos_mask = mtf.cast(token_initial_pos_mask, tf.int32)
@@ -245,13 +258,16 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     else:
                         token_x_input = token_x_input * token_initial_pos_mask
 
-                    while_loop_inputs = [initial_pos, token_x_input, token_y_input]
+                    if sampling_temperature is None:
+                        sampling_temperature = constant_scalar(params, params.sampling_temperature, dtype=tf.float32)
+
+                    #if end_iterations is None:
+                    #    end_iterations  =
+
+                    while_loop_inputs = [initial_pos, token_x_input, token_y_input, sampling_temperature]
 
                 def cond_fn(position, *states):
-                    is_done = mtf.greater_equal(position, steps)
-                    is_done = mtf.logical_or(is_done,
-                                             mtf.greater_equal(position - params.initial_autoregressive_position,
-                                                               steps))
+                    is_done = mtf.greater_equal(position, end_iterations)
                     is_done = mtf.reduce_sum(is_done)
 
                     return mtf.logical_not(is_done)
@@ -452,181 +468,201 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         ordered_host_ids.append(host_id)
         host_id_to_its_pnums[host_id].append(pnum)
 
-    num_hosts = len(set(ordered_hosts))
+    if query_input_fns is None:
+        num_hosts = len(set(ordered_hosts))
 
-    pnum_maps = []
-    macro_batching_multi = params.macro_batching if params.train else 1
-    batch_size = params.input_pipeline_shape[0].to_integer_list[0] * macro_batching_multi
-    for mtf_shape in params.input_pipeline_shape:
-        # Make sure that the batch size is the same across all input tensors.
-        assert batch_size == mtf_shape.to_integer_list[0] * macro_batching_multi
+        pnum_maps = []
+        macro_batching_multi = params.macro_batching if params.train else 1
+        batch_size = params.input_pipeline_shape[0].to_integer_list[0] * macro_batching_multi
+        for mtf_shape in params.input_pipeline_shape:
+            # Make sure that the batch size is the same across all input tensors.
+            assert batch_size == mtf_shape.to_integer_list[0] * macro_batching_multi
 
-        s_shape = params.mesh_impl.slice_shape(mtf_shape)
-        shape_list = [dim_size // s_dim_size for dim_size, s_dim_size in zip(mtf_shape.to_integer_list, s_shape)]
+            s_shape = params.mesh_impl.slice_shape(mtf_shape)
+            shape_list = [dim_size // s_dim_size for dim_size, s_dim_size in zip(mtf_shape.to_integer_list, s_shape)]
 
-        pnum_map_shape = shape_list + [num_cores // np.prod(shape_list)]
-        assert np.prod(pnum_map_shape) == num_cores
+            pnum_map_shape = shape_list + [num_cores // np.prod(shape_list)]
+            assert np.prod(pnum_map_shape) == num_cores
 
-        # Initialize the pnum_map to None.
-        pnum_map = np.empty(pnum_map_shape, dtype=object)
-        pnum_map[:] = None
+            # Initialize the pnum_map to None.
+            pnum_map = np.empty(pnum_map_shape, dtype=object)
+            pnum_map[:] = None
 
-        for pnum in range(num_cores):
-            s_begin = params.mesh_impl.slice_begin(mtf_shape, pnum)
-            coord = [dim_size // s_dim_size for dim_size, s_dim_size in zip(s_begin, s_shape)]
-            # put pnum in pnum_map[coord]
-            pnum_array_ref = pnum_map[tuple(coord)]
-            for idx, value in enumerate(pnum_array_ref):
-                if value is None:
-                    pnum_array_ref[idx] = pnum
-                    break
+            for pnum in range(num_cores):
+                s_begin = params.mesh_impl.slice_begin(mtf_shape, pnum)
+                coord = [dim_size // s_dim_size for dim_size, s_dim_size in zip(s_begin, s_shape)]
+                # put pnum in pnum_map[coord]
+                pnum_array_ref = pnum_map[tuple(coord)]
+                for idx, value in enumerate(pnum_array_ref):
+                    if value is None:
+                        pnum_array_ref[idx] = pnum
+                        break
 
-        pnum_maps.append(pnum_map)
+            pnum_maps.append(pnum_map)
 
-    # For each sub-batch, we need to know which host should read it.
-    if params.train:
-
-        # This records how many datasets (ds) are already stored on each host.
-        num_dss_per_host = [0] * num_hosts
-
-        # A list of host_ids that holds datasets (ds).
-        hosts_to_hold_ds = []
-
-        for sub_batch_pnum_map in pnum_maps[0]:
-
-            num_pnums_per_host = [0] * num_hosts
-            for pnum in sub_batch_pnum_map.flatten():
-                num_pnums_per_host[ordered_host_ids[pnum]] += 1
-
-            host_metrics = [(host_id, num_pnums_per_host[host_id], num_dss_per_host[host_id]) for host_id in
-                            range(num_hosts)]
-            host_id, _, _ = max(host_metrics, key=lambda keys: (keys[1], -keys[2]))
-
-            num_dss_per_host[host_id] += 1
-            hosts_to_hold_ds.append(host_id)
-
-    else:
-        # There should be just one dataset-holding host. Make the last host do it.
-        hosts_to_hold_ds = [num_hosts - 1]
-
-    sub_batch_size = batch_size // len(hosts_to_hold_ds)
-    tf1.logging.info("MTF sub_batch_size: {}".format(sub_batch_size))
-    assert sub_batch_size * len(hosts_to_hold_ds) == batch_size
-
-    # Slots for all laidout tensors.
-    all_laidout_tensors = [[None] * len(params.input_pipeline_shape) for _ in range(num_cores)]
-
-    log_path = params.model_path + "/DataLog.log"
-    _run_log = []
-    run_log = None
-
-    if params.use_checkpointing:
-        if tf.io.gfile.exists(log_path):
-            _run_log = json.load(tf.io.gfile.GFile(log_path, 'r'))
-
-        curran_stats = {'steps':             params.current_step, 'ctx': params.n_ctx,
-                        'slice_count':       len(hosts_to_hold_ds),
-                        'interleave_size':   params.interleaved_datasets,
-                        'batch_size':        params.train_batch_size,
-                        'grad_accumulation': params.grad_accumulation,
-                        'token_patch_size':  params.token_patch_size
-                        }
-        json.dump((_run_log + [curran_stats]), tf.io.gfile.GFile(log_path, 'w'), indent=2)
-
-        if len(_run_log) > 0 and not params.use_random_dataloader:
-            _run_log = [r for r in _run_log if r['steps'] != params.current_step]
-            if len(_run_log) > 0:
-                run_log = [_run_log.pop(-1)]
-                for r in _run_log[::-1]:
-                    if run_log[-1]['steps'] != r['steps'] and r['steps'] != params.current_step:
-                        run_log.append(r)
-                run_log = run_log[::-1]
-
-                for run_idx in range(len(run_log) - 1):
-                    run_log[run_idx]['steps'] = run_log[run_idx + 1]['steps'] - run_log[run_idx]['steps']
-
-                run_log[-1]['steps'] = params.current_step - run_log[-1]['steps']
-
-                if run_log[-1]['steps'] <= 0:
-                    run_log = None
-
-    ds_iterator = []
-    # For each sub-batch, create a SubBatchSlicer object.
-    for sub_batch_i, host_id in enumerate(hosts_to_hold_ds):
-        # Get the list of pnums for each input.
+        # For each sub-batch, we need to know which host should read it.
         if params.train:
 
-            all_sub_batch_pnums = []
-            for pnum_map in pnum_maps:
-                sub_batch_pnums = pnum_map[sub_batch_i, ...].flatten().tolist()
-                all_sub_batch_pnums.append(sub_batch_pnums)
+            # This records how many datasets (ds) are already stored on each host.
+            num_dss_per_host = [0] * num_hosts
+
+            # A list of host_ids that holds datasets (ds).
+            hosts_to_hold_ds = []
+
+            for sub_batch_pnum_map in pnum_maps[0]:
+
+                num_pnums_per_host = [0] * num_hosts
+                for pnum in sub_batch_pnum_map.flatten():
+                    num_pnums_per_host[ordered_host_ids[pnum]] += 1
+
+                host_metrics = [(host_id, num_pnums_per_host[host_id], num_dss_per_host[host_id]) for host_id in
+                                range(num_hosts)]
+                host_id, _, _ = max(host_metrics, key=lambda keys: (keys[1], -keys[2]))
+
+                num_dss_per_host[host_id] += 1
+                hosts_to_hold_ds.append(host_id)
 
         else:
+            # There should be just one dataset-holding host. Make the last host do it.
+            hosts_to_hold_ds = [num_hosts - 1]
 
-            all_sub_batch_pnums = [pnum_map.flatten().tolist() for pnum_map in pnum_maps]
+        sub_batch_size = batch_size // len(hosts_to_hold_ds)
+        tf1.logging.info("MTF sub_batch_size: {}".format(sub_batch_size))
+        assert sub_batch_size * len(hosts_to_hold_ds) == batch_size
 
-        with ops.device(f"/job:worker/task:{host_id}/device:CPU:0"):
-            dataset = input_fn(params, sub_batch_size, sub_batch_i, len(hosts_to_hold_ds), run_log)
-            if not params.use_random_dataloader and params.train and params.use_video:
-                dataset = dataset.skip(params.current_step // params.macro_batching)
-            dataset = dataset.prefetch(params.buffer_size)
-            options = tf.data.Options()
-            options.experimental_deterministic = not params.train
-            options.experimental_optimization.autotune = True
-            options.experimental_optimization.autotune_buffers = True
-            options.experimental_optimization.filter_fusion = True
-            options.experimental_optimization.hoist_random_uniform = True
-            options.experimental_optimization.map_and_batch_fusion = True
-            options.experimental_optimization.map_and_filter_fusion = False
-            options.experimental_optimization.map_fusion = True
-            options.experimental_optimization.map_parallelization = True
-            options.experimental_optimization.map_vectorization.enabled = True
-            options.experimental_optimization.map_vectorization.use_choose_fastest = True
-            options.experimental_optimization.noop_elimination = True
-            options.experimental_optimization.parallel_batch = True
-            options.experimental_optimization.shuffle_and_repeat_fusion = True
-            options.experimental_optimization.apply_default_optimizations = False
-            options.experimental_threading.max_intra_op_parallelism = 1
-            options.experimental_threading.private_threadpool_size = 48
-            options.experimental_distribute.auto_shard_policy = AutoShardPolicy.AUTO
-            dataset: Dataset = dataset.with_options(options)
-            _ds_iterator = tf1.data.make_initializable_iterator(dataset)
-            ds_iterator.append(_ds_iterator)
-            all_input_tensors = _ds_iterator.get_next()
+        # Slots for all laidout tensors.
+        all_laidout_tensors = [[None] * len(params.input_pipeline_shape) for _ in range(num_cores)]
 
-            if isinstance(all_input_tensors, tf.Tensor):
-                all_input_tensors = [all_input_tensors]
-            assert len(all_input_tensors) == len(all_sub_batch_pnums)
+        log_path = params.model_path + "/DataLog.log"
+        _run_log = []
+        run_log = None
 
-            for input_i in range(len(all_input_tensors)):
-                input_tensor = all_input_tensors[input_i]
-                sub_batch_pnums = all_sub_batch_pnums[input_i]
-                mtf_input_shape = params.input_pipeline_shape[input_i]
+        if params.use_checkpointing:
+            if tf.io.gfile.exists(log_path):
+                _run_log = json.load(tf.io.gfile.GFile(log_path, 'r'))
 
-                # Initialize the cache for each input_i
-                _slice_dict = collections.defaultdict(list)
+            curran_stats = {'steps':             params.current_step, 'ctx': params.n_ctx,
+                            'slice_count':       len(hosts_to_hold_ds),
+                            'interleave_size':   params.interleaved_datasets,
+                            'batch_size':        params.train_batch_size,
+                            'grad_accumulation': params.grad_accumulation,
+                            'token_patch_size':  params.token_patch_size
+                            }
+            json.dump((_run_log + [curran_stats]), tf.io.gfile.GFile(log_path, 'w'), indent=2)
 
-                for idx, pnum in enumerate(sub_batch_pnums):
+            if len(_run_log) > 0 and not params.use_random_dataloader:
+                _run_log = [r for r in _run_log if r['steps'] != params.current_step]
+                if len(_run_log) > 0:
+                    run_log = [_run_log.pop(-1)]
+                    for r in _run_log[::-1]:
+                        if run_log[-1]['steps'] != r['steps'] and r['steps'] != params.current_step:
+                            run_log.append(r)
+                    run_log = run_log[::-1]
 
-                    s_begin = params.mesh_impl.slice_begin(mtf_input_shape, pnum)
-                    if not not params.train:
-                        # Always slice from 0 in the first dimension (batch dimension), since
-                        # input_tensor a sub-batch tensor.
-                        s_begin[0] = 0
-                    if tuple(s_begin) in _slice_dict:
-                        input_slice = _slice_dict[tuple(s_begin)]
-                    else:
-                        s_shape = params.mesh_impl.slice_shape(mtf_input_shape)
-                        s_shape[0] = s_shape[0] * macro_batching_multi
-                        input_slice = tf.slice(input_tensor, s_begin, s_shape)
+                    for run_idx in range(len(run_log) - 1):
+                        run_log[run_idx]['steps'] = run_log[run_idx + 1]['steps'] - run_log[run_idx]['steps']
 
-                    all_laidout_tensors[pnum][input_i] = input_slice
+                    run_log[-1]['steps'] = params.current_step - run_log[-1]['steps']
 
-    # Make sure that there are no Nones in all_laidout_tensors.
-    for laidout_tensors in all_laidout_tensors:
-        assert None not in laidout_tensors
+                    if run_log[-1]['steps'] <= 0:
+                        run_log = None
 
-    with ops.device(f"/job:worker/task:{hosts_to_hold_ds[0]}/device:CPU:0"):
+        ds_iterator = []
+        # For each sub-batch, create a SubBatchSlicer object.
+        for sub_batch_i, host_id in enumerate(hosts_to_hold_ds):
+            # Get the list of pnums for each input.
+            if params.train:
+
+                all_sub_batch_pnums = []
+                for pnum_map in pnum_maps:
+                    sub_batch_pnums = pnum_map[sub_batch_i, ...].flatten().tolist()
+                    all_sub_batch_pnums.append(sub_batch_pnums)
+
+            else:
+
+                all_sub_batch_pnums = [pnum_map.flatten().tolist() for pnum_map in pnum_maps]
+
+            with ops.device(f"/job:worker/task:{host_id}/device:CPU:0"):
+                dataset = input_fn(params, sub_batch_size, sub_batch_i, len(hosts_to_hold_ds), run_log)
+                if not params.use_random_dataloader and params.train and params.use_video:
+                    dataset = dataset.skip(params.current_step // params.macro_batching)
+                dataset = dataset.prefetch(params.buffer_size)
+                options = tf.data.Options()
+                options.experimental_deterministic = not params.train
+                options.experimental_optimization.autotune = True
+                options.experimental_optimization.autotune_buffers = True
+                options.experimental_optimization.filter_fusion = True
+                options.experimental_optimization.hoist_random_uniform = True
+                options.experimental_optimization.map_and_batch_fusion = True
+                options.experimental_optimization.map_and_filter_fusion = False
+                options.experimental_optimization.map_fusion = True
+                options.experimental_optimization.map_parallelization = True
+                options.experimental_optimization.map_vectorization.enabled = True
+                options.experimental_optimization.map_vectorization.use_choose_fastest = True
+                options.experimental_optimization.noop_elimination = True
+                options.experimental_optimization.parallel_batch = True
+                options.experimental_optimization.shuffle_and_repeat_fusion = True
+                options.experimental_optimization.apply_default_optimizations = False
+                options.experimental_threading.max_intra_op_parallelism = 1
+                options.experimental_threading.private_threadpool_size = 48
+                options.experimental_distribute.auto_shard_policy = AutoShardPolicy.AUTO
+                dataset: Dataset = dataset.with_options(options)
+                _ds_iterator = tf1.data.make_initializable_iterator(dataset)
+                ds_iterator.append(_ds_iterator)
+                all_input_tensors = _ds_iterator.get_next()
+
+                if isinstance(all_input_tensors, tf.Tensor):
+                    all_input_tensors = [all_input_tensors]
+                assert len(all_input_tensors) == len(all_sub_batch_pnums)
+
+                for input_i in range(len(all_input_tensors)):
+                    input_tensor = all_input_tensors[input_i]
+                    sub_batch_pnums = all_sub_batch_pnums[input_i]
+                    mtf_input_shape = params.input_pipeline_shape[input_i]
+
+                    # Initialize the cache for each input_i
+                    _slice_dict = collections.defaultdict(list)
+
+                    for idx, pnum in enumerate(sub_batch_pnums):
+
+                        s_begin = params.mesh_impl.slice_begin(mtf_input_shape, pnum)
+                        if not not params.train:
+                            # Always slice from 0 in the first dimension (batch dimension), since
+                            # input_tensor a sub-batch tensor.
+                            s_begin[0] = 0
+                        if tuple(s_begin) in _slice_dict:
+                            input_slice = _slice_dict[tuple(s_begin)]
+                        else:
+                            s_shape = params.mesh_impl.slice_shape(mtf_input_shape)
+                            s_shape[0] = s_shape[0] * macro_batching_multi
+                            input_slice = tf.slice(input_tensor, s_begin, s_shape)
+
+                        all_laidout_tensors[pnum][input_i] = input_slice
+
+        # Make sure that there are no Nones in all_laidout_tensors.
+        for laidout_tensors in all_laidout_tensors:
+            assert None not in laidout_tensors
+
+        with ops.device(f"/job:worker/task:{hosts_to_hold_ds[0]}/device:CPU:0"):
+
+            def _tpu_ordinal_function_impl(pnum):
+                return ordered_ordinals[pnum]
+
+            def _placement_function_impl(pnum):
+                return ordered_hosts[pnum]
+
+            laidout_tensors0 = all_laidout_tensors[0]
+            infeed_queue = tpu_feed.InfeedQueue(
+                    number_of_tuple_elements=len(laidout_tensors0),
+                    tuple_types=[x.dtype for x in laidout_tensors0],
+                    tuple_shapes=[x.shape for x in laidout_tensors0])
+            enqueue_ops = infeed_queue.generate_enqueue_ops(
+                    all_laidout_tensors,
+                    tpu_ordinal_function=_tpu_ordinal_function_impl,
+                    placement_function=_placement_function_impl)
+
+        input_initializers = [ds.initializer for ds in ds_iterator]
+    else:
 
         def _tpu_ordinal_function_impl(pnum):
             return ordered_ordinals[pnum]
@@ -634,17 +670,22 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         def _placement_function_impl(pnum):
             return ordered_hosts[pnum]
 
+        prompt = tf1.placeholder(dtype=tf.int32, shape=[t.size for t in params.token_dim_shape])
+        iter_pos = tf1.placeholder(dtype=tf.int32, shape=[1])
+        samp_temp = tf1.placeholder(dtype=tf.float32, shape=[1])
+        end_iter = tf1.placeholder(dtype=tf.int32, shape=[1])
+
+        all_laidout_tensors = [[prompt, prompt, iter_pos, samp_temp, end_iter] for _ in range(params.num_cores)]
+
         laidout_tensors0 = all_laidout_tensors[0]
         infeed_queue = tpu_feed.InfeedQueue(
                 number_of_tuple_elements=len(laidout_tensors0),
                 tuple_types=[x.dtype for x in laidout_tensors0],
                 tuple_shapes=[x.shape for x in laidout_tensors0])
-        enqueue_ops = infeed_queue.generate_enqueue_ops(
-                all_laidout_tensors,
-                tpu_ordinal_function=_tpu_ordinal_function_impl,
-                placement_function=_placement_function_impl)
+        enqueue_ops = infeed_queue.generate_enqueue_ops(all_laidout_tensors,
+                                                        tpu_ordinal_function=_tpu_ordinal_function_impl,
+                                                        placement_function=_placement_function_impl)
 
-    input_initializers = [ds.initializer for ds in ds_iterator]
 
     color_print(params, "Building split TensorFlow computation...")
     start_time = time.time()
@@ -719,19 +760,34 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         with tf1.train.MonitoredSession(session_creator=tf1.train.ChiefSessionCreator(master=cluster_resolver.master(),
                                                                                       config=session_config),
                                         hooks=[ckpt_loader_hook, hooks[0]]) as sess:
-            tf.compat.v1.get_default_graph().finalize()
+
             color_print(params, f"Connected after {time.time() - start_time:.1f}s")
+            color_print(params, 'Compiling computation...')
+            now = time.time()
+            sess.run(compilation_state)
+            elapsed = time.time() - now
+            color_print(params, f'Compiled in {elapsed:.1f}s')
 
-            color_print(params, "Initializing inputs...")
-            sess.run(input_initializers)
+            if query_input_fns is None:
+                color_print(params, "Initializing inputs...")
+                sess.run(input_initializers)
 
-            color_print(params, "Enqueueing first batch...")
-            sess.run(enqueue_ops)
 
             while True:
+
+                if query_input_fns is None:
+                    feed_dict = None
+                else:
+                    _prompt, _iter_pos, _samp_temp, _end_iter = query_input_fns()
+                    feed_dict = {prompt: _prompt,
+                                 iter_pos: _iter_pos,
+                                 samp_temp: _samp_temp,
+                                 end_iter: _end_iter}
+
+                sess.run(enqueue_ops, feed_dict=feed_dict)
+
                 sess.run(computation)
                 out = sess.run(outfeed_dequeue_ops)[0]
-                sess.run(enqueue_ops)
 
                 for fn in callback_fns:
                     fn(out)

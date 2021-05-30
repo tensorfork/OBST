@@ -16,7 +16,7 @@ from tensorflow.python.tpu.topology import Topology
 from tensorflow_estimator.python.estimator import estimator as estimator_lib
 
 from .dataclass import ModelParameter
-from .eval import gen_sample_fn
+from .interface import gen_sample_fn, get_command_line_input_and_output_fn
 from .inputs import dataset, gpt_neo_input
 from .train import computation_func
 
@@ -145,12 +145,23 @@ def main(args: argparse.Namespace) -> None:
                                  session_config,
                                  tpu_cluster_resolver,
                                  [lambda x: print(f"Current step: {x}")] * params.debug_train_step)
-        else:  # train == 'sample'
+        elif args.run_mode == 'sample':
             computation_func(params,
                              input_fn,
                              session_config,
                              tpu_cluster_resolver,
                              [gen_sample_fn(params)])
+
+        elif args.run_mode == 'quary':
+            input_fns, output_fn = get_command_line_input_and_output_fn(params)
+
+            computation_func(params,
+                             input_fn,
+                             session_config,
+                             tpu_cluster_resolver,
+                             [output_fn],
+                             input_fns)
+
     tf.logging.info('finished.')
 
     with tf.Session(target=tpu_cluster_resolver.get_master(), config=session_config) as sess:
