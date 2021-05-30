@@ -21,7 +21,7 @@ from .model import build
 from .mtf_wrapper import constant_scalar, log
 from .optimizers import get_optimizer
 from .utils_core import color_print
-from .utils_mtf import concat, pad, slice, to_fp32, weighted_add, anonymize
+from .utils_mtf import concat, pad, slice, to_fp32, weighted_add
 
 tf1 = tf.compat.v1
 Dataset = tf1.data.Dataset
@@ -233,10 +233,11 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                             mtf.ones(params.mesh, [], tf.float32))
 
                         one_hot_mask = mtf.one_hot(position, output_dim=params.sequence_dim, dtype=tf.int32)
+                        token_out = mtf.cast(token_out, dtype=tf.float32)
 
                         token_out += (log(-log(mtf.random_uniform(params.mesh, token_out.shape, maxval=1,
-                                                                      minval=1e-9, dtype=tf.float32)))
-                                          * (-sampling_temperature))
+                                                                  minval=1e-9, dtype=tf.float32)))
+                                      * (-sampling_temperature))
                         token_out = mtf.argmax(token_out, params.vocab_dim)
 
                         token_out = mtf.shift(token_out, offset=1, dim=params.sequence_dim, wrap=False)
@@ -261,7 +262,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     if sampling_temperature is None:
                         sampling_temperature = constant_scalar(params, params.sampling_temperature, dtype=tf.float32)
 
-                    #if end_iterations is None:
+                    # if end_iterations is None:
                     #    end_iterations  =
 
                     while_loop_inputs = [initial_pos, token_x_input, token_y_input, sampling_temperature]
@@ -686,7 +687,6 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                         tpu_ordinal_function=_tpu_ordinal_function_impl,
                                                         placement_function=_placement_function_impl)
 
-
     color_print(params, "Building split TensorFlow computation...")
     start_time = time.time()
     compilation_state, computation = tpu.split_compile_and_replicate(_model_fn,
@@ -772,17 +772,17 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 color_print(params, "Initializing inputs...")
                 sess.run(input_initializers)
 
-
             while True:
 
                 if query_input_fns is None:
                     feed_dict = None
                 else:
                     _prompt, _iter_pos, _samp_temp, _end_iter = query_input_fns()
-                    feed_dict = {prompt: _prompt,
-                                 iter_pos: _iter_pos,
+                    feed_dict = {prompt:    _prompt,
+                                 iter_pos:  _iter_pos,
                                  samp_temp: _samp_temp,
-                                 end_iter: _end_iter}
+                                 end_iter:  _end_iter
+                                 }
 
                 sess.run(enqueue_ops, feed_dict=feed_dict)
 
