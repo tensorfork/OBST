@@ -4,14 +4,14 @@ import mesh_tensorflow as mtf
 import tensorflow as tf
 
 from .backend import get_intermediate, linear, linear_from_features, linear_to_features
+from .basic import feed_forward_in
 from .embedding import embed
-from .basic import  feed_forward_in
 from .frontend import block_part_fn
 from .momentumnet import MomentumOperation
 from .revnet import RevGradOp
 from ..dataclass import BlockArgs, BlockConfig, ModelParameter
-from ..mtf_wrapper import (add_n, cast, constant_scalar, dropout, einsum, one_hot, ones, reciprocal,
-                           reduce_logsumexp, reduce_sum, reduce_mean, sigmoid, sign, zeros_like)
+from ..mtf_wrapper import (add_n, cast, constant_scalar, dropout, einsum, one_hot, ones, reciprocal, reduce_logsumexp,
+                           reduce_mean, reduce_sum, sigmoid, sign, zeros_like)
 from ..utils_mtf import concat, slice, weighted_add
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
@@ -199,8 +199,8 @@ def build(params: ModelParameter,
             token_loss = reduce_mean(token_loss)
             loss_list.append(token_loss)
             if params.calc_accuracy:
-                accuracy = reduce_sum(mtf.equal(mtf.argmax(token_out, params.vocab_dim), txt_tgt),
-                                      params.variable_dtype.activation_dtype) / txt_tgt.size
+                accuracy = reduce_sum(mtf.cast(mtf.equal(mtf.argmax(token_out, params.vocab_dim), txt_tgt),
+                                               params.variable_dtype.activation_dtype), []) / txt_tgt.size
 
         if params.use_video:
 
