@@ -5,6 +5,7 @@ import tensorflow as tf
 
 from .backend import get_intermediate, linear, linear_from_features, linear_to_features
 from .embedding import embed
+from .basic import  feed_forward_in
 from .frontend import block_part_fn
 from .momentumnet import MomentumOperation
 from .revnet import RevGradOp
@@ -168,7 +169,7 @@ def build(params: ModelParameter,
 
             for config_idx, config in enumerate(params.output_block_config):
                 token_out = block_part_fn(params, config, token_out, f'lang_out{config_idx}')
-            token_out = linear_from_features(base_args(token_out), params.intermediate)
+            token_out = feed_forward_in(base_args(token_out)(params.output_linear_config))
             token_out = linear(base_args(token_out), params.intermediate, [txt_tgt.shape[-1], params.vocab_dim])
 
         if params.use_video:

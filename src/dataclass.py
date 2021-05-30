@@ -116,6 +116,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.num_of_sample = 10
         self.gradient_clip = -1
         self.group_linear_factor = 2
+        self.output_linear_config = ['lecun_tanh', 'norm', 'glu_add']
         self.embedding_stddev = 0.04
         self.color_quantization_value = 256
         self.use_discrete_video_loss = False
