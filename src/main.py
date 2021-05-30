@@ -145,7 +145,7 @@ def main(args: argparse.Namespace) -> None:
                                  session_config,
                                  tpu_cluster_resolver,
                                  [lambda x: print(f"Current step: {x}")] * params.debug_train_step)
-        elif args.run_mode == 'sample':
+        elif args.run_mode == 'sample' or args.run_mode == 'debug':
             computation_func(params,
                              input_fn,
                              session_config,
