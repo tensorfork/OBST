@@ -152,7 +152,7 @@ def main(args: argparse.Namespace) -> None:
                              tpu_cluster_resolver,
                              [gen_sample_fn(params)])
 
-        elif args.run_mode == 'quary':
+        elif args.run_mode == 'query':
             input_fns, output_fn = get_command_line_input_and_output_fn(params)
 
             computation_func(params,

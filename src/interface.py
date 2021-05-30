@@ -177,40 +177,40 @@ def get_command_line_input_and_output_fn(params: ModelParameter):
     bpe_tokenizer = GPT2TokenizerFast.from_pretrained('gpt2') if params.vocab_size != 256 and \
                                                                  params.vocab_size > 256 else None
 
-    samp_temp = 0.7
+    samp_temp = params.sampling_temperature
     end_iter = params.n_ctx
     _iter_pos = [0]
     _end_iter = [0]
 
     def input_fns():
 
-        valid_quary = False
+        valid_query = False
 
-        while not valid_quary:
+        while not valid_query:
             color_print(params, 'Enter Quary:')
-            quary = input()
+            query = input()
 
             if bpe_tokenizer is None:
-                quary = [ord(q) for q in quary]
+                query = [ord(q) for q in query]
             else:
-                quary = bpe_tokenizer.encode(quary)
+                query = bpe_tokenizer.encode(query)
 
-            if len(quary) < params.n_ctx:
-                valid_quary = True
+            if len(query) < params.n_ctx:
+                valid_query = True
             else:
                 color_print(params, f'Quary is to long, the maximum number tokens is '
-                                    f'{params.n_ctx}, but you have {len(quary)} tokens.')
+                                    f'{params.n_ctx}, but you have {len(query)} tokens.')
 
-            iter_pos = len(quary) + 1
+            iter_pos = len(query) + 1
             _iter_pos[0] = iter_pos
 
             _end_iter[0] = end_iter
 
-            quary = quary + [0] * (params.n_ctx - len(quary))
-            quary = np.reshape(np.array(quary, np.int32), newshape=(1, params.n_ctx, 1))
+            query = query + [0] * (params.n_ctx - len(query))
+            query = np.reshape(np.array(query, np.int32), newshape=(1, params.n_ctx, 1))
 
 
-        return quary, np.array([iter_pos], np.int32), \
+        return query, np.array([iter_pos], np.int32), \
                np.array([samp_temp], np.float32),  np.array([end_iter], np.int32)
 
     def output_fn(out):
