@@ -261,8 +261,9 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     if sampling_temperature is None:
                         sampling_temperature = constant_scalar(params, params.sampling_temperature, dtype=tf.float32)
 
-                    #if end_iterations is None:
-                    #    end_iterations  =
+                    if end_iterations is None:
+                        end_iterations = mtf.constant(params.mesh, value=params.n_ctx,
+                                                   dtype=tf.int32)
 
                     while_loop_inputs = [initial_pos, token_x_input, token_y_input, sampling_temperature]
 
