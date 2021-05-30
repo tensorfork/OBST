@@ -7,7 +7,7 @@ from .backend import get_intermediate, normal_var, orthogonal_var
 from .basic import feed_forward_out, feed_forward_in
 from .embedding import embed
 from ..dataclass import BlockArgs
-from ..mtf_wrapper import einsum, less_equal
+from ..mtf_wrapper import einsum, greater_equal
 from ..utils_core import random_name
 from ..utils_mtf import anonymize, anonymize_dim, compare_range, get_attention_dim, is_masked
 
@@ -117,7 +117,7 @@ def spatial_mixing(args: BlockArgs) -> mtf.Tensor:
 
     inputs = [mid, orthogonal_var(args.params, old + new)]
     if is_masked(args):
-        inputs.append(compare_range(args.params, dim, tmp, less_equal))
+        inputs.append(compare_range(args.params, dim, tmp, greater_equal))
 
     mid = einsum(inputs, args.tensor.shape)
     if 'multiply_gate' in args:
