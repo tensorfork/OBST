@@ -10,7 +10,7 @@ from .momentumnet import MomentumOperation
 from .revnet import RevGradOp
 from ..dataclass import BlockArgs, BlockConfig, ModelParameter
 from ..mtf_wrapper import (add_n, cast, constant_scalar, dropout, einsum, one_hot, ones, reciprocal,
-                           reduce_logsumexp, reduce_sum, sigmoid, sign, zeros_like)
+                           reduce_logsumexp, reduce_sum, reduce_mean, sigmoid, sign, zeros_like)
 from ..utils_mtf import concat, slice, weighted_add
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
@@ -195,6 +195,7 @@ def build(params: ModelParameter,
 
         if params.use_language:
             token_loss = mtf.layers.softmax_cross_entropy_with_logits(token_out, txt_tgt, params.vocab_dim)
+            token_loss = reduce_mean(token_loss)
             loss_list.append(token_loss)
             if params.calc_accuracy:
                 accuracy = reduce_sum(mtf.equal(mtf.argmax(token_out, params.vocab_dim), txt_tgt),
