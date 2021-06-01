@@ -34,7 +34,7 @@ cdef unicode BASE_PATH = "pile2/"
 
 # constants
 cdef int SPLITS = 30
-cdef unicode BASE_URL = 'https://the-eye.eu/public/AI/pile/train/%s.jsonl.zst'
+cdef unicode BASE_URL = 'http://eaidata.bmk.sh/data/pile/train/%s.jsonl.zst'
 # http://eaidata.bmk.sh/data/pile/train/%s.jsonl.zst
 cdef unicode START = "Starting"
 cdef unicode DOWNLOADING = "Downloading"
