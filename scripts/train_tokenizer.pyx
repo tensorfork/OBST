@@ -5,12 +5,10 @@
 #cython: wraparound=False
 #cython: cdivision=True
 
-import argparse
 import datetime
 import io
 import multiprocessing
 import os
-import shutil
 import string
 import threading
 import time
@@ -20,7 +18,6 @@ from queue import Queue
 import ftfy
 import jsonlines
 import jsonpickle
-import requests
 import simdjson
 import zstandard
 from tokenizers import Regex, Tokenizer
@@ -32,12 +29,13 @@ from tokenizers.trainers import BpeTrainer
 cdef int PROCS = 16
 cdef int VOCAB_SIZE = 65536
 cdef int PREFETCH = 128
-cdef int CACHE_CAPACITY = 1<<30
+cdef int CACHE_CAPACITY = 1 << 30
 cdef unicode BASE_PATH = "pile2/"
 
 # constants
 cdef int SPLITS = 30
-cdef unicode BASE_URL = 'http://eaidata.bmk.sh/data/pile/train/%s.jsonl.zst'
+cdef unicode BASE_URL = 'https://the-eye.eu/public/AI/pile/train/%s.jsonl.zst'
+# http://eaidata.bmk.sh/data/pile/train/%s.jsonl.zst
 cdef unicode START = "Starting"
 cdef unicode DOWNLOADING = "Downloading"
 cdef unicode FINISHED_DOWNLOAD = "Finished downloading"
@@ -57,6 +55,7 @@ cpdef log(text: str, log_path: str, const int pid, const int i):
 cpdef file_generator(queue: Queue, lock: threading.Semaphore, int pid, int procs, base_path: str):
     tmp_name = f"{base_path}download/{pid}.zstd"
     log_path = f"{base_path}log/{pid}.txt"
+    completion = f'{base_path}/done/{pid}.txt'
     cdef int splits = 30
     cdef list total = [0]
     cdef int idx = 0
@@ -69,8 +68,10 @@ cpdef file_generator(queue: Queue, lock: threading.Semaphore, int pid, int procs
         log(START, log_path, pid, i)
         lock.acquire()
         log(DOWNLOADING, log_path, pid, i)
-        with requests.get(BASE_URL.replace("%s", str(i).zfill(2)), stream=True) as r, open(tmp_name, 'wb') as f:
-            shutil.copyfileobj(r.raw, f)
+        os.system(f"wget {BASE_URL.replace('%s', str(i).zfill(2))} -O {tmp_name} && echo 1 > {completion}")
+        while not os.path.exists(completion):
+            time.sleep(300)
+        os.remove(completion)
         log(FINISHED_DOWNLOAD, log_path, pid, i)
         lock.release()
         with open(tmp_name, 'rb') as f:
@@ -101,7 +102,7 @@ def iterator(queue: Queue, procs: typing.List[multiprocessing.Process]):
                 break
 
 cpdef main():
-    for path in ('', 'download', 'log'):
+    for path in ('', 'download', 'log', 'done'):
         if not os.path.exists(BASE_PATH + path):
             os.mkdir(BASE_PATH + path)
 
