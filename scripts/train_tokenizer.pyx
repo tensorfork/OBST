@@ -68,7 +68,8 @@ cpdef file_generator(queue: Queue, lock: threading.Semaphore, int pid, int procs
         log(START, log_path, pid, i)
         lock.acquire()
         log(DOWNLOADING, log_path, pid, i)
-        os.system(f"wget {BASE_URL.replace('%s', str(i).zfill(2))} -O {tmp_name} && echo 1 > {completion}")
+        os.system(f"wget {BASE_URL.replace('%s', str(i).zfill(2))} -O {tmp_name} -t inf --timeout 15 "
+                  f"&& echo 1 > {completion}")
         while not os.path.exists(completion):
             time.sleep(300)
         os.remove(completion)
