@@ -4,7 +4,7 @@ import mesh_tensorflow as mtf
 import tensorflow as tf
 
 from .backend import get_intermediate, normal_var, orthogonal_var
-from .basic import feed_forward_out, feed_forward_in
+from .basic import feed_forward_in, feed_forward_out
 from .embedding import embed
 from ..dataclass import BlockArgs
 from ..mtf_wrapper import einsum, greater_equal
@@ -17,7 +17,6 @@ tf1 = tf.compat.v1
 
 
 def tf_softmax(x, masked, dim, dim_index, anonymous_dim_index):
-    x *= dim.size ** -0.5
     if masked:
         arange = tf.range(0, dim.size)
         msk = tf.reshape(arange, (1, dim.size)) > tf.reshape(arange, (dim.size, 1))
@@ -86,6 +85,7 @@ class SoftmaxForward(mtf.Operation):
 def _softmax_attention(args: BlockArgs, val: mtf.Tensor, *lgt_in: mtf.Tensor) -> mtf.Tensor:
     dim = get_attention_dim(args).dim
     shape = args.tensor.shape
+    lgt_in[0] *= dim.size ** -0.5
     lgt = einsum(list(lgt_in), output_shape=shape - [args.params.key_dim] - get_intermediate(args) + anonymize_dim(dim))
     return einsum(SoftmaxForward(lgt, dim, is_masked(args)).outputs + [val], shape)
 
@@ -136,4 +136,4 @@ def spatial_mixing(args: BlockArgs) -> mtf.Tensor:
 def spatial_feed_forward(args: BlockArgs) -> mtf.Tensor:
     base = args(feed_forward_in(args))
     var = orthogonal_var(args.params, get_intermediate(base) + [anonymize_dim(get_attention_dim(args).dim)])
-    return _softmax_attention(args, feed_forward_out(base), base.tensor, var)
+    return _softmax_attention(args, feed_forward_out(base), var, base.tensor)
