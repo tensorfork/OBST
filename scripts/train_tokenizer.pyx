@@ -39,6 +39,8 @@ cdef unicode BASE_URL = 'http://eaidata.bmk.sh/data/pile/train/%s.jsonl.zst'
 cdef unicode START = "Starting"
 cdef unicode DOWNLOADING = "Downloading"
 cdef unicode FINISHED_DOWNLOAD = "Finished downloading"
+cdef unicode FILE_EXISTS = "File exists, not downloading"
+cdef unicode DOWNLOAD_CACHE_PATH = f"{BASE_PATH}download"
 
 cpdef parser(x: str):
     return simdjson.Parser().parse(x.encode()).as_dict()
@@ -52,10 +54,9 @@ cpdef log(text: str, log_path: str, const int pid, const int i):
     with open(log_path, 'a') as f:
         f.write(f'Proc: {pid} | Slice: {i} | Time: {datetime.datetime.now()} | {text}\n')
 
-cpdef file_generator(queue: Queue, lock: threading.Semaphore, int pid, int procs, base_path: str):
-    tmp_name = f"{base_path}download/{pid}.zstd"
-    log_path = f"{base_path}log/{pid}.txt"
-    completion = f'{base_path}/done/{pid}.txt'
+cpdef file_generator(queue: Queue, lock: threading.Semaphore, int pid):
+    log_path = f"{BASE_PATH}log/{pid}.txt"
+    completion = f'{BASE_PATH}/done/{pid}.txt'
     cdef int splits = 30
     cdef list total = [0]
     cdef int idx = 0
@@ -63,18 +64,24 @@ cpdef file_generator(queue: Queue, lock: threading.Semaphore, int pid, int procs
     with open(log_path, 'w') as f:
         f.write('')
 
-    for i in range(pid, splits, procs):
+    for i in range(pid, splits, PROCS):
         total[0] = 0
         log(START, log_path, pid, i)
-        lock.acquire()
-        log(DOWNLOADING, log_path, pid, i)
-        os.system(f"wget {BASE_URL.replace('%s', str(i).zfill(2))} -O {tmp_name} -t inf --timeout 15 "
-                  f"&& echo 1 > {completion}")
-        while not os.path.exists(completion):
-            time.sleep(300)
-        os.remove(completion)
-        log(FINISHED_DOWNLOAD, log_path, pid, i)
-        lock.release()
+        tmp_name = f"{DOWNLOAD_CACHE_PATH}/{i}.zstd"
+
+        if not os.path.exists(tmp_name):
+            lock.acquire()
+            log(DOWNLOADING, log_path, pid, i)
+            os.system(f"wget {BASE_URL.replace('%s', str(i).zfill(2))} -O {tmp_name} -t inf --timeout 15 "
+                      f"&& echo 1 > {completion}")
+            while not os.path.exists(completion):
+                time.sleep(300)
+            os.remove(completion)
+            log(FINISHED_DOWNLOAD, log_path, pid, i)
+            lock.release()
+        else:
+            log(FILE_EXISTS, log_path, pid, i)
+
         with open(tmp_name, 'rb') as f:
             read = jsonlines.Reader(io.BufferedReader(zstandard.ZstdDecompressor().stream_reader(f)), loads=parser)
             for idx, item in enumerate(read):
@@ -126,7 +133,7 @@ cpdef main():
     queue = manger.Queue(PREFETCH)
     lock = manger.Semaphore()
 
-    cdef list procs = [multiprocessing.Process(target=file_generator, args=(queue, lock, i, PROCS, BASE_PATH))
+    cdef list procs = [multiprocessing.Process(target=file_generator, args=(queue, lock, i))
                        for i in range(PROCS)]
     for p in procs:
         p.start()
