@@ -44,7 +44,7 @@ for c in string.punctuation:
 cdef unicode SPLIT_REGEX = f"""[{SPLIT_CHARS}]|[^{SPLIT_CHARS}]+"""
 cdef list ALWAYS_INCLUDED_TOKENS = [chr(i) for i in range(256)]
 cdef unicode OUTPUT_FILE = "tokenizer.json"
-cdef int PRINTERVALL = 100 * 1000
+cdef int PRINT_INTERVAL = 100 * 1000
 
 # constants
 cdef int SPLITS = 30
@@ -54,28 +54,27 @@ cdef unicode FINISHED_DOWNLOAD = "Finished downloading"
 cdef unicode FILE_EXISTS = "File exists, not downloading"
 cdef unicode TEMP_TOKENIZER_PATH = ".tmp.json"
 
-cdef parser(unicode x):
-    return simdjson.Parser().parse(x.encode()).as_dict()
 
-
-cdef write(unicode text, list total):
+cdef unicode write(unicode text, list total):
     out = ftfy.fix_text(text).replace('    ', '\t')
     total[0] += len(out)
     return out
 
 
-cdef log(unicode text, unicode log_path, const int pid, const int i):
+cdef void log(unicode text, unicode log_path, const int pid, const int i):
     with open(log_path, 'a') as f:
         f.write(f'Proc: {pid} | Slice: {i} | Time: {datetime.datetime.now()} | {text}\n')
 
 
-cdef file_generator(queue: Queue, lock: threading.Semaphore, const int pid):
+cdef void file_generator(queue: Queue, lock: threading.Semaphore, const int pid):
     cdef unicode log_path = f"{BASE_PATH}log/{pid}.txt"
     cdef unicode completion = f'{BASE_PATH}/done/{pid}.txt'
     cdef int splits = 30
     cdef list total = [0]
     cdef int idx = 0
     cdef unicode tmp_name = ""
+    cdef bytes byte_line = b""
+    parse = simdjson.Parser().parse
 
     with open(log_path, 'w') as f:
         f.write('')
@@ -99,15 +98,14 @@ cdef file_generator(queue: Queue, lock: threading.Semaphore, const int pid):
             log(FILE_EXISTS, log_path, pid, i)
 
         with open(tmp_name, 'rb') as f:
-            read = jsonlines.Reader(io.BufferedReader(zstandard.ZstdDecompressor().stream_reader(f)), loads=parser)
-            for idx, item in enumerate(read):
-                item = item['text']
+            for idx, byte_line in enumerate(io.BufferedReader(zstandard.ZstdDecompressor().stream_reader(f))):
+                item = parse(byte_line)['text']
                 if isinstance(item, list):
                     for itm in item:
                         queue.put(write(itm, total))
                 else:
                     queue.put(write(item, total))
-                if idx % PRINTERVALL == 0:
+                if idx % PRINT_INTERVAL == 0:
                     log(f"{total[0] * 2 ** -20:9.2f}MB", log_path, pid, i)
         os.remove(tmp_name)
 
@@ -127,15 +125,18 @@ def iterator(queue: Queue, procs: typing.List[multiprocessing.Process]):
                 break
 
 
-cpdef main():
+cpdef void main():
     for path in ('', 'download', 'log', 'done'):
         if not os.path.exists(BASE_PATH + path):
             os.mkdir(BASE_PATH + path)
 
     # set up tokenizer
-    regex = Regex(SPLIT_REGEX)
+    cdef unicode split_chars = string.punctuation + " \t\n\r\x0b\x0c"
+    for c in string.punctuation:
+        split_chars += '\\' + c
+    regex = Regex(f"""[{split_chars}]|[^{split_chars}]+""")
     tokenizer = Tokenizer(BPE(unk_token='\x01', cache_capacity=CACHE_CAPACITY, merges=None, dropout=None))
-    trainer = BpeTrainer(special_tokens=ALWAYS_INCLUDED_TOKENS, vocab_size=VOCAB_SIZE)
+    trainer = BpeTrainer(special_tokens=[chr(i) for i in range(256)], vocab_size=VOCAB_SIZE)
     tokenizer.pre_tokenizer = Split(regex, 'isolated')
 
     # train and save
