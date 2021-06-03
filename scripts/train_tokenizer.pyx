@@ -31,16 +31,23 @@ cdef int VOCAB_SIZE = 65536
 cdef int PREFETCH = 128
 cdef int CACHE_CAPACITY = 1 << 30
 cdef unicode BASE_PATH = "pile2/"
+cdef unicode DOWNLOAD_CACHE_PATH = f"{BASE_PATH}download"
+cdef unicode BASE_URL = 'http://eaidata.bmk.sh/data/pile/train/%s.jsonl.zst'
+# https://the-eye.eu/public/AI/pile/train/%s.jsonl.zst
+cdef unicode SPLIT_CHARS = f'{string.digits} \t\n\r\x0b\x0c'
+for c in string.punctuation:
+    SPLIT_CHARS = SPLIT_CHARS + "\\" + c
+cdef unicode SPLIT_REGEX = f"""[{SPLIT_CHARS}]|[^{SPLIT_CHARS}]+"""
+cdef list ALWAYS_INCLUDED_TOKENS = [chr(i) for i in range(256)]
+cdef unicode OUTPUT_FILE = "tokenizer.json"
 
 # constants
 cdef int SPLITS = 30
-cdef unicode BASE_URL = 'http://eaidata.bmk.sh/data/pile/train/%s.jsonl.zst'
-# http://eaidata.bmk.sh/data/pile/train/%s.jsonl.zst
 cdef unicode START = "Starting"
 cdef unicode DOWNLOADING = "Downloading"
 cdef unicode FINISHED_DOWNLOAD = "Finished downloading"
 cdef unicode FILE_EXISTS = "File exists, not downloading"
-cdef unicode DOWNLOAD_CACHE_PATH = f"{BASE_PATH}download"
+cdef unicode TEMP_TOKENIZER_PATH = ".tmp.json"
 
 cpdef parser(x: str):
     return simdjson.Parser().parse(x.encode()).as_dict()
@@ -58,11 +65,12 @@ cpdef log(text: str, log_path: str, const int pid, const int i):
 
 
 cpdef file_generator(queue: Queue, lock: threading.Semaphore, int pid):
-    log_path = f"{BASE_PATH}log/{pid}.txt"
-    completion = f'{BASE_PATH}/done/{pid}.txt'
+    cdef unicode log_path = f"{BASE_PATH}log/{pid}.txt"
+    cdef unicode completion = f'{BASE_PATH}/done/{pid}.txt'
     cdef int splits = 30
     cdef list total = [0]
     cdef int idx = 0
+    cdef unicode tmp_name = ""
 
     with open(log_path, 'w') as f:
         f.write('')
@@ -119,18 +127,10 @@ cpdef main():
         if not os.path.exists(BASE_PATH + path):
             os.mkdir(BASE_PATH + path)
 
-    cdef unicode backslash = "\\"
-
-    cdef unicode chars = f'{string.digits} \t\n\r\x0b\x0c'
-    for c in string.punctuation:
-        chars = chars + backslash + c
-
-    regex = Regex(f"""[{chars}]|[^{chars}]+""")
-    cdef list special_tokens = [chr(i) for i in range(256)]
-
     # set up tokenizer
+    regex = Regex(SPLIT_REGEX)
     tokenizer = Tokenizer(BPE(unk_token='\x01', cache_capacity=CACHE_CAPACITY, merges=None, dropout=None))
-    trainer = BpeTrainer(special_tokens=special_tokens, vocab_size=VOCAB_SIZE)
+    trainer = BpeTrainer(special_tokens=ALWAYS_INCLUDED_TOKENS, vocab_size=VOCAB_SIZE)
     tokenizer.pre_tokenizer = Split(regex, 'isolated')
 
     # train and save
@@ -138,22 +138,21 @@ cpdef main():
     queue = manger.Queue(PREFETCH)
     lock = manger.Semaphore()
 
-    cdef list procs = [multiprocessing.Process(target=file_generator, args=(queue, lock, i))
-                       for i in range(PROCS)]
+    cdef list procs = [multiprocessing.Process(target=file_generator, args=(queue, lock, i)) for i in range(PROCS)]
     for p in procs:
         p.start()
 
     while queue.qsize() < PREFETCH // 2:
         time.sleep(5)
+
     tokenizer.train_from_iterator(iterator(queue, procs), trainer)
+
     for p in procs:
         p.join()
 
-    tokenizer.save(f".tmp.json")
+    tokenizer.save(TEMP_TOKENIZER_PATH)
 
-    with open(f"tokenizer.json", 'w', errors='ignore') as w, open(f".tmp.json", 'r', errors='ignore') as r:
+    with open(OUTPUT_FILE, 'w', errors='ignore') as w, open(TEMP_TOKENIZER_PATH, 'r', errors='ignore') as r:
         w.write(jsonpickle.dumps(jsonpickle.loads(r.read()), indent=4))
 
-
-if __name__ == "__main__":
-    main()
+    os.remove(TEMP_TOKENIZER_PATH)
