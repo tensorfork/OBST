@@ -9,7 +9,7 @@ from tensorflow.python.ops.init_ops import Initializer
 
 from ..dataclass import BlockArgs, ModelParameter
 from ..mtf_wrapper import einsum, scoped
-from ..utils_core import default, random_name
+from ..utils_core import random_name
 from ..utils_mtf import OPT_DIMS, SHAPE, anonymize_dim, deduplicate, feature_dims_used
 
 tf1 = tf.compat.v1
@@ -70,11 +70,11 @@ def linear(args: BlockArgs, old: typing.List[mtf.Dimension], new: typing.List[mt
 
 
 def linear_to_features(args: BlockArgs, old: typing.Optional[typing.List[mtf.Dimension]] = None) -> mtf.Tensor:
-    return linear(args, default(old, args.params.feature_dims), args.params.feature_dims)
+    return linear(args, old, args.params.feature_dims)
 
 
 def linear_from_features(args: BlockArgs, new: typing.Optional[typing.List[mtf.Dimension]] = None) -> mtf.Tensor:
-    return linear(args, args.params.feature_dims, default(new, args.params.intermediate))
+    return linear(args, args.params.feature_dims, new)
 
 
 def get_intermediate(args: BlockArgs):
