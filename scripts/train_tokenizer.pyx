@@ -111,10 +111,11 @@ cpdef void main():
             os.mkdir(BASE_PATH + path)
 
     # set up tokenizer
-    cdef unicode split_chars = string.punctuation + " \t\n\r\x0b\x0c"
+    cdef unicode split_chars = string.digits + " \t\n\r\x0b\x0c"
     for c in string.punctuation:
         split_chars += '\\' + c
-    regex = Regex(f"""[{split_chars}]|[^{split_chars}]+""")
+    print(repr(f"""[{split_chars}]|[^{split_chars}]+"""))
+    regex = Regex("") # Regex(f"""[{split_chars}]|[^{split_chars}]+""")
     tokenizer = Tokenizer(BPE(unk_token='\x01', cache_capacity=CACHE_CAPACITY, merges=None, dropout=None))
     trainer = BpeTrainer(special_tokens=[chr(i) for i in range(256)], vocab_size=VOCAB_SIZE)
     tokenizer.pre_tokenizer = Split(regex, 'isolated')
