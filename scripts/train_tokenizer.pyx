@@ -36,21 +36,6 @@ cdef unicode BASE_PATH = "pile2/"
 cdef unicode DOWNLOAD_CACHE_PATH = f"{BASE_PATH}download"
 cdef unicode BASE_URL = 'http://eaidata.bmk.sh/data/pile/train/%s.jsonl.zst'
 # https://the-eye.eu/public/AI/pile/train/%s.jsonl.zst
-cdef unicode SPLIT_CHARS = f'{string.digits} \t\n\r\x0b\x0c'
-for c in string.punctuation:
-    SPLIT_CHARS = SPLIT_CHARS + "\\" + c
-cdef unicode SPLIT_REGEX = f"""[{SPLIT_CHARS}]|[^{SPLIT_CHARS}]+"""
-cdef list ALWAYS_INCLUDED_TOKENS = [chr(i) for i in range(256)]
-cdef unicode OUTPUT_FILE = "tokenizer.json"
-cdef int PRINT_INTERVAL = 100 * 1000
-
-# constants
-cdef int SPLITS = 30
-cdef unicode START = "Starting"
-cdef unicode DOWNLOADING = "Downloading"
-cdef unicode FINISHED_DOWNLOAD = "Finished downloading"
-cdef unicode FILE_EXISTS = "File exists, not downloading"
-cdef unicode TEMP_TOKENIZER_PATH = ".tmp.json"
 
 
 cdef void log(unicode text, unicode log_path, const int pid, const int i):
@@ -63,7 +48,6 @@ cdef void file_generator(queue: Queue, lock: threading.Semaphore, const int pid)
     cdef unicode tmp_name = ""
     cdef unicode out = ""
     cdef bytes byte_line = b""
-    cdef int splits = 30
     cdef int total = 0
     cdef int idx = 0
     cdef int i = 0
@@ -73,23 +57,23 @@ cdef void file_generator(queue: Queue, lock: threading.Semaphore, const int pid)
     with open(log_path, 'w') as f:
         f.write('')
 
-    for i in range(pid, splits, PROCESSES):
+    for i in range(pid, 30, PROCESSES):
         total = 0
-        log(START, log_path, pid, i)
+        log("Starting", log_path, pid, i)
         tmp_name = f"{DOWNLOAD_CACHE_PATH}/{i}.zstd"
 
         if not os.path.exists(tmp_name):
             lock.acquire()
-            log(DOWNLOADING, log_path, pid, i)
+            log("Downloading", log_path, pid, i)
             os.system(f"wget {BASE_URL.replace('%s', str(i).zfill(2))} -O {tmp_name} -t inf --timeout 15 "
                       f"&& echo 1 > {completion}")
             while not os.path.exists(completion):
                 time.sleep(300)
             os.remove(completion)
-            log(FINISHED_DOWNLOAD, log_path, pid, i)
+            log("Finished downloading", log_path, pid, i)
             lock.release()
         else:
-            log(FILE_EXISTS, log_path, pid, i)
+            log("File exists, not downloading", log_path, pid, i)
 
         with open(tmp_name, 'rb') as f:
             for idx, byte_line in enumerate(io.BufferedReader(stream_reader(f))):
@@ -103,7 +87,7 @@ cdef void file_generator(queue: Queue, lock: threading.Semaphore, const int pid)
                     out = ftfy.fix_text(item).replace('    ', '\t')
                     total += len(out)
                     queue.put(out)
-                if idx % PRINT_INTERVAL == 0:
+                if idx % 100000 == 0:
                     log(f"{total * 2 ** -20:9.2f}MB", log_path, pid, i)
         os.remove(tmp_name)
 
@@ -152,9 +136,9 @@ cpdef void main():
     for p in procs:
         p.join()
 
-    tokenizer.save(TEMP_TOKENIZER_PATH)
+    tokenizer.save(".tmp.json")
 
-    with open(OUTPUT_FILE, 'w', errors='ignore') as w, open(TEMP_TOKENIZER_PATH, 'r', errors='ignore') as r:
+    with open("tokenizer.json", 'w', errors='ignore') as w, open(".tmp.json", 'r', errors='ignore') as r:
         w.write(jsonpickle.dumps(jsonpickle.loads(r.read()), indent=4))
 
-    os.remove(TEMP_TOKENIZER_PATH)
+    os.remove(".tmp.json")
