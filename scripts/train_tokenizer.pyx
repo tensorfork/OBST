@@ -40,6 +40,7 @@ for c in string.punctuation:
 cdef unicode SPLIT_REGEX = f"""[{SPLIT_CHARS}]|[^{SPLIT_CHARS}]+"""
 cdef list ALWAYS_INCLUDED_TOKENS = [chr(i) for i in range(256)]
 cdef unicode OUTPUT_FILE = "tokenizer.json"
+cdef int PRINTERVALL = 100 * 1000
 
 # constants
 cdef int SPLITS = 30
@@ -49,22 +50,22 @@ cdef unicode FINISHED_DOWNLOAD = "Finished downloading"
 cdef unicode FILE_EXISTS = "File exists, not downloading"
 cdef unicode TEMP_TOKENIZER_PATH = ".tmp.json"
 
-cpdef parser(x: str):
+cdef parser(unicode x):
     return simdjson.Parser().parse(x.encode()).as_dict()
 
 
-cpdef write(text: str, list total):
+cdef write(unicode text, list total):
     out = ftfy.fix_text(text).replace('    ', '\t')
     total[0] += len(out)
     return out
 
 
-cpdef log(text: str, log_path: str, const int pid, const int i):
+cdef log(unicode text, unicode log_path, const int pid, const int i):
     with open(log_path, 'a') as f:
         f.write(f'Proc: {pid} | Slice: {i} | Time: {datetime.datetime.now()} | {text}\n')
 
 
-cpdef file_generator(queue: Queue, lock: threading.Semaphore, int pid):
+cdef file_generator(queue: Queue, lock: threading.Semaphore, const int pid):
     cdef unicode log_path = f"{BASE_PATH}log/{pid}.txt"
     cdef unicode completion = f'{BASE_PATH}/done/{pid}.txt'
     cdef int splits = 30
@@ -102,8 +103,8 @@ cpdef file_generator(queue: Queue, lock: threading.Semaphore, int pid):
                         queue.put(write(itm, total))
                 else:
                     queue.put(write(item, total))
-                if idx % 100000 == 0:
-                    log(f"{total[0] / 2 ** 20:9.2f}MB", log_path, pid, i)
+                if idx % PRINTERVALL == 0:
+                    log(f"{total[0] * 2 ** -20:9.2f}MB", log_path, pid, i)
         os.remove(tmp_name)
 
 
