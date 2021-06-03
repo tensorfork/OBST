@@ -29,4 +29,6 @@ function compile {
   python3 -c "import $file"
   echo
 }
+
+
 compile train_tokenizer
