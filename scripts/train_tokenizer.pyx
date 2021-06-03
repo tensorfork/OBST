@@ -67,6 +67,7 @@ cdef void file_generator(queue: Queue, lock: threading.Semaphore, const int pid)
     cdef int total = 0
     cdef int idx = 0
     cdef int i = 0
+    stream_reader = zstandard.ZstdDecompressor().stream_reader
     parse = simdjson.Parser().parse
 
     with open(log_path, 'w') as f:
@@ -91,7 +92,7 @@ cdef void file_generator(queue: Queue, lock: threading.Semaphore, const int pid)
             log(FILE_EXISTS, log_path, pid, i)
 
         with open(tmp_name, 'rb') as f:
-            for idx, byte_line in enumerate(io.BufferedReader(zstandard.ZstdDecompressor().stream_reader(f))):
+            for idx, byte_line in enumerate(io.BufferedReader(stream_reader(f))):
                 item = parse(byte_line)['text']
                 if isinstance(item, list):
                     for out in item:
