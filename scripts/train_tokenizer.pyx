@@ -19,7 +19,6 @@ import typing
 from queue import Queue
 
 import ftfy
-import jsonlines
 import jsonpickle
 import simdjson
 import zstandard
@@ -28,9 +27,8 @@ from tokenizers.models import BPE
 from tokenizers.pre_tokenizers import Split
 from tokenizers.trainers import BpeTrainer
 
-
 # config
-cdef int PROCS = 16
+cdef int PROCESSES = 16
 cdef int VOCAB_SIZE = 65536
 cdef int PREFETCH = 128
 cdef int CACHE_CAPACITY = 1 << 30
@@ -55,32 +53,27 @@ cdef unicode FILE_EXISTS = "File exists, not downloading"
 cdef unicode TEMP_TOKENIZER_PATH = ".tmp.json"
 
 
-cdef unicode write(unicode text, list total):
-    out = ftfy.fix_text(text).replace('    ', '\t')
-    total[0] += len(out)
-    return out
-
-
 cdef void log(unicode text, unicode log_path, const int pid, const int i):
     with open(log_path, 'a') as f:
         f.write(f'Proc: {pid} | Slice: {i} | Time: {datetime.datetime.now()} | {text}\n')
 
-
 cdef void file_generator(queue: Queue, lock: threading.Semaphore, const int pid):
     cdef unicode log_path = f"{BASE_PATH}log/{pid}.txt"
     cdef unicode completion = f'{BASE_PATH}/done/{pid}.txt'
-    cdef int splits = 30
-    cdef list total = [0]
-    cdef int idx = 0
     cdef unicode tmp_name = ""
+    cdef unicode out = ""
     cdef bytes byte_line = b""
+    cdef int splits = 30
+    cdef int total = 0
+    cdef int idx = 0
+    cdef int i = 0
     parse = simdjson.Parser().parse
 
     with open(log_path, 'w') as f:
         f.write('')
 
-    for i in range(pid, splits, PROCS):
-        total[0] = 0
+    for i in range(pid, splits, PROCESSES):
+        total = 0
         log(START, log_path, pid, i)
         tmp_name = f"{DOWNLOAD_CACHE_PATH}/{i}.zstd"
 
@@ -101,14 +94,17 @@ cdef void file_generator(queue: Queue, lock: threading.Semaphore, const int pid)
             for idx, byte_line in enumerate(io.BufferedReader(zstandard.ZstdDecompressor().stream_reader(f))):
                 item = parse(byte_line)['text']
                 if isinstance(item, list):
-                    for itm in item:
-                        queue.put(write(itm, total))
+                    for out in item:
+                        out = ftfy.fix_text(out).replace('    ', '\t')
+                        total += len(out)
+                        queue.put(out)
                 else:
-                    queue.put(write(item, total))
+                    out = ftfy.fix_text(item).replace('    ', '\t')
+                    total += len(out)
+                    queue.put(out)
                 if idx % PRINT_INTERVAL == 0:
-                    log(f"{total[0] * 2 ** -20:9.2f}MB", log_path, pid, i)
+                    log(f"{total * 2 ** -20:9.2f}MB", log_path, pid, i)
         os.remove(tmp_name)
-
 
 def iterator(queue: Queue, procs: typing.List[multiprocessing.Process]):
     die = False
@@ -123,7 +119,6 @@ def iterator(queue: Queue, procs: typing.List[multiprocessing.Process]):
                     break
             if die:
                 break
-
 
 cpdef void main():
     for path in ('', 'download', 'log', 'done'):
@@ -144,7 +139,7 @@ cpdef void main():
     queue = manger.Queue(PREFETCH)
     lock = manger.Semaphore()
 
-    cdef list procs = [multiprocessing.Process(target=file_generator, args=(queue, lock, i)) for i in range(PROCS)]
+    cdef list procs = [multiprocessing.Process(target=file_generator, args=(queue, lock, i)) for i in range(PROCESSES)]
     for p in procs:
         p.start()
 
