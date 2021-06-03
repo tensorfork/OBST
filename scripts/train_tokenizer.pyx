@@ -28,13 +28,14 @@ from tokenizers.pre_tokenizers import Split
 from tokenizers.trainers import BpeTrainer
 
 # config
-cdef unsigned char PROCESSES = 16
-cdef unsigned long VOCAB_SIZE = 65536UL
-cdef unsigned short PREFETCH = 128
-cdef unsigned long CACHE_CAPACITY = 1UL << 30
-cdef unicode BASE_PATH = "pile2/"
-cdef unicode DOWNLOAD_CACHE_PATH = f"{BASE_PATH}download"
-cdef unicode BASE_URL = 'http://eaidata.bmk.sh/data/pile/train/%s.jsonl.zst'
+DEF PROCESSES = 16
+DEF VOCAB_SIZE = 65536UL
+DEF PREFETCH = 128
+DEF CACHE_CAPACITY = 1UL << 30
+DEF BASE_PATH = "pile2/"
+DEF DOWNLOAD_CACHE_PATH = "pile2/download"
+DEF BASE_URL = 'http://eaidata.bmk.sh/data/pile/train/%s.jsonl.zst'
+DEF PRINT_INTERVAL = 100000
 # https://the-eye.eu/public/AI/pile/train/%s.jsonl.zst
 
 
@@ -87,7 +88,7 @@ cdef void file_generator(queue: Queue, lock: threading.Semaphore, const unsigned
                     out = ftfy.fix_text(item).replace('    ', '\t')
                     total += len(out)
                     queue.put(out)
-                if idx % 100000 == 0:
+                if idx % PRINT_INTERVAL  == 0:
                     log(f"{total:15,}B", log_path, pid, i)
         os.remove(tmp_name)
 
