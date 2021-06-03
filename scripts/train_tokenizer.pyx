@@ -88,7 +88,7 @@ cdef void file_generator(queue: Queue, lock: threading.Semaphore, const int pid)
                     total += len(out)
                     queue.put(out)
                 if idx % 100000 == 0:
-                    log(f"{total:10,}B", log_path, pid, i)
+                    log(f"{total:15,}B", log_path, pid, i)
         os.remove(tmp_name)
 
 def iterator(queue: Queue, procs: typing.List[multiprocessing.Process]):
