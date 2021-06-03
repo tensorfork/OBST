@@ -45,14 +45,17 @@ cdef unicode DOWNLOAD_CACHE_PATH = f"{BASE_PATH}download"
 cpdef parser(x: str):
     return simdjson.Parser().parse(x.encode()).as_dict()
 
+
 cpdef write(text: str, list total):
     out = ftfy.fix_text(text).replace('    ', '\t')
     total[0] += len(out)
     return out
 
+
 cpdef log(text: str, log_path: str, const int pid, const int i):
     with open(log_path, 'a') as f:
         f.write(f'Proc: {pid} | Slice: {i} | Time: {datetime.datetime.now()} | {text}\n')
+
 
 cpdef file_generator(queue: Queue, lock: threading.Semaphore, int pid):
     log_path = f"{BASE_PATH}log/{pid}.txt"
@@ -95,6 +98,7 @@ cpdef file_generator(queue: Queue, lock: threading.Semaphore, int pid):
                     log(f"{total[0] / 2 ** 20:9.2f}MB", log_path, pid, i)
         os.remove(tmp_name)
 
+
 def iterator(queue: Queue, procs: typing.List[multiprocessing.Process]):
     die = False
     while True:
@@ -108,6 +112,7 @@ def iterator(queue: Queue, procs: typing.List[multiprocessing.Process]):
                     break
             if die:
                 break
+
 
 cpdef main():
     for path in ('', 'download', 'log', 'done'):
@@ -148,6 +153,7 @@ cpdef main():
 
     with open(f"tokenizer.json", 'w', errors='ignore') as w, open(f".tmp.json", 'r', errors='ignore') as r:
         w.write(jsonpickle.dumps(jsonpickle.loads(r.read()), indent=4))
+
 
 if __name__ == "__main__":
     main()
