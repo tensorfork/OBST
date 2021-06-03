@@ -1,9 +1,12 @@
 #!python
-#cython: boundscheck=False
-#cython: initializedcheck=False
-#cython: nonecheck=False
-#cython: wraparound=False
-#cython: cdivision=True
+# cython: boundscheck=False
+# cython: initializedcheck=False
+# cython: nonecheck=False
+# cython: wraparound=False
+# cython: cdivision=True
+# cython: profile=False
+# cython: linetrace=False
+# cython: language_level=3
 
 import datetime
 import io
@@ -24,6 +27,7 @@ from tokenizers import Regex, Tokenizer
 from tokenizers.models import BPE
 from tokenizers.pre_tokenizers import Split
 from tokenizers.trainers import BpeTrainer
+
 
 # config
 cdef int PROCS = 16
