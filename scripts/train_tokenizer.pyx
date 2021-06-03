@@ -29,9 +29,9 @@ from tokenizers.trainers import BpeTrainer
 
 # config
 cdef unsigned char PROCESSES = 16
-cdef unsigned long VOCAB_SIZE = 65536
+cdef unsigned long VOCAB_SIZE = 65536UL
 cdef unsigned short PREFETCH = 128
-cdef unsigned long CACHE_CAPACITY = 1 << 30
+cdef unsigned long CACHE_CAPACITY = 1UL << 30
 cdef unicode BASE_PATH = "pile2/"
 cdef unicode DOWNLOAD_CACHE_PATH = f"{BASE_PATH}download"
 cdef unicode BASE_URL = 'http://eaidata.bmk.sh/data/pile/train/%s.jsonl.zst'
