@@ -28,29 +28,29 @@ from tokenizers.pre_tokenizers import Split
 from tokenizers.trainers import BpeTrainer
 
 # config
-cdef int PROCESSES = 16
-cdef int VOCAB_SIZE = 65536
-cdef int PREFETCH = 128
-cdef int CACHE_CAPACITY = 1 << 30
+cdef unsigned char PROCESSES = 16
+cdef unsigned long VOCAB_SIZE = 65536
+cdef unsigned short PREFETCH = 128
+cdef unsigned long CACHE_CAPACITY = 1 << 30
 cdef unicode BASE_PATH = "pile2/"
 cdef unicode DOWNLOAD_CACHE_PATH = f"{BASE_PATH}download"
 cdef unicode BASE_URL = 'http://eaidata.bmk.sh/data/pile/train/%s.jsonl.zst'
 # https://the-eye.eu/public/AI/pile/train/%s.jsonl.zst
 
 
-cdef void log(unicode text, unicode log_path, const int pid, const int i):
+cdef void log(unicode text, unicode log_path, const unsigned char pid, const unsigned char i):
     with open(log_path, 'a') as f:
         f.write(f'Proc: {pid} | Slice: {i} | Time: {datetime.datetime.now()} | {text}\n')
 
-cdef void file_generator(queue: Queue, lock: threading.Semaphore, const int pid):
+cdef void file_generator(queue: Queue, lock: threading.Semaphore, const unsigned char pid):
     cdef unicode log_path = f"{BASE_PATH}log/{pid}.txt"
     cdef unicode completion = f'{BASE_PATH}/done/{pid}.txt'
     cdef unicode tmp_name = ""
     cdef unicode out = ""
     cdef bytes byte_line = b""
-    cdef int total = 0
-    cdef int idx = 0
-    cdef int i = 0
+    cdef unsigned long long total = 0
+    cdef unsigned long idx = 0
+    cdef unsigned char i = 0
     stream_reader = zstandard.ZstdDecompressor().stream_reader
     parse = simdjson.Parser().parse
 
@@ -124,7 +124,7 @@ cpdef void main():
     queue = manger.Queue(PREFETCH)
     lock = manger.Semaphore()
 
-    cdef list procs = [multiprocessing.Process(target=file_generator, args=(queue, lock, i)) for i in range(PROCESSES)]
+    cdef tuple procs = tuple([multiprocessing.Process(target=file_generator, args=(queue, lock, i)) for i in range(PROCESSES)])
     for p in procs:
         p.start()
 
