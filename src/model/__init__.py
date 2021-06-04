@@ -166,11 +166,12 @@ def build(params: ModelParameter,
 
         if params.use_language:
             token_out = slice(out, 0, params.language_token_patch, spatial_ctx)
-
+            tmp_dim = mtf.Dimension("_tmp", params.vocab_size // params.n_head)
             for config_idx, config in enumerate(params.output_block_config):
                 token_out = block_part_fn(params, config, token_out, f'lang_out{config_idx}')
-            token_out = feed_forward_in(base_args(token_out)(params.output_linear_config))
-            token_out = linear(base_args(token_out), params.intermediate, [txt_tgt.shape[-1], params.vocab_dim])
+            token_out = linear(base_args(token_out), [params.key_dim],
+                               [txt_tgt.shape[-1], tmp_dim])
+            token_out = mtf.reshape(token_out, token_out.shape - [params.head_dim, tmp_dim] + params.vocab_dim)
 
         if params.use_video:
             frame_out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)
