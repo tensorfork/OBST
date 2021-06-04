@@ -85,8 +85,9 @@ class SoftmaxForward(mtf.Operation):
 def _softmax_attention(args: BlockArgs, val: mtf.Tensor, *lgt_in: mtf.Tensor) -> mtf.Tensor:
     dim = get_attention_dim(args).dim
     shape = args.tensor.shape
+    lgt_in = list(lgt_in)
     lgt_in[0] *= dim.size ** -0.5
-    lgt = einsum(list(lgt_in), output_shape=shape - [args.params.key_dim] - get_intermediate(args) + anonymize_dim(dim))
+    lgt = einsum(lgt_in, output_shape=shape - [args.params.key_dim] - get_intermediate(args) + anonymize_dim(dim))
     return einsum(SoftmaxForward(lgt, dim, is_masked(args)).outputs + [val], shape)
 
 
