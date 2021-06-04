@@ -18,8 +18,10 @@ import time
 import typing
 from queue import Queue
 
+cimport numpy as cnp
 import ftfy
 import jsonpickle
+import numpy as np
 import simdjson
 import zstandard
 from tokenizers import Regex, Tokenizer
@@ -36,6 +38,7 @@ DEF BASE_PATH = "pile2/"
 DEF DOWNLOAD_CACHE_PATH = "pile2/download"
 DEF BASE_URL = 'http://eaidata.bmk.sh/data/pile/train/%s.jsonl.zst'
 DEF PRINT_INTERVAL = 100000
+DEF ITEMS_IN_CHUNK = 4096  # one print per hour
 # https://the-eye.eu/public/AI/pile/train/%s.jsonl.zst
 
 
@@ -48,10 +51,12 @@ cdef void file_generator(queue: Queue, lock: threading.Semaphore, const unsigned
     cdef unicode completion = f'{BASE_PATH}/done/{pid}.txt'
     cdef unicode tmp_name = ""
     cdef unicode out = ""
+    cdef cnp.ndarray buffer = np.empty((ITEMS_IN_CHUNK,), dtype=object)
     cdef bytes byte_line = b""
     cdef unsigned long long total = 0
     cdef unsigned long idx = 0
     cdef unsigned char i = 0
+    cdef unsigned long idx_in_chunk = 0
     stream_reader = zstandard.ZstdDecompressor().stream_reader
     parse = simdjson.Parser().parse
 
@@ -78,18 +83,19 @@ cdef void file_generator(queue: Queue, lock: threading.Semaphore, const unsigned
 
         with open(tmp_name, 'rb') as f:
             for idx, byte_line in enumerate(io.BufferedReader(stream_reader(f))):
+                idx_in_chunk = idx % ITEMS_IN_CHUNK
                 item = parse(byte_line)['text']
                 if isinstance(item, list):
-                    for out in item:
-                        out = ftfy.fix_text(out).replace('    ', '\t')
-                        total += len(out)
-                        queue.put(out)
+                    out = ''.join(item)
                 else:
-                    out = ftfy.fix_text(item).replace('    ', '\t')
-                    total += len(out)
-                    queue.put(out)
-                if idx % PRINT_INTERVAL  == 0:
+                    out = item
+                buffer[idx_in_chunk] = ftfy.fix_text(out).replace('    ', '\t')
+                if idx % PRINT_INTERVAL == 0:
                     log(f"{total:15,}B", log_path, pid, i)
+                if idx_in_chunk == ITEMS_IN_CHUNK - 1:
+                    queue.put(''.join(buffer))
+            if idx_in_chunk != ITEMS_IN_CHUNK - 1:
+                queue.put(''.join(buffer[:idx_in_chunk]))
         os.remove(tmp_name)
 
 def iterator(queue: Queue, procs: typing.List[multiprocessing.Process]):
@@ -125,7 +131,8 @@ cpdef void main():
     queue = manger.Queue(PREFETCH)
     lock = manger.Semaphore()
 
-    cdef tuple procs = tuple([multiprocessing.Process(target=file_generator, args=(queue, lock, i)) for i in range(PROCESSES)])
+    cdef tuple procs = tuple(
+            [multiprocessing.Process(target=file_generator, args=(queue, lock, i)) for i in range(PROCESSES)])
     for p in procs:
         p.start()
 
