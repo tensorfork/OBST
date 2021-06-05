@@ -19,11 +19,11 @@ import typing
 from queue import Queue
 
 cimport numpy as cnp
-import ftfy
+from ftfy import fix_text
 import jsonpickle
 import numpy as np
-import simdjson
-import zstandard
+from simdjson import Parser
+from zstandard import ZstdDecompressor
 from tokenizers import Regex, Tokenizer
 from tokenizers.models import BPE
 from tokenizers.pre_tokenizers import Split
@@ -57,8 +57,8 @@ cdef void file_generator(queue: Queue, lock: threading.Semaphore, const unsigned
     cdef unsigned long idx = 0
     cdef unsigned char i = 0
     cdef unsigned long idx_in_chunk = 0
-    stream_reader = zstandard.ZstdDecompressor().stream_reader
-    parse = simdjson.Parser().parse
+    stream_reader = ZstdDecompressor().stream_reader
+    parse = Parser().parse
 
     with open(log_path, 'w') as f:
         f.write('')
@@ -89,11 +89,15 @@ cdef void file_generator(queue: Queue, lock: threading.Semaphore, const unsigned
                     out = ''.join(item)
                 else:
                     out = item
-                buffer[idx_in_chunk] = ftfy.fix_text(out).replace('    ', '\t')
+                buffer[idx_in_chunk] = out
                 if idx % PRINT_INTERVAL == 0:
                     log(f"{total:15,}B", log_path, pid, i)
                 if idx_in_chunk == ITEMS_IN_CHUNK - 1:
-                    queue.put(''.join(buffer))
+                    out = ''.join(buffer)
+                    out = fix_text(out)
+                    out = out.replace('    ', '\t')
+                    total += len(out)
+                    queue.put(out)
             if idx_in_chunk != ITEMS_IN_CHUNK - 1:
                 queue.put(''.join(buffer[:idx_in_chunk]))
         os.remove(tmp_name)
