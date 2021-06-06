@@ -68,17 +68,12 @@ cdef void locked_execution(const unsigned char i, const unsigned char pid, lock:
     wait_for_bash(i, pid, start, end, command)
     lock.release()
 
-cdef unsigned char check_files(unicode command, unsigned short pid, unsigned short i, list paths):
+cdef unsigned char check_files(list paths):
     cdef unicode path = ""
     for path in paths:
         if os.path.exists(path):
-            log(f"File exists, not running {command}", pid, i)
             return 1
     return 0
-
-cdef void locked_execution(const unsigned char i, const unsigned char pid, lock: threading.Semaphore,
-                                   unicode start, unicode end, unicode command):
-    locked_execution(i, pid, lock, start, end, command)
 
 cdef void extract(const unsigned char pid, lock: threading.Semaphore):
     cdef unicode tmp_name = f"{DOWNLOAD_CACHE_PATH}{pid}"
