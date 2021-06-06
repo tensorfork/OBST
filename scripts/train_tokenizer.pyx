@@ -68,23 +68,28 @@ cdef void locked_execution(const unsigned char i, const unsigned char pid, lock:
     wait_for_bash(i, pid, start, end, command)
     lock.release()
 
-cdef void checked_locked_execution(const unsigned char i, const unsigned char pid, lock: threading.Semaphore,
-                                   unicode start, unicode end, unicode command, list paths):
+cdef unsigned char check_files(unicode command, unsigned short pid, unsigned short i, list paths):
     cdef unicode path = ""
     for path in paths:
         if os.path.exists(path):
             log(f"File exists, not running {command}", pid, i)
-            return
+            return 1
+    return 0
+
+cdef void locked_execution(const unsigned char i, const unsigned char pid, lock: threading.Semaphore,
+                                   unicode start, unicode end, unicode command):
     locked_execution(i, pid, lock, start, end, command)
 
 cdef void extract(const unsigned char pid, lock: threading.Semaphore):
     cdef unicode tmp_name = f"{DOWNLOAD_CACHE_PATH}{pid}"
     cdef unicode tmp_zstd = tmp_name + '.zstd'
     print(f"extract {pid} sleep")
+    if check_files([tmp_name, tmp_name + '.txt']):
+        print(f"extract {pid} no")
+        return
     sleep_till_exists(tmp_zstd)
     print(f"extract {pid} start")
-    checked_locked_execution(pid, pid, lock, "Extracting", "Finished extraction", f"unzstd {tmp_zstd}",
-                             [tmp_name, tmp_name + '.txt'])
+    locked_execution(pid, pid, lock, "Extracting", "Finished extraction", f"unzstd {tmp_zstd}")
     if REMOVE_INTERMEDIATE:
         os.remove(tmp_zstd)
 
@@ -92,8 +97,10 @@ cdef void download(const unsigned char i, const unsigned char pid, lock: threadi
     cdef unicode tmp_name = f"{DOWNLOAD_CACHE_PATH}{pid}"
     cdef unicode tmp_zstd = tmp_name + '.zstd'
     print(f"download {pid} start")
-    checked_locked_execution(i, pid, lock, "Downloading", "Finished download", download_command(i, tmp_zstd),
-                             [tmp_zstd] + [tmp_name, tmp_name + '.txt'] * (not STREAM))
+    if check_files([tmp_zstd] + [tmp_name, tmp_name + '.txt'] * (not STREAM)):
+        print(f"download {pid} no")
+        return
+    locked_execution(i, pid, lock, "Downloading", "Finished download", download_command(i, tmp_zstd))
 
 cdef unicode fix_string(bytes byte_line, const unsigned short pid, const unsigned short i, const unsigned long idx,
                         unsigned long long * total):
@@ -149,6 +156,9 @@ cdef jsonl_to_txt(const unsigned short i, lock: threading.Lock):
     cdef unsigned long long total = 0
     cdef int idx = 0
     print(f"jsonl {i:2d} sleep")
+    if check_files([tmp_name + '.txt']):
+        print(f"jsonl {i:2d} no")
+        return
     sleep_till_exists(tmp_name)
     print(f"jsonl {i:2d} start")
 
