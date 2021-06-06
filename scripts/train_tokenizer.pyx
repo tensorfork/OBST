@@ -32,14 +32,15 @@ DEF PROCESSES = 16
 DEF VOCAB_SIZE = 65536UL
 DEF PREFETCH = 128
 DEF CACHE_CAPACITY = 1UL << 30
-DEF BASE_PATH = "/mnt/e/pile"
-DEF DOWNLOAD_CACHE_PATH = "/mnt/e/pile/download"
+DEF BASE_PATH = "/mnt/e/pile/"
+DEF DOWNLOAD_CACHE_PATH = "/mnt/e/pile/"
 DEF BASE_URL = 'http://eaidata.bmk.sh/data/pile/train/%s.jsonl.zst'
 # https://the-eye.eu/public/AI/pile/train/%s.jsonl.zst
 DEF PRINT_INTERVAL = 100000
 DEF SPLITS = 30
 DEF REMOVE_INTERMEDIATE = True
 DEF REMOVE_LAST_INTERMEDIATE = False
+DEF STREAM = False  # if less than 2TB memory are available
 
 cdef void log(unicode text, const unsigned char pid, const unsigned char i):
     with open(f"{BASE_PATH}log/{pid}.txt", 'a') as f:
@@ -54,7 +55,7 @@ cdef void sleep_till_exists(unicode file_path):
         time.sleep(300)
 
 cdef void wait_for_bash(const unsigned char i, const unsigned char pid, unicode start, unicode end, unicode command):
-    cdef unicode completion = f'{BASE_PATH}/done/{pid}.txt'
+    cdef unicode completion = f'{BASE_PATH}done/{pid}.txt'
     log(start, pid, i)
     os.system(f'{command} && echo 1 > {completion}')
     sleep_till_exists(completion)
@@ -68,23 +69,28 @@ cdef void locked_execution(const unsigned char i, const unsigned char pid, lock:
     lock.release()
 
 cdef void checked_locked_execution(const unsigned char i, const unsigned char pid, lock: threading.Semaphore,
-                                   unicode start, unicode end, unicode command, unicode path):
-    if os.path.exists(path):
-        log(f"File exists, not running {command}", pid, i)
-        return
+                                   unicode start, unicode end, unicode command, list paths):
+    cdef unicode path = ""
+    for path in paths:
+        if os.path.exists(path):
+            log(f"File exists, not running {command}", pid, i)
+            return
     locked_execution(i, pid, lock, start, end, command)
 
 cdef void extract(const unsigned char pid, lock: threading.Semaphore):
-    cdef unicode tmp_name = f"{DOWNLOAD_CACHE_PATH}/{pid}"
+    cdef unicode tmp_name = f"{DOWNLOAD_CACHE_PATH}{pid}"
     cdef unicode tmp_zstd = tmp_name + '.zstd'
     sleep_till_exists(tmp_zstd)
-    checked_locked_execution(pid, pid, lock, "Extracting", "Finished extraction", f"unzstd {tmp_zstd}", tmp_name)
+    checked_locked_execution(pid, pid, lock, "Extracting", "Finished extraction", f"unzstd {tmp_zstd}",
+                             [tmp_name, tmp_name + '.txt'])
     if REMOVE_INTERMEDIATE:
         os.remove(tmp_zstd)
 
 cdef void download(const unsigned char i, const unsigned char pid, lock: threading.Semaphore):
-    cdef unicode tmp_name = f"{DOWNLOAD_CACHE_PATH}/{i}.zstd"
-    checked_locked_execution(i, pid, lock, "Downloading", "Finished download", download_command(i, tmp_name), tmp_name)
+    cdef unicode tmp_name = f"{DOWNLOAD_CACHE_PATH}{pid}"
+    cdef unicode tmp_zstd = tmp_name + '.zstd'
+    checked_locked_execution(i, pid, lock, "Downloading", "Finished download", download_command(i, tmp_zstd),
+                             [tmp_zstd] + [tmp_name, tmp_name + '.txt'] * (not STREAM))
 
 cdef void file_generator(queue: Queue, lock: threading.Semaphore, const unsigned char pid):
     cdef unicode log_path = f"{BASE_PATH}log/{pid}.txt"
@@ -102,7 +108,7 @@ cdef void file_generator(queue: Queue, lock: threading.Semaphore, const unsigned
 
     for i in range(pid, SPLITS, PROCESSES):
         total = 0
-        tmp_name = f"{DOWNLOAD_CACHE_PATH}/{i}.zstd"
+        tmp_name = f"{DOWNLOAD_CACHE_PATH}{i}.zstd"
         log("Starting", pid, i)
         download(i, pid, lock)
 
@@ -137,7 +143,7 @@ def iterator(queue: Queue, procs: typing.List[multiprocessing.Process]):
                 break
 
 cdef jsonl_to_txt(const unsigned short i, lock: threading.Lock):
-    cdef unicode tmp_name = f"{DOWNLOAD_CACHE_PATH}/{i}"
+    cdef unicode tmp_name = f"{DOWNLOAD_CACHE_PATH}{i}"
     cdef bytes byte_line = b""
     cdef unsigned long long total = 0
     cdef int idx = 0
@@ -165,34 +171,10 @@ cdef jsonl_to_txt(const unsigned short i, lock: threading.Lock):
     if REMOVE_INTERMEDIATE:
         os.remove(tmp_name)
 
-cpdef tuple setup():
-    for path in ('', 'download', 'log', 'done'):
-        if not os.path.exists(BASE_PATH + path):
-            os.mkdir(BASE_PATH + path)
-    if not os.path.exists(DOWNLOAD_CACHE_PATH):
-        os.mkdir(DOWNLOAD_CACHE_PATH)
+cdef void train_local(tokenizer: Tokenizer):
+    cdef list formatted = [f"{DOWNLOAD_CACHE_PATH}{i}.txt" for i in range(SPLITS)]
 
-    cdef unicode split_chars = string.digits + " \t\n\r\x0b\x0c"
-    for c in string.punctuation:
-        split_chars += '\\' + c
-    regex = Regex(f"""[{split_chars}]|[^{split_chars}]+""")
-    tokenizer = Tokenizer(BPE(unk_token='\x01', cache_capacity=CACHE_CAPACITY, merges=None, dropout=None))
     trainer = BpeTrainer(special_tokens=[chr(i) for i in range(256)], vocab_size=VOCAB_SIZE)
-    tokenizer.pre_tokenizer = Split(regex, 'isolated')
-    return tokenizer, trainer
-
-cdef save(tokenizer:Tokenizer):
-    tokenizer.save(".tmp.json")
-
-    with open("tokenizer.json", 'w', errors='ignore') as w, open(".tmp.json", 'r', errors='ignore') as r:
-        w.write(jsonpickle.dumps(jsonpickle.loads(r.read()), indent=4))
-
-    os.remove(".tmp.json")
-
-cpdef void train_local():
-    cdef list formatted = [f"{DOWNLOAD_CACHE_PATH}/{i}.txt" for i in range(SPLITS)]
-
-    tokenizer, trainer = setup()
 
     manager = multiprocessing.Manager()
     down_lock = manager.Semaphore(2)
@@ -207,14 +189,14 @@ cpdef void train_local():
     for p in procs:
         p.join()
     tokenizer.train(formatted, trainer)
-    save(tokenizer)
+
     if REMOVE_LAST_INTERMEDIATE:
         cdef unicode file = ""
         for file in formatted:
             os.remove(file)
 
-cpdef void train_stream():
-    tokenizer, trainer = setup()
+cdef void train_stream(tokenizer: Tokenizer):
+    trainer = BpeTrainer(special_tokens=[chr(i) for i in range(256)], vocab_size=VOCAB_SIZE)
 
     manager = multiprocessing.Manager()
     queue = manager.Queue(PREFETCH)
@@ -232,5 +214,25 @@ cpdef void train_stream():
 
     for p in procs:
         p.join()
-    save(tokenizer)
 
+cpdef void main():
+    for path in ('', 'download', 'log', 'done'):
+        if not os.path.exists(BASE_PATH + path):
+            os.mkdir(BASE_PATH + path)
+    if not os.path.exists(DOWNLOAD_CACHE_PATH):
+        os.mkdir(DOWNLOAD_CACHE_PATH)
+
+    cdef unicode split_chars = string.digits + " \t\n\r\x0b\x0c"
+    for c in string.punctuation:
+        split_chars += '\\' + c
+    regex = Regex(f"""[{split_chars}]|[^{split_chars}]+""")
+    tokenizer = Tokenizer(BPE(unk_token='\x01', cache_capacity=CACHE_CAPACITY, merges=None, dropout=None))
+    tokenizer.pre_tokenizer = Split(regex, 'isolated')
+
+    train_stream(tokenizer) if STREAM else train_local(tokenizer)
+    tokenizer.save(".tmp.json")
+
+    with open("tokenizer.json", 'w', errors='ignore') as w, open(".tmp.json", 'r', errors='ignore') as r:
+        w.write(jsonpickle.dumps(jsonpickle.loads(r.read()), indent=4))
+
+    os.remove(".tmp.json")
