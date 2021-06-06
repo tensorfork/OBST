@@ -157,50 +157,9 @@ cdef jsonl_to_txt(const unsigned short i, lock: threading.Lock):
     if REMOVE_INTERMEDIATE:
         os.remove(tmp_name)
 
-cdef void train_local(tokenizer: Tokenizer):
-    cdef list formatted = [f"{DOWNLOAD_CACHE_PATH}{i}.txt" for i in range(SPLITS)]
-
-    trainer = BpeTrainer(special_tokens=[chr(i) for i in range(256)], vocab_size=VOCAB_SIZE)
-
-    manager = multiprocessing.Manager()
-    down_lock = manager.Semaphore(2)
-    extract_lock = manager.Semaphore(PROCESSES)
-    txt_lock = manager.Semaphore(PROCESSES)
-
-    cdef tuple procs = tuple([multiprocessing.Process(target=download, args=(i, i, down_lock)) for i in range(SPLITS)] +
-                             [multiprocessing.Process(target=extract, args=(i, extract_lock)) for i in range(SPLITS)] +
-                             [multiprocessing.Process(target=jsonl_to_txt, args=(i, txt_lock)) for i in range(SPLITS)])
-    for p in procs:
-        p.start()
-    for p in procs:
-        p.join()
-    tokenizer.train(formatted, trainer)
-
-    if REMOVE_LAST_INTERMEDIATE:
-        for file in formatted:
-            os.remove(file)
-
-cdef void train_stream(tokenizer: Tokenizer):
-    trainer = BpeTrainer(special_tokens=[chr(i) for i in range(256)], vocab_size=VOCAB_SIZE)
-
-    manager = multiprocessing.Manager()
-    queue = manager.Queue(PREFETCH)
-    lock = manager.Semaphore(2)
-
-    cdef tuple procs = tuple([multiprocessing.Process(target=file_generator, args=(queue, lock, i))
-                              for i in range(PROCESSES)])
-    for p in procs:
-        p.start()
-
-    while queue.qsize() < PREFETCH // 2:
-        time.sleep(5)
-
-    tokenizer.train_from_iterator(iterator(queue, procs), trainer)
-
-    for p in procs:
-        p.join()
 
 cpdef void main():
+    cdef tuple procs = tuple()
     for path in ('', 'download', 'log', 'done'):
         if not os.path.exists(BASE_PATH + path):
             os.mkdir(BASE_PATH + path)
@@ -213,8 +172,45 @@ cpdef void main():
     regex = Regex(f"""[{split_chars}]|[^{split_chars}]+""")
     tokenizer = Tokenizer(BPE(unk_token='\x01', cache_capacity=CACHE_CAPACITY, merges=None, dropout=None))
     tokenizer.pre_tokenizer = Split(regex, 'isolated')
+    cdef list formatted = [f"{DOWNLOAD_CACHE_PATH}{i}.txt" for i in range(SPLITS)]
+    trainer = BpeTrainer(special_tokens=[chr(i) for i in range(256)], vocab_size=VOCAB_SIZE)
+    manager = multiprocessing.Manager()
+    down_lock = manager.Semaphore(2)
+    cdef bool files_exist = True
+    cdef unicode file = ""
+    for file in formatted:
+        files_exist &= not os.path.exists(file)
+    if STREAM and not files_exist:
+        queue = manager.Queue(PREFETCH)
 
-    train_stream(tokenizer) if STREAM else train_local(tokenizer)
+        procs = tuple([multiprocessing.Process(target=file_generator, args=(queue, down_lock, i))
+                       for i in range(PROCESSES)])
+        for p in procs:
+            p.start()
+
+        while queue.qsize() < PREFETCH // 2:
+            time.sleep(5)
+
+        tokenizer.train_from_iterator(iterator(queue, procs), trainer)
+
+        for p in procs:
+            p.join()
+    else:
+        extract_lock = manager.Semaphore(PROCESSES)
+        txt_lock = manager.Semaphore(PROCESSES)
+
+        procs = tuple([multiprocessing.Process(target=download, args=(i, i, down_lock)) for i in range(SPLITS)] +
+                      [multiprocessing.Process(target=extract, args=(i, extract_lock)) for i in range(SPLITS)] +
+                      [multiprocessing.Process(target=jsonl_to_txt, args=(i, txt_lock)) for i in range(SPLITS)])
+        for p in procs:
+            p.start()
+        for p in procs:
+            p.join()
+        tokenizer.train(formatted, trainer)
+
+        if REMOVE_LAST_INTERMEDIATE:
+            for file in formatted:
+                os.remove(file)
     tokenizer.save(".tmp.json")
 
     with open("tokenizer.json", 'w', errors='ignore') as w, open(".tmp.json", 'r', errors='ignore') as r:
