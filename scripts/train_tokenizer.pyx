@@ -32,8 +32,8 @@ DEF PROCESSES = 16
 DEF VOCAB_SIZE = 65536UL
 DEF PREFETCH = 128
 DEF CACHE_CAPACITY = 1UL << 30
-DEF BASE_PATH = "/mnt/e/pile/"
-DEF DOWNLOAD_CACHE_PATH = "/mnt/e/pile/"
+DEF BASE_PATH = "/mnt/e/pile2/"
+DEF DOWNLOAD_CACHE_PATH = "/mnt/e/pile2/"
 DEF BASE_URL = 'http://eaidata.bmk.sh/data/pile/train/%s.jsonl.zst'
 # https://the-eye.eu/public/AI/pile/train/%s.jsonl.zst
 DEF PRINT_INTERVAL = 100000
@@ -105,7 +105,6 @@ cdef unicode fix_string(bytes byte_line, const unsigned short pid, const unsigne
 cdef void file_generator(queue: Queue, lock: threading.Semaphore, const unsigned char pid):
     cdef unicode log_path = f"{BASE_PATH}log/{pid}.txt"
     cdef unicode tmp_name = ""
-    cdef unicode out = ""
     cdef bytes byte_line = b""
     cdef unsigned long long total = 0
     cdef unsigned long idx = 0
@@ -146,8 +145,6 @@ cdef jsonl_to_txt(const unsigned short i, lock: threading.Lock):
     cdef bytes byte_line = b""
     cdef unsigned long long total = 0
     cdef int idx = 0
-    cdef unicode out = ""
-    parse = Parser().parse
 
     sleep_till_exists(tmp_name)
 
