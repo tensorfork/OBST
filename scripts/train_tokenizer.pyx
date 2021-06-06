@@ -180,7 +180,6 @@ cdef void train_local(tokenizer: Tokenizer):
     tokenizer.train(formatted, trainer)
 
     if REMOVE_LAST_INTERMEDIATE:
-        cdef unicode file = ""
         for file in formatted:
             os.remove(file)
 
