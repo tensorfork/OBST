@@ -49,7 +49,7 @@ cdef unicode download_command(const unsigned char i, unicode tmp_name):
     url = "http://eaidata.bmk.sh/data/" if i % 2 else "https://the-eye.eu/public/AI/"
     return f"wget {url}/pile/train/{i:02d}.jsonl.zst -O {tmp_name} -t inf --timeout 15"
 
-cdef void sleep_till_exists(const unicode file_path):
+cdef void sleep_till_exists(unicode file_path):
     while not os.path.exists(file_path):
         time.sleep(300)
 
@@ -70,12 +70,12 @@ cdef void locked_execution(const unsigned char i, const unsigned char pid, lock:
 cdef void checked_locked_execution(const unsigned char i, const unsigned char pid, lock: threading.Semaphore,
                                    unicode start, unicode end, unicode command, unicode path):
     if os.path.exists(path):
-        log(f"File exists, not running {command}")
+        log(f"File exists, not running {command}", pid, i)
         return
     locked_execution(i, pid, lock, start, end, command)
 
 cdef void extract(const unsigned char pid, lock: threading.Semaphore):
-    cdef unicode tmp_name = f"{DOWNLOAD_CACHE_PATH}/{i}"
+    cdef unicode tmp_name = f"{DOWNLOAD_CACHE_PATH}/{pid}"
     cdef unicode tmp_zstd = tmp_name + '.zstd'
     sleep_till_exists(tmp_zstd)
     checked_locked_execution(pid, pid, lock, "Extracting", "Finished extraction", f"unzstd {tmp_zstd}", tmp_name)
@@ -143,7 +143,6 @@ cdef jsonl_to_txt(const unsigned short i, lock: threading.Lock):
     cdef unsigned long long total = 0
     cdef int idx = 0
     cdef unicode out = ""
-    cdef int total = 0
     parse = Parser().parse
 
     sleep_till_exists(tmp_name)
@@ -171,6 +170,8 @@ cpdef tuple setup():
     for path in ('', 'download', 'log', 'done'):
         if not os.path.exists(BASE_PATH + path):
             os.mkdir(BASE_PATH + path)
+    if not os.path.exists(DOWNLOAD_CACHE_PATH):
+        os.mkdir(DOWNLOAD_CACHE_PATH)
 
     cdef unicode split_chars = string.digits + " \t\n\r\x0b\x0c"
     for c in string.punctuation:
