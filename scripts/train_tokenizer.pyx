@@ -32,8 +32,8 @@ DEF PROCESSES = 16
 DEF VOCAB_SIZE = 65536UL
 DEF PREFETCH = 128
 DEF CACHE_CAPACITY = 1UL << 30
-DEF BASE_PATH = "pile2/"
-DEF DOWNLOAD_CACHE_PATH = "pile2/download"
+DEF BASE_PATH = "/mnt/e/pile"
+DEF DOWNLOAD_CACHE_PATH = "/mnt/e/pile/download"
 DEF BASE_URL = 'http://eaidata.bmk.sh/data/pile/train/%s.jsonl.zst'
 # https://the-eye.eu/public/AI/pile/train/%s.jsonl.zst
 DEF PRINT_INTERVAL = 100000
@@ -94,7 +94,6 @@ cdef void file_generator(queue: Queue, lock: threading.Semaphore, const unsigned
     cdef unsigned long long total = 0
     cdef unsigned long idx = 0
     cdef unsigned char i = 0
-    cdef unsigned long idx_in_chunk = 0
     stream_reader = ZstdDecompressor().stream_reader
     parse = Parser().parse
 
@@ -192,7 +191,6 @@ cdef save(tokenizer:Tokenizer):
 
 cpdef void train_local():
     cdef list formatted = [f"{DOWNLOAD_CACHE_PATH}/{i}.txt" for i in range(SPLITS)]
-    cdef unicode file = ""
 
     tokenizer, trainer = setup()
 
@@ -211,6 +209,7 @@ cpdef void train_local():
     tokenizer.train(formatted, trainer)
     save(tokenizer)
     if REMOVE_LAST_INTERMEDIATE:
+        cdef unicode file = ""
         for file in formatted:
             os.remove(file)
 
