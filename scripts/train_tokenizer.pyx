@@ -28,10 +28,10 @@ from tokenizers.trainers import BpeTrainer
 from zstandard import ZstdDecompressor
 
 # config
-DEF PROCESSES = 16
+DEF PROCESSES = 1
 DEF VOCAB_SIZE = 65536UL
 DEF PREFETCH = 128
-DEF CACHE_CAPACITY = 1UL << 30
+DEF CACHE_CAPACITY = 1UL << 20
 DEF BASE_PATH = "/mnt/e/pile2/"
 DEF DOWNLOAD_CACHE_PATH = "/mnt/e/pile2/"
 DEF BASE_URL = 'http://eaidata.bmk.sh/data/pile/train/%s.jsonl.zst'
@@ -80,7 +80,9 @@ cdef void checked_locked_execution(const unsigned char i, const unsigned char pi
 cdef void extract(const unsigned char pid, lock: threading.Semaphore):
     cdef unicode tmp_name = f"{DOWNLOAD_CACHE_PATH}{pid}"
     cdef unicode tmp_zstd = tmp_name + '.zstd'
+    print(f"extract {pid} sleep")
     sleep_till_exists(tmp_zstd)
+    print(f"extract {pid} start")
     checked_locked_execution(pid, pid, lock, "Extracting", "Finished extraction", f"unzstd {tmp_zstd}",
                              [tmp_name, tmp_name + '.txt'])
     if REMOVE_INTERMEDIATE:
@@ -89,11 +91,12 @@ cdef void extract(const unsigned char pid, lock: threading.Semaphore):
 cdef void download(const unsigned char i, const unsigned char pid, lock: threading.Semaphore):
     cdef unicode tmp_name = f"{DOWNLOAD_CACHE_PATH}{pid}"
     cdef unicode tmp_zstd = tmp_name + '.zstd'
+    print(f"download {pid} start")
     checked_locked_execution(i, pid, lock, "Downloading", "Finished download", download_command(i, tmp_zstd),
                              [tmp_zstd] + [tmp_name, tmp_name + '.txt'] * (not STREAM))
 
 cdef unicode fix_string(bytes byte_line, const unsigned short pid, const unsigned short i, const unsigned long idx,
-                        unsigned long long* total):
+                        unsigned long long * total):
     cdef unicode out = Parser().parse(byte_line)['text']
     total[0] += len(out)
     if idx % PRINT_INTERVAL == 0:
@@ -145,8 +148,9 @@ cdef jsonl_to_txt(const unsigned short i, lock: threading.Lock):
     cdef bytes byte_line = b""
     cdef unsigned long long total = 0
     cdef int idx = 0
-
+    print(f"jsonl {i:2d} sleep")
     sleep_till_exists(tmp_name)
+    print(f"jsonl {i:2d} start")
 
     lock.acquire()
     with open(tmp_name, 'rb', 2 ** 20) as f:
@@ -176,7 +180,7 @@ cpdef void main():
     trainer = BpeTrainer(special_tokens=[chr(i) for i in range(256)], vocab_size=VOCAB_SIZE)
     manager = multiprocessing.Manager()
     down_lock = manager.Semaphore(2)
-    cdef bool files_exist = True
+    cdef unsigned short files_exist = 1
     cdef unicode file = ""
     for file in formatted:
         files_exist &= not os.path.exists(file)
