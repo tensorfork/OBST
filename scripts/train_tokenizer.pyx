@@ -48,7 +48,7 @@ cdef void log(unicode text, const unsigned char pid, const unsigned char i):
 
 cdef unicode download_command(const unsigned char i, unicode tmp_name):
     url = "http://eaidata.bmk.sh/data/" if i % 2 else "https://the-eye.eu/public/AI/"
-    return f"wget {url}/pile/train/{i:02d}.jsonl.zst -O {tmp_name} -t inf --timeout 15"
+    return f"wget {url}/pile/train/{i:02d}.jsonl.zst -O {tmp_name}.tmp -t inf --timeout 15 && mv {tmp_name}.tmp {tmp_name}"
 
 cdef void sleep_till_exists(unicode file_path):
     while not os.path.exists(file_path):
