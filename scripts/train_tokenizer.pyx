@@ -92,6 +92,16 @@ cdef void download(const unsigned char i, const unsigned char pid, lock: threadi
     checked_locked_execution(i, pid, lock, "Downloading", "Finished download", download_command(i, tmp_zstd),
                              [tmp_zstd] + [tmp_name, tmp_name + '.txt'] * (not STREAM))
 
+cdef unicode fix_string(bytes byte_line, const unsigned short pid, const unsigned short i, const unsigned long idx,
+                        unsigned long long* total):
+    cdef unicode out = Parser().parse(byte_line)['text']
+    total[0] += len(out)
+    if idx % PRINT_INTERVAL == 0:
+        log(f"{total[0]:15,}B", pid, i)
+    out = fix_text(out)
+    out = out.replace('    ', '\t')
+    return out
+
 cdef void file_generator(queue: Queue, lock: threading.Semaphore, const unsigned char pid):
     cdef unicode log_path = f"{BASE_PATH}log/{pid}.txt"
     cdef unicode tmp_name = ""
@@ -101,7 +111,6 @@ cdef void file_generator(queue: Queue, lock: threading.Semaphore, const unsigned
     cdef unsigned long idx = 0
     cdef unsigned char i = 0
     stream_reader = ZstdDecompressor().stream_reader
-    parse = Parser().parse
 
     with open(log_path, 'w') as f:
         f.write('')
@@ -114,17 +123,7 @@ cdef void file_generator(queue: Queue, lock: threading.Semaphore, const unsigned
 
         with open(tmp_name, 'rb') as f:
             for idx, byte_line in enumerate(io.BufferedReader(stream_reader(f))):
-                item = parse(byte_line)['text']
-                if isinstance(item, list):
-                    out = ''.join(item)
-                else:
-                    out = item
-                if idx % PRINT_INTERVAL == 0:
-                    log(f"{total:15,}B", pid, i)
-                out = fix_text(out)
-                out = out.replace('    ', '\t')
-                total += len(out)
-                queue.put(out)
+                queue.put(fix_string(byte_line, pid, i, idx, &total))
         if REMOVE_LAST_INTERMEDIATE:
             os.remove(tmp_name)
 
@@ -156,17 +155,7 @@ cdef jsonl_to_txt(const unsigned short i, lock: threading.Lock):
     with open(tmp_name, 'rb', 2 ** 20) as f:
         with open(tmp_name + '.txt', 'a', 2 ** 20) as o:
             for idx, byte_line in enumerate(f):
-                item = parse(byte_line)['text']
-                if isinstance(item, list):
-                    out = ''.join(item)
-                else:
-                    out = item
-                if idx % PRINT_INTERVAL == 0:
-                    log(f"{total:15,}B", i, i)
-                out = fix_text(out)
-                out = out.replace('    ', '\t')
-                total += len(out)
-                o.write(out + '\n')
+                o.write(fix_string(byte_line, i, i, idx, &total) + '\n')
     lock.release()
     if REMOVE_INTERMEDIATE:
         os.remove(tmp_name)
