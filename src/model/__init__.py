@@ -224,8 +224,6 @@ def build(params: ModelParameter,
                                       _vid_msk_tgt, _cat_msk_tgt], output_shape=[params.head_dim])
                 video_loss = reduce_sum(video_loss, output_shape=[])
 
-                mtf.layers.softmax_cross_entropy_with_logits()
-
             else:
                 size = constant_scalar(params, 1 / frame_out.size)
                 out = frame_out - tgt
