@@ -287,6 +287,32 @@ def shape_size(shape: ALL_SHAPES):
     return np.prod([d.size for d in dims_from_shape(shape)])
 
 
+def shape_crossection(*shapes: ALL_SHAPES):
+    shapes = [dims_from_shape(s) for s in shapes]
+    out = [dim for dim in shape_addition(*shapes) if all(dim in shape for shape in shapes)]
+    return mtf.Shape(out)
+
+
+def shape_addition(*shapes: ALL_SHAPES):
+    dims = []
+    for s in shapes:
+        dims.extend(dims_from_shape(s))
+    return mtf.Shape(deduplicate(dims))
+
+
+def missing_dims(self: ALL_SHAPES, other: ALL_SHAPES):
+    self = dims_from_shape(self)
+    other = dims_from_shape(other)
+    return [d for d in other if d not in self]
+
+
+def compare_range(params: ModelParameter, dim0: mtf.Dimension, dim1: mtf.Dimension, comparison: typing.Callable):
+    with tf1.variable_scope(f"compare{dim0.name}_{dim1.name}"):
+        return cast(comparison(mtf_range(params.mesh, dim0, tf.int32),
+                               mtf_range(params.mesh, dim1, tf.int32)),
+                    params.variable_dtype.activation_dtype)
+
+
 def shape_union(*shapes: ALL_SHAPES):
     out = set(dims_from_shape(shapes[0]))
     for s in shapes[1:]:
