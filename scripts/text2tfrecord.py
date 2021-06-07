@@ -12,7 +12,6 @@ import jsonlines
 import requests
 import simdjson
 import tensorflow as tf
-import torch.nn.functional
 import zstandard
 from google.cloud import storage
 from transformers import GPT2TokenizerFast
@@ -31,7 +30,7 @@ parser.add_argument("--separator", type=str, default="\04",
                     help="separator to place between files in chunk mode."
                          "Default is 0 (Null) in case of byte encodings, "
                          "50256 for tokenized texts")
-torch.nn.functional.dropout2d()
+
 
 def file_generator(args, pid, procs):
     base_url = 'http://eaidata.bmk.sh/data/pile/train/%s.jsonl.zst'
