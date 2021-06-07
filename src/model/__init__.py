@@ -10,10 +10,10 @@ from .revnet import RevGradOp
 from ..dataclass import BlockArgs, BlockConfig, ModelParameter
 from ..mtf_wrapper import (add_n, cast, constant_scalar, dropout, einsum, exp, log, one_hot, ones, reciprocal,
                            reduce_logsumexp, reduce_max, reduce_sum, sigmoid, sign, zeros_like)
-from ..utils_mtf import concat, head_argmax, head_embed, slice, weighted_add
+from ..utils_mtf import concat, head_argmax, head_embed, slice, weighted_add, anonymize_dim, anonymize, anonymize_shape
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
-
+import numpy as np
 tf1 = tf.compat.v1
 
 
@@ -67,7 +67,7 @@ def build(params: ModelParameter,
 
         if params.use_video:
             base_args = BlockArgs(params, vid, [''])
-            vid = dropout(vid, rate=params.input_dropout)
+            vid = dropout(vid, params.train, rate=params.input_dropout)
 
             if params.use_bit_fold_input_pipeline:
                 vid = mtf.cast(vid, dtype=tf.int64)
@@ -114,8 +114,7 @@ def build(params: ModelParameter,
                              [params.head_dim, params.vocab_dim] + params.intermediate)
             txt = einsum([txt_embd, *head_embed(params, txt_src)], reduced_dims=[params.vocab_dim, params.head_dim])
 
-            if params.input_dropout > 0:
-                txt = dropout(txt, rate=params.input_dropout)
+            txt = dropout(txt, params.train, rate=params.input_dropout)
 
             txt = linear_to_features(base_args(txt), [txt_tgt.shape[-1]] + params.intermediate)
 
@@ -163,7 +162,9 @@ def build(params: ModelParameter,
             for config_idx, config in enumerate(params.output_block_config):
                 token_out = block_part_fn(params, config, token_out, f'lang_out{config_idx}')
 
-            token_out = linear_from_features(base_args(token_out), [txt_tgt.shape[-1]] + params.vocab_dims)
+            token_out = linear(base_args(anonymize(token_out, params.head_dim)),
+                               old=anonymize_shape(params.feature_dims, params.head_dim),
+                               new=[txt_tgt.shape[-1]] + params.vocab_dims)
 
         if params.use_video:
             frame_out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)
@@ -222,6 +223,8 @@ def build(params: ModelParameter,
                 video_loss += einsum([frame_out, video_target, video_size, constant_scalar(params, -1),
                                       _vid_msk_tgt, _cat_msk_tgt], output_shape=[params.head_dim])
                 video_loss = reduce_sum(video_loss, output_shape=[])
+
+                mtf.layers.softmax_cross_entropy_with_logits()
 
             else:
                 size = constant_scalar(params, 1 / frame_out.size)

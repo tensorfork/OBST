@@ -162,6 +162,6 @@ def zeros_like(tensor: mtf.Tensor) -> mtf.Tensor:
     return scoped("zeros_like", mtf.zeros_like, tensor)
 
 
-def dropout(tensor: mtf.Tensor, keep_prob: typing.Optional[float] = None, rate: typing.Optional[float] = None,
-            noise_shape: OPT_SHAPE = None) -> mtf.Tensor:
-    return scoped("dropout", mtf.dropout, tensor, keep_prob, rate, noise_shape)
+def dropout(tensor: mtf.Tensor, is_training: bool, keep_prob: typing.Optional[float] = None,
+            rate: typing.Optional[float] = None, noise_shape: OPT_SHAPE = None) -> mtf.Tensor:
+    return scoped("dropout", mtf.dropout, tensor, is_training, keep_prob, rate, noise_shape)
