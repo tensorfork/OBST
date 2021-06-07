@@ -28,17 +28,17 @@ from tokenizers.trainers import BpeTrainer
 from zstandard import ZstdDecompressor
 
 # config
-DEF PROCESSES = 1
+DEF PROCESSES = 8
 DEF VOCAB_SIZE = 65536UL
 DEF PREFETCH = 128
 DEF CACHE_CAPACITY = 1UL << 20
-DEF BASE_PATH = "/mnt/e/pile2/"
-DEF DOWNLOAD_CACHE_PATH = "/mnt/e/pile2/"
+DEF BASE_PATH = "/mnt/wolf/"
+DEF DOWNLOAD_CACHE_PATH = "/mnt/wolf/"
 DEF BASE_URL = 'http://eaidata.bmk.sh/data/pile/train/%s.jsonl.zst'
 # https://the-eye.eu/public/AI/pile/train/%s.jsonl.zst
 DEF PRINT_INTERVAL = 100000
 DEF SPLITS = 30
-DEF REMOVE_INTERMEDIATE = True
+DEF REMOVE_INTERMEDIATE = False
 DEF REMOVE_LAST_INTERMEDIATE = False
 DEF STREAM = False  # if less than 2TB memory are available
 
@@ -77,20 +77,20 @@ cdef unsigned char check_files(list paths):
 
 cdef void extract(const unsigned char pid, lock: threading.Semaphore):
     cdef unicode tmp_name = f"{DOWNLOAD_CACHE_PATH}{pid}"
-    cdef unicode tmp_zstd = tmp_name + '.zstd'
+    cdef unicode tmp_zstd = tmp_name + '.zst'
     print(f"extract {pid} sleep")
     if check_files([tmp_name, tmp_name + '.txt']):
         print(f"extract {pid} no")
         return
     sleep_till_exists(tmp_zstd)
     print(f"extract {pid} start")
-    locked_execution(pid, pid, lock, "Extracting", "Finished extraction", f"unzstd {tmp_zstd}")
+    locked_execution(pid, pid, lock, "Extracting", "Finished extraction", f"unzstd {tmp_zstd}.tmp && mv {tmp_name}.tmp {tmp_name}")
     if REMOVE_INTERMEDIATE:
         os.remove(tmp_zstd)
 
 cdef void download(const unsigned char i, const unsigned char pid, lock: threading.Semaphore):
     cdef unicode tmp_name = f"{DOWNLOAD_CACHE_PATH}{pid}"
-    cdef unicode tmp_zstd = tmp_name + '.zstd'
+    cdef unicode tmp_zstd = tmp_name + '.zst'
     print(f"download {pid} start")
     if check_files([tmp_zstd] + [tmp_name, tmp_name + '.txt'] * (not STREAM)):
         print(f"download {pid} no")
@@ -121,7 +121,7 @@ cdef void file_generator(queue: Queue, lock: threading.Semaphore, const unsigned
 
     for i in range(pid, SPLITS, PROCESSES):
         total = 0
-        tmp_name = f"{DOWNLOAD_CACHE_PATH}{i}.zstd"
+        tmp_name = f"{DOWNLOAD_CACHE_PATH}{i}.zst"
         log("Starting", pid, i)
         download(i, pid, lock)
 
@@ -147,10 +147,12 @@ def iterator(queue: Queue, procs: typing.List[multiprocessing.Process]):
 
 cdef jsonl_to_txt(const unsigned short i, lock: threading.Lock):
     cdef unicode tmp_name = f"{DOWNLOAD_CACHE_PATH}{i}"
+    cdef unicode txt_name = tmp_name + '.txt'
     cdef bytes byte_line = b""
     cdef unsigned long long total = 0
     cdef int idx = 0
     print(f"jsonl {i:2d} sleep")
+    print(tmp_name)
     if check_files([tmp_name + '.txt']):
         print(f"jsonl {i:2d} no")
         return
@@ -159,10 +161,11 @@ cdef jsonl_to_txt(const unsigned short i, lock: threading.Lock):
 
     lock.acquire()
     with open(tmp_name, 'rb', 2 ** 20) as f:
-        with open(tmp_name + '.txt', 'a', 2 ** 20) as o:
+        with open(txt_name + '.tmp', 'a', 2 ** 20) as o:
             for idx, byte_line in enumerate(f):
                 o.write(fix_string(byte_line, i, i, idx, &total) + '\n')
     lock.release()
+    os.rename(txt_name + '.tmp', txt_name)
     if REMOVE_INTERMEDIATE:
         os.remove(tmp_name)
 
@@ -226,3 +229,4 @@ cpdef void main():
         w.write(jsonpickle.dumps(jsonpickle.loads(r.read()), indent=4))
 
     os.remove(".tmp.json")
+    
