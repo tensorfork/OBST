@@ -84,16 +84,14 @@ cdef void extract(const unsigned char pid, lock: threading.Semaphore):
         return
     sleep_till_exists(tmp_zstd)
     print(f"extract {pid} start")
-    locked_execution(pid, pid, lock, "Extracting", "Finished extraction", f"unzstd {tmp_zstd}.tmp && mv {tmp_name}.tmp {tmp_name}")
+    locked_execution(pid, pid, lock, "Extracting", "Finished extraction", f"unzstd {tmp_zstd} && mv {tmp_name} {tmp_name}.jsonl")
     if REMOVE_INTERMEDIATE:
         os.remove(tmp_zstd)
 
 cdef void download(const unsigned char i, const unsigned char pid, lock: threading.Semaphore):
     cdef unicode tmp_name = f"{DOWNLOAD_CACHE_PATH}{pid}"
     cdef unicode tmp_zstd = tmp_name + '.zst'
-    print(f"download {pid} start")
     if check_files([tmp_zstd] + [tmp_name, tmp_name + '.txt'] * (not STREAM)):
-        print(f"download {pid} no")
         return
     locked_execution(i, pid, lock, "Downloading", "Finished download", download_command(i, tmp_zstd))
 
@@ -152,22 +150,21 @@ cdef jsonl_to_txt(const unsigned short i, lock: threading.Lock):
     cdef unsigned long long total = 0
     cdef int idx = 0
     print(f"jsonl {i:2d} sleep")
-    print(tmp_name)
     if check_files([tmp_name + '.txt']):
         print(f"jsonl {i:2d} no")
         return
-    sleep_till_exists(tmp_name)
+    sleep_till_exists(tmp_name + '.jsonl')
     print(f"jsonl {i:2d} start")
 
     lock.acquire()
-    with open(tmp_name, 'rb', 2 ** 20) as f:
+    with open(tmp_name + '.jsonl', 'rb', 2 ** 20) as f:
         with open(txt_name + '.tmp', 'a', 2 ** 20) as o:
             for idx, byte_line in enumerate(f):
                 o.write(fix_string(byte_line, i, i, idx, &total) + '\n')
     lock.release()
     os.rename(txt_name + '.tmp', txt_name)
     if REMOVE_INTERMEDIATE:
-        os.remove(tmp_name)
+        os.remove(tmp_name + '.jsonl')
 
 
 cpdef void main():
@@ -229,4 +226,3 @@ cpdef void main():
         w.write(jsonpickle.dumps(jsonpickle.loads(r.read()), indent=4))
 
     os.remove(".tmp.json")
-    
