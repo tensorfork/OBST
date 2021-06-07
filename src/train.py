@@ -21,7 +21,7 @@ from .model import build
 from .mtf_wrapper import constant_scalar, log
 from .optimizers import get_optimizer
 from .utils_core import color_print
-from .utils_mtf import concat, pad, slice, to_fp32, weighted_add, anonymize, head_argmax
+from .utils_mtf import concat, pad, slice, to_fp32, weighted_add, anonymize, head_argmax, replace_dim
 
 tf1 = tf.compat.v1
 Dataset = tf1.data.Dataset
@@ -234,9 +234,13 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
                         one_hot_mask = mtf.one_hot(position, output_dim=params.sequence_dim, dtype=tf.int32)
 
+                        true_vocab_dim = mtf.Dimension('true_vocab',
+                                                       token_out.shape[-1].size * token_out.shape[-2].size)
+                        token_out = mtf.reshape(token_out, mtf.Shape(token_out.shape[:-2] + [true_vocab_dim]))
+
                         token_out += (log(-log(mtf.random_uniform(params.mesh, token_out.shape, maxval=1,
                                                                       minval=1e-9, dtype=tf.float32))))
-                        token_out = mtf.argmax(token_out, params.vocab_dim)
+                        token_out = mtf.argmax(token_out, true_vocab_dim)
 
                         token_out = mtf.shift(token_out, offset=1, dim=params.sequence_dim, wrap=False)
 
