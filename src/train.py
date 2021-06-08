@@ -239,7 +239,8 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                         token_out = mtf.reshape(token_out, mtf.Shape(token_out.shape[:-2] + [true_vocab_dim]))
 
                         token_out += (log(-log(mtf.random_uniform(params.mesh, token_out.shape, maxval=1,
-                                                                      minval=1e-9, dtype=tf.float32))))
+                                                                      minval=1e-9, dtype=tf.float32)))
+                                      * sampling_temperature)
                         token_out = mtf.argmax(token_out, true_vocab_dim)
 
                         token_out = mtf.shift(token_out, offset=1, dim=params.sequence_dim, wrap=False)
