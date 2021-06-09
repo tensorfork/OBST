@@ -62,9 +62,9 @@ def get_variable(args: BlockArgs, shape: SHAPE, initializer: typing.Callable) ->
         name = scope._name
         scope = name.split('/')
         body_idx = scope.index("body") + 1
-        block, fn_name = scope[body_idx:body_idx + 2]
+        block, full_fn_name = scope[body_idx:body_idx + 2]
         block, config = block.split('_')
-        fn_name = ''.join(c for c in fn_name if not c.isdigit())
+        fn_name = ''.join(c for c in full_fn_name if not c.isdigit())
 
         cache = params.cached_parameters
         for idx in (block, config, fn_name):
@@ -74,8 +74,11 @@ def get_variable(args: BlockArgs, shape: SHAPE, initializer: typing.Callable) ->
 
         if "counter" not in cache:
             cache["counter"] = 0
-        cache["counter"] += 1
-        if len(cache) == cache["counter"] + 1:
+            cache["seen"] = {}
+        if idx not in cache["seen"]:
+            cache["counter"] += 1
+            cache["seen"].add(full_fn_name)
+        if len(cache) == cache["counter"] + 2:
             cache["counter"] = 0
         fn_id = cache["counter"]
 
