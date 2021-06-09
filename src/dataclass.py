@@ -241,6 +241,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
                                                self.intermediate_feed_forward_multiplier))]
 
         self.vocab_dim = mtf.Dimension(self.head_dim.name, self.vocab_size)
+        self.vocab_dims = [self.head_dim] * self.split_vocab + [self.vocab_dim]
         self.batch_dim = mtf.Dimension("batch", self.train_batch_size)
         self.frame_input_sequence = mtf.Dimension("_sequence", self.time_patch_size + 1)
 
