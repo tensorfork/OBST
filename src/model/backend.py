@@ -67,7 +67,7 @@ def get_variable(args: BlockArgs, shape: SHAPE, initializer: typing.Callable) ->
         fn_name = ''.join(c for c in full_fn_name if not c.isdigit())
 
         cache = params.cached_parameters
-        for idx in (block, config, fn_name):
+        for idx in (config, fn_name):
             if idx not in cache:
                 cache[idx] = {}
             cache = cache[idx]
