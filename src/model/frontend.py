@@ -23,7 +23,7 @@ def block_part_fn(params: ModelParameter, block_part_config: BlockConfig, block_
     with tf1.variable_scope(random_name(f"{name_prefix}_")):
         for layer in block_part_config.layer:
             name, *extras = layer.split('-')
-            out = scoped(name, LAYER_FUNCTIONS[name], BlockArgs(params, out, extras))
+            out = scoped(name + '_', LAYER_FUNCTIONS[name], BlockArgs(params, out, extras))
 
         if not block_part_config.use_revnet and block_part_config.skip:
             out += block_input

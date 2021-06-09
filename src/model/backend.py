@@ -1,4 +1,5 @@
 import random
+import string
 import typing
 
 import mesh_tensorflow as mtf
@@ -49,8 +50,46 @@ class OrthogonalInit(Initializer):
 
 
 def get_variable(params: ModelParameter, shape: SHAPE, initializer: typing.Callable) -> mtf.Tensor:
-    return scoped(random_name("get_variable"), mtf.get_variable, params.mesh, random_name("get_variable"),
-                  deduplicate(shape), dtype=params.variable_dtype, initializer=initializer)
+    params: ModelParameter = params
+    with tf1.variable_scope("get_variable") as scope:
+        name = scope._name
+        scope = name.split('/')
+        body_idx = scope.index("body") + 1
+        block, fn_name = scope[body_idx:body_idx + 2]
+        block, config = block.split('_')
+        fn_name, _ = fn_name.split('_')
+
+        cache = params.cached_parameters
+        for idx in (block, config, fn_name):
+            if idx not in cache:
+                cache[idx] = {}
+            cache = cache[idx]
+
+        if "counter" not in cache:
+            cache["counter"] = 0
+        cache["counter"] += 1
+        if len(cache) == cache["counter"] + 1:
+            cache["counter"] = 0
+        fn_id = cache["counter"]
+
+        if fn_id not in cache:
+            cache[fn_id] = {}
+        cache = cache[fn_id]
+        if "counter" not in cache:
+            cache["counter"] = 0
+
+        if block == "0":
+            var = mtf.get_variable(params.mesh, random_name("get_variable"), deduplicate(shape),
+                                   dtype=params.variable_dtype, initializer=initializer)
+            cache[cache["counter"]] = var
+            cache["counter"] += 1
+            return var
+
+        if len(cache) == cache["counter"] + 1:
+            cache["counter"] = 0
+        var = cache[cache["counter"]]
+        cache["counter"] += 1
+        return var
 
 
 def orthogonal_var(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
