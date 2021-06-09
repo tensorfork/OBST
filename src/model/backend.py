@@ -64,7 +64,7 @@ def get_variable(args: BlockArgs, shape: SHAPE, initializer: typing.Callable) ->
         body_idx = scope.index("body") + 1
         block, fn_name = scope[body_idx:body_idx + 2]
         block, config = block.split('_')
-        fn_name, _ = fn_name.split('_')
+        fn_name = ''.join(c for c in fn_name if not c.isdigit())
 
         cache = params.cached_parameters
         for idx in (block, config, fn_name):
