@@ -122,11 +122,11 @@ def sigmoid(tensor: mtf.Tensor) -> mtf.Tensor:
 
 
 def sqrt(tensor: mtf.Tensor) -> mtf.Tensor:
-    return scoped("sqrt", mtf.sqrt, tensor)
+    return scoped("sqrt", lambda x: mtf.pow(x, 0.5), tensor)
 
 
 def rsqrt(tensor: mtf.Tensor) -> mtf.Tensor:
-    return scoped("rsqrt", mtf.rsqrt, tensor)
+    return scoped("rsqrt", lambda x: mtf.pow(x, -0.5), tensor)
 
 
 def square(tensor: mtf.Tensor) -> mtf.Tensor:
