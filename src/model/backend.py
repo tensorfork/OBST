@@ -74,7 +74,7 @@ def get_variable(args: BlockArgs, shape: SHAPE, initializer: typing.Callable) ->
 
         if "counter" not in cache:
             cache["counter"] = 0
-            cache["seen"] = {}
+            cache["seen"] = set()
         if idx not in cache["seen"]:
             cache["counter"] += 1
             cache["seen"].add(full_fn_name)
