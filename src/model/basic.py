@@ -15,7 +15,7 @@ tf1 = tf.compat.v1
 
 
 def rezero(args: BlockArgs) -> mtf.Tensor:
-    return args.tensor * get_variable(args.params, [], tf.constant_initializer(0))
+    return args.tensor * get_variable(args, [], tf.constant_initializer(0))
 
 
 def dropout(args: BlockArgs):

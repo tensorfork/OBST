@@ -79,7 +79,7 @@ class ConvolutionForward(mtf.Operation):
         fan_in = [mtf.Dimension(chr(i + ord('a')), w) for i, w in enumerate(self.weight_size[1:]) if w != 1]
         mtf_weight_size = params.feature_dims
         mtf_weight_size.extend(fan_in)
-        super().__init__([x, get_variable(params, mtf_weight_size, OrthogonalInit(params, mtf_weight_size, fan_in))],
+        super().__init__([x, get_variable(args, mtf_weight_size, OrthogonalInit(params, mtf_weight_size, fan_in))],
                          name=random_name("conv_forward"))
         self._outputs = [mtf.Tensor(self, x.shape, x.dtype)]
         self.params = params

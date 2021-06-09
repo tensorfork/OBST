@@ -49,9 +49,16 @@ class OrthogonalInit(Initializer):
         return tf.cast(array_ops.reshape(q, self.sizes) / self.params.n_blocks ** 0.5, dtype)
 
 
-def get_variable(params: ModelParameter, shape: SHAPE, initializer: typing.Callable) -> mtf.Tensor:
-    params: ModelParameter = params
+def get_variable(args: BlockArgs, shape: SHAPE, initializer: typing.Callable) -> mtf.Tensor:
+    params: ModelParameter = args.params
     with tf1.variable_scope("get_variable") as scope:
+        def _var():
+            return mtf.get_variable(params.mesh, random_name("get_variable"), deduplicate(shape),
+                                    dtype=params.variable_dtype, initializer=initializer)
+
+        if "shared" not in args:
+            return _var()
+
         name = scope._name
         scope = name.split('/')
         body_idx = scope.index("body") + 1
@@ -79,8 +86,7 @@ def get_variable(params: ModelParameter, shape: SHAPE, initializer: typing.Calla
             cache["counter"] = 0
 
         if block == "0":
-            var = mtf.get_variable(params.mesh, random_name("get_variable"), deduplicate(shape),
-                                   dtype=params.variable_dtype, initializer=initializer)
+            var = _var()
             cache[cache["counter"]] = var
             cache["counter"] += 1
             return var
@@ -92,19 +98,19 @@ def get_variable(params: ModelParameter, shape: SHAPE, initializer: typing.Calla
         return var
 
 
-def orthogonal_var(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
+def orthogonal_var(args: BlockArgs, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
                    fan_in_dims: OPT_DIMS = None) -> mtf.Tensor:
     shape = deduplicate(shape)
-    return scoped("orthogonal_var", get_variable, params, shape, OrthogonalInit(params, shape, fan_in_dims))
+    return scoped("orthogonal_var", get_variable, args, shape, OrthogonalInit(args.params, shape, fan_in_dims))
 
 
-def normal_var(params: ModelParameter, shape: SHAPE, stddev: float = 0.02, mean: float = 0.) -> mtf.Tensor:
+def normal_var(args: BlockArgs, shape: SHAPE, stddev: float = 0.02, mean: float = 0.) -> mtf.Tensor:
     shape = deduplicate(shape)
-    return scoped("normal_var", get_variable, params, shape, tf.random_normal_initializer(stddev=stddev, mean=mean))
+    return scoped("normal_var", get_variable, args, shape, tf.random_normal_initializer(stddev=stddev, mean=mean))
 
 
 def linear(args: BlockArgs, old: typing.List[mtf.Dimension], new: typing.List[mtf.Dimension]) -> mtf.Tensor:
-    return einsum([args.tensor, orthogonal_var(args.params, old + new)],
+    return einsum([args.tensor, orthogonal_var(args, old + new)],
                   deduplicate((args.tensor.shape - old).dims + new))
 
 

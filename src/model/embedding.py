@@ -73,7 +73,7 @@ class RelativeEmbeddingForward(mtf.Operation):
 
 
 def _embed_var(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
-    return normal_var(args.params, shape, args.params.embedding_stddev)
+    return normal_var(args, shape, args.params.embedding_stddev)
 
 
 def _embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
