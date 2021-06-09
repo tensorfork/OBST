@@ -11,8 +11,8 @@ from .momentumnet import MomentumOperation
 from .revnet import RevGradOp
 from ..dataclass import BlockArgs, BlockConfig, ModelParameter
 from ..mtf_wrapper import (add_n, cast, constant_scalar, dropout, einsum, one_hot, ones, reciprocal, reduce_logsumexp,
-                           reduce_mean, reduce_sum, sigmoid, sign, zeros_like)
-from ..utils_mtf import concat, slice, weighted_add, anonymize, anonymize_dim, anonymize_shape
+                           reduce_mean, reduce_sum, sigmoid, sign, zeros_like, reduce_max, log, exp)
+from ..utils_mtf import concat, slice, weighted_add, anonymize, head_embed, anonymize_dim, anonymize_shape
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -166,15 +166,13 @@ def build(params: ModelParameter,
 
         if params.use_language:
             token_out = slice(out, 0, params.language_token_patch, spatial_ctx)
-            tmp_dim = mtf.Dimension("_tmp", params.vocab_size // params.n_head)
+
             for config_idx, config in enumerate(params.output_block_config):
                 token_out = block_part_fn(params, config, token_out, f'lang_out{config_idx}')
-            #token_out = linear(base_args(token_out), [params.key_dim],
-            #                   [txt_tgt.shape[-1], tmp_dim])
-            #token_out = mtf.reshape(token_out, token_out.shape - [params.head_dim, tmp_dim] + params.vocab_dim)
+
             token_out = linear(base_args(anonymize(token_out, params.head_dim)),
                                old=anonymize_shape(params.feature_dims, params.head_dim),
-                               new=[txt_tgt.shape[-1], params.vocab_dim])
+                               new=[txt_tgt.shape[-1]] + params.vocab_dims)
 
 
         if params.use_video:
@@ -200,8 +198,14 @@ def build(params: ModelParameter,
         accuracy = None
 
         if params.use_language:
-            token_loss = mtf.layers.softmax_cross_entropy_with_logits(token_out, txt_tgt, params.vocab_dim)
-            token_loss = reduce_mean(token_loss)
+            reduced_shape = token_out.shape - params.vocab_dims
+            max_logit = reduce_max(token_out, output_shape=reduced_shape)
+            msk = txt_msk * cat_msk_tgt * (1 / txt_tgt.size)
+            token_loss = einsum([log(reduce_sum(exp(token_out - max_logit), output_shape=reduced_shape)), msk],
+                                output_shape=[])
+            token_loss += einsum([token_out, *head_embed(params, txt_tgt), constant_scalar(params, -1), msk],
+                                 output_shape=[])
+            token_loss += einsum([max_logit, msk], output_shape=[])
             loss_list.append(token_loss)
             if params.calc_accuracy:
                 accuracy = reduce_sum(mtf.cast(mtf.equal(mtf.argmax(token_out, params.vocab_dim), txt_tgt),

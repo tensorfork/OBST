@@ -5,7 +5,7 @@ import numpy as np
 import tensorflow as tf
 
 from .dataclass import BlockArgs, ModelParameter
-from .mtf_wrapper import cast, mtf_range
+from .mtf_wrapper import cast, floordiv, mod, mtf_range, one_hot
 from .utils_core import default
 
 tf1 = tf.compat.v1
@@ -49,6 +49,13 @@ def new_dim(dim: typing.Union[mtf.Dimension, str], new_size: typing.Optional[int
     if new_size is None:
         return name
     return mtf.Dimension(name, new_size)
+
+
+def head_embed(params: ModelParameter, int_tokens: mtf.Tensor) -> typing.Tuple[mtf.Tensor, mtf.Tensor]:
+    return (one_hot(floordiv(int_tokens, params.vocab_size), params.head_dim,
+                    dtype=params.variable_dtype.activation_dtype),
+            one_hot(mod(int_tokens, params.vocab_size), params.vocab_dim,
+                    dtype=params.variable_dtype.activation_dtype))
 
 
 def unanonymize_dim(dim: typing.Union[mtf.Dimension, str], new_size: typing.Optional[int] = None):
