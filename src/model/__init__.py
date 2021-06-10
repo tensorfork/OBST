@@ -113,13 +113,15 @@ def build(params: ModelParameter,
         # Language embedding and initial feed forward.
         if params.use_language:
             base_args = BlockArgs(params, txt_tgt, [''])
-            txt_embd = embed(base_args(params.token_embedding), [params.vocab_dim] + params.intermediate)
+            intermediate = params.intermediate[0]
+            intermediate = mtf.Dimension(intermediate.name, int(intermediate.size * params.input_embed_factorization))
+            txt_embd = embed(base_args(params.token_embedding), [params.vocab_dim, intermediate])
             txt = einsum([txt_embd, one_hot(txt_src, params.vocab_dim, dtype=params.variable_dtype.activation_dtype)],
                          reduced_dims=[params.vocab_dim])
 
             txt = dropout(txt, params.train, rate=params.input_dropout)
 
-            txt = linear_to_features(base_args(txt), [txt_tgt.shape[-1]] + params.intermediate)
+            txt = linear_to_features(base_args(txt), [txt_tgt.shape[-1], intermediate])
 
             for config_idx, config in enumerate(params.input_block_config):
                 txt = block_part_fn(params, config, txt, f'lang_inp{config_idx}')
