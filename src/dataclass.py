@@ -23,7 +23,9 @@ class ModelParameter(typing.Dict[str, typing.Any]):
     def __init__(self, config: typing.Dict[str, typing.Any]):
         super().__init__()
 
-        self.position_embedding = "absolute"  # (-split) or "relative"(-learned) or "axial"(-split)
+        self.position_embedding = "absolute"  # relative(additional args: -learned -shared) or
+                                              # absolute(additional args: -split -shared) or
+                                              #  axial(additional args: -shared)
         self.token_embedding = "absolute"
         self.empty_frame_embedding = "absolute"  # embedding options above or None
         self.shared_position_embedding = False

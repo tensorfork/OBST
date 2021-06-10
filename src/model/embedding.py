@@ -98,9 +98,6 @@ def _embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
             out = _embed_var(args, shape)
             variables = [out]
     elif 'axial' in args:
-        if 'split' in args:
-            feature_dims = []
-            position_dims = shape.dims
         splits = 2
         for a in args:
             if a.isdigit():
@@ -132,7 +129,8 @@ def _embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
                 variables = [_embed_var(args, feature_dims)]
             out *= variables[0]
     else:
-        raise ValueError("relative(-learned) or absolute(-split) or axial(-split)")
+        raise ValueError("relative(additional args: -learned -shared) or absolute(additional args: -split -shared)"
+                         " or axial(additional args: -shared)")
 
     if 'shared' in args:
         args.params.cached_embeddings[shape.to_string] = variables
