@@ -6,9 +6,11 @@ import tensorflow as tf
 from .backend import get_intermediate, linear, linear_from_features, linear_to_features
 from .basic import feed_forward_in
 from .embedding import embed
+from .normalization import  norm
 from .frontend import block_part_fn
 from .momentumnet import MomentumOperation
 from .revnet import RevGradOp
+from .activation import activate
 from ..dataclass import BlockArgs, BlockConfig, ModelParameter
 from ..mtf_wrapper import (add_n, cast, constant_scalar, dropout, einsum, one_hot, ones, reciprocal, reduce_logsumexp,
                            reduce_mean, reduce_sum, sigmoid, sign, zeros_like)
@@ -114,7 +116,7 @@ def build(params: ModelParameter,
         if params.use_language:
             base_args = BlockArgs(params, txt_tgt, [''])
             intermediate = params.intermediate[0]
-            intermediate = mtf.Dimension(intermediate.name, int(intermediate.size * params.input_embed_factorization))
+            intermediate = mtf.Dimension(intermediate.name, int(intermediate.size * params.vocab_weight_factorization))
             txt_embd = embed(base_args(params.token_embedding), [params.vocab_dim, intermediate])
             txt = einsum([txt_embd, one_hot(txt_src, params.vocab_dim, dtype=params.variable_dtype.activation_dtype)],
                          reduced_dims=[params.vocab_dim])
@@ -168,16 +170,12 @@ def build(params: ModelParameter,
 
         if params.use_language:
             token_out = slice(out, 0, params.language_token_patch, spatial_ctx)
-            tmp_dim = mtf.Dimension("_tmp", params.vocab_size // params.n_head)
             for config_idx, config in enumerate(params.output_block_config):
                 token_out = block_part_fn(params, config, token_out, f'lang_out{config_idx}')
-            #token_out = linear(base_args(token_out), [params.key_dim],
-            #                   [txt_tgt.shape[-1], tmp_dim])
-            #token_out = mtf.reshape(token_out, token_out.shape - [params.head_dim, tmp_dim] + params.vocab_dim)
-            token_out = linear(base_args(anonymize(token_out, params.head_dim)),
-                               old=anonymize_shape(params.feature_dims, params.head_dim),
-                               new=[txt_tgt.shape[-1], params.vocab_dim])
-
+            token_out = linear_from_features(base_args(token_out), [intermediate])
+            token_out = norm(base_args(token_out)['scale-shift'])
+            token_out = activate(base_args(token_out)['lecun_tanh'])
+            token_out = linear(base_args(token_out), old=[intermediate], new=[txt_tgt.shape[-1], params.vocab_dim])
 
         if params.use_video:
             frame_out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)

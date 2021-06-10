@@ -99,7 +99,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
                                                  }
         self.language_token_per_frame = 0
         self.weight_decay = 0.001
-        self.input_embed_factorization = 1
+        self.vocab_weight_factorization = 1
         self.train_steps = 150_000
         self.warmup_steps = 3000
         self.rezero_lr_multiplier = 0.1
