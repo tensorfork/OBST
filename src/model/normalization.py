@@ -21,7 +21,7 @@ def norm(args: BlockArgs) -> mtf.Tensor:
     if 'mean' in args:
         block_input -= reduce_mean(block_input, output_shape=normalized_shape)
 
-    scale = [mtf.pow(mtf.reduce_mean(mtf.square(block_input), output_shape=normalized_shape) + 1e-6, -0.5), block_input]
+    scale = [mtf.pow(mtf.reduce_mean(mtf.square(block_input), output_shape=normalized_shape) + 1e-6, -0.5)]
     if 'scale' in args:
         scale.append(normal_var(args.params, args.params.feature_dims, mean=1))
     if scale:
