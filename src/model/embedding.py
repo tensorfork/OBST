@@ -121,7 +121,7 @@ def _embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
                 _new_part(final)
                 for i in range(1, splits):
                     _new_part(base)
-        out = mtf.reshape(einsum(variables, reduced_dims=[]), shape)
+        out = mtf.reshape(einsum(variables, output_shape=tmp_dims + feature_dims), shape)
 
     elif 'relative' in args:
         out = RelativeEmbeddingForward(args.params, shape).outputs[0]
