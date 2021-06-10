@@ -99,7 +99,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
                                                  }
         self.language_token_per_frame = 0
         self.weight_decay = 0.001
-        self.vocab_weight_factorization = 1
+        self.vocab_weight_factorization = 0.125
         self.train_steps = 150_000
         self.warmup_steps = 3000
         self.rezero_lr_multiplier = 0.1
@@ -117,7 +117,6 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.num_of_sample = 10
         self.gradient_clip = -1
         self.group_linear_factor = 2
-        self.output_linear_config = ['lecun_tanh', 'norm', 'glu_add']
         self.embedding_stddev = 0.04
         self.color_quantization_value = 256
         self.use_discrete_video_loss = False
@@ -133,16 +132,16 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.intermediate_feed_forward_multiplier = None
         self.own_color = "\x1b[32;1m"
         self.other_color = "\x1b[0m"
-        self.block_config = [{'layer': ["norm-group-instance-mean-std-shift-scale",
-                                        "feed_forward-relu-group"]
+        self.block_config = [{'layer': ["norm-group-shift-scale",
+                                        "feed_forward-mish-group-glu_add-norm"]
                               },
 
-                             {'layer': ["norm-group-instance-mean-std-shift-scale",
-                                        "attention-relu-embedded-kernel_softmax"]
+                             {'layer': ["norm-group-std-shift-scale",
+                                        "attention-lecun_tanh-embedded-relative-learned-shared"]
                               }]
 
         self.input_block_config = []
-        self.output_block_config = []
+        self.output_block_config = [{'layer': ["norm-shift-scale"]}]
 
         self.mesh: typing.Optional[mtf.Mesh] = None
         self.d_assignment: typing.Optional[DeviceAssignment] = None
