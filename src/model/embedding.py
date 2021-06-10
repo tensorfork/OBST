@@ -81,10 +81,11 @@ def _embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
         shape = mtf.Shape(shape)
 
     create = 'shared' not in args or shape.to_string not in args.params.cached_embeddings
+
+    variables = []
     if not create:
         variables = args.params.cached_embeddings[shape.to_string]
 
-    variables = []
     position_dims: mtf.Shape = (shape - args.params.feature_dims) - args.params.intermediate
     feature_dims = shape_crossection(shape, args.params.feature_dims + args.params.intermediate).dims
 
@@ -97,30 +98,31 @@ def _embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
             out = _embed_var(args, shape)
             variables = [out]
     elif 'axial' in args:
-        if create:
-            if 'split' in args:
-                feature_dims = []
-                position_dims = shape.dims
-            splits = 2
-            for a in args:
-                if a.isdigit():
-                    splits = int(a)
-                    break
-            tmp_dims = []
+        if 'split' in args:
+            feature_dims = []
+            position_dims = shape.dims
+        splits = 2
+        for a in args:
+            if a.isdigit():
+                splits = int(a)
+                break
+        tmp_dims = []
 
-            def _new_part(size: int):
-                tmp = mtf.Dimension(f'_{len(tmp_dims)}', size)
-                tmp_dims.append(tmp)
+        def _new_part(size: int):
+            tmp = mtf.Dimension(f'_{len(tmp_dims)}', size)
+            tmp_dims.append(tmp)
+            if create:
                 variables.append(_embed_var(args, [tmp] + feature_dims))
 
-            for dim in position_dims:
-                base = int(dim.size ** (1 / splits))
-                while dim.size % base != 0:
-                    base -= 1
-                final = dim.size // base ** (splits - 1)
-                _new_part(final)
-                for i in range(1, splits):
-                    _new_part(base)
+        for dim in position_dims:
+            base = int(dim.size ** (1 / splits))
+            while dim.size % base != 0:
+                base -= 1
+            final = dim.size // base ** (splits - 1)
+            _new_part(final)
+            for i in range(1, splits):
+                _new_part(base)
+
         out = mtf.reshape(einsum(variables, output_shape=tmp_dims + feature_dims), shape)
 
     elif 'relative' in args:
