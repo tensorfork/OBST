@@ -85,14 +85,8 @@ def _embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
     feature_dims = shape_crossection(shape, args.params.feature_dims + args.params.intermediate).dims
 
     if 'absolute' in args:
-        if 'split' in args:
-            out = _embed_var(args, position_dims) * _embed_var(args, feature_dims)
-        else:
-            out = _embed_var(args, shape)
+        out = _embed_var(args, shape)
     elif 'axial' in args:
-        if 'split' in args:
-            feature_dims = []
-            position_dims = shape.dims
         splits = 2
         for a in args:
             if a.isdigit():
