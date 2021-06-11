@@ -175,7 +175,8 @@ def build(params: ModelParameter,
             token_out = linear_from_features(base_args(token_out), [intermediate])
             token_out = norm(base_args(token_out)(['scale', 'shift']))
             token_out = activate(base_args(token_out)(['lecun_tanh']))
-            token_out = linear(base_args(token_out), old=[intermediate], new=[txt_tgt.shape[-1], params.vocab_dim])
+            txt_embd = embed(base_args(params.token_embedding), [intermediate, txt_tgt.shape[-1], params.vocab_dim])
+            token_out = einsum([token_out, txt_embd], reduced_dims=[intermediate])
 
         if params.use_video:
             frame_out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)

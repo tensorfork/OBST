@@ -23,9 +23,10 @@ class ModelParameter(typing.Dict[str, typing.Any]):
     def __init__(self, config: typing.Dict[str, typing.Any]):
         super().__init__()
 
-        self.position_embedding = "absolute"  # (-split) or "relative"(-learned) or "axial"(-split)
+        self.position_embedding = "absolute"  # "absolute" or "relative"(-learned) or "axial"
         self.token_embedding = "absolute"
-        self.empty_frame_embedding = "absolute"  # embedding options above or None
+        self.empty_frame_embedding = "absolute"
+        self.output_embedding = "absolute"  # embedding options above
         self.use_video = True
         self.save_graph = False
         self.use_language = True
@@ -163,6 +164,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         if isinstance(self.position_embedding, str):
             self.position_embedding = self.position_embedding.split('-')
             self.token_embedding = self.token_embedding.split('-')
+            self.output_embedding = self.output_embedding.split('-')
             self.empty_frame_embedding = self.empty_frame_embedding.split('-')
 
         self.multi_loss_strategy = self.multi_loss_strategy.lower()
