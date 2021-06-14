@@ -116,7 +116,7 @@ def spatial_mixing(args: BlockArgs) -> mtf.Tensor:
     old = base + [tmp]
     new = base + [dim]
 
-    inputs = [mid, orthogonal_var(args.params, old + new)]
+    inputs = [mid, orthogonal_var(args, old + new)]
     if is_masked(args):
         inputs.append(compare_range(args.params, dim, tmp, greater_equal))
 
@@ -127,7 +127,7 @@ def spatial_mixing(args: BlockArgs) -> mtf.Tensor:
         elif 'sigmoid' in args:
             mid = mtf.sigmoid(mid)
         elif 'bias' in args:
-            mid += normal_var(args.params, new, mean=1)
+            mid += normal_var(args, new, mean=1)
         mid *= args.tensor
     if 'feed_forward' not in args:
         return mid
@@ -136,5 +136,5 @@ def spatial_mixing(args: BlockArgs) -> mtf.Tensor:
 
 def spatial_feed_forward(args: BlockArgs) -> mtf.Tensor:
     base = args(feed_forward_in(args))
-    var = orthogonal_var(args.params, get_intermediate(base) + [anonymize_dim(get_attention_dim(args).dim)])
+    var = orthogonal_var(args, get_intermediate(base) + [anonymize_dim(get_attention_dim(args).dim)])
     return _softmax_attention(args, feed_forward_out(base), var, base.tensor)

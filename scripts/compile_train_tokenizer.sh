@@ -21,7 +21,7 @@ echo "$gcc_options"
 function compile {
   file=${1}
   echo "Cythonizing.."
-  cython "$file.pyx"  -3 -Wextra -D
+  python3 -m cython "$file.pyx"  -3 -Wextra -D
   flags="$file.c $gcc_options -o $file.so"
   echo "Executing gcc.."
   time ((gcc-11 $flags) || (gcc-10 $flags) || (gcc-9 $flags) || (gcc-8 $flags) || (gcc $flags))

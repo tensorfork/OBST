@@ -23,9 +23,10 @@ class ModelParameter(typing.Dict[str, typing.Any]):
     def __init__(self, config: typing.Dict[str, typing.Any]):
         super().__init__()
 
-        self.position_embedding = "absolute"  # (-split) or "relative"(-learned) or "axial"(-split)
+        self.position_embedding = "absolute"  # "absolute" or "relative"(-learned) or "axial"
         self.token_embedding = "absolute"
-        self.empty_frame_embedding = "absolute"  # embedding options above or None
+        self.empty_frame_embedding = "absolute"
+        self.output_embedding = "absolute"  # embedding options above
         self.use_video = True
         self.save_graph = False
         self.use_language = True
@@ -48,6 +49,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.three_axes = True
         self.dataset_configs = []
         self.data_seed = 456772
+        self.parallel_batch = None
         self.parallel_interleave = None
         self.use_random_dataloader = False
         self.train = True
@@ -98,6 +100,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
                                                  }
         self.language_token_per_frame = 0
         self.weight_decay = 0.001
+        self.vocab_weight_factorization = 0.125
         self.train_steps = 150_000
         self.warmup_steps = 3000
         self.rezero_lr_multiplier = 0.1
@@ -115,7 +118,6 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.num_of_sample = 10
         self.gradient_clip = -1
         self.group_linear_factor = 2
-        self.output_linear_config = ['lecun_tanh', 'norm', 'glu_add']
         self.embedding_stddev = 0.04
         self.color_quantization_value = 256
         self.use_discrete_video_loss = False
@@ -131,16 +133,16 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.intermediate_feed_forward_multiplier = None
         self.own_color = "\x1b[32;1m"
         self.other_color = "\x1b[0m"
-        self.block_config = [{'layer': ["norm-group-instance-mean-std-shift-scale",
-                                        "feed_forward-relu-group"]
+        self.block_config = [{'layer': ["norm-group-shift-scale",
+                                        "feed_forward-mish-group-glu_add-norm"]
                               },
 
-                             {'layer': ["norm-group-instance-mean-std-shift-scale",
-                                        "attention-relu-embedded-kernel_softmax"]
+                             {'layer': ["norm-group-std-shift-scale",
+                                        "attention-lecun_tanh-embedded-relative-learned-shared"]
                               }]
 
         self.input_block_config = []
-        self.output_block_config = []
+        self.output_block_config = [{'layer': ["norm-shift-scale"]}]
 
         self.mesh: typing.Optional[mtf.Mesh] = None
         self.d_assignment: typing.Optional[DeviceAssignment] = None
@@ -162,6 +164,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         if isinstance(self.position_embedding, str):
             self.position_embedding = self.position_embedding.split('-')
             self.token_embedding = self.token_embedding.split('-')
+            self.output_embedding = self.output_embedding.split('-')
             self.empty_frame_embedding = self.empty_frame_embedding.split('-')
 
         self.multi_loss_strategy = self.multi_loss_strategy.lower()
@@ -239,8 +242,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
                                            int(self.n_head * self.key_dim.size *
                                                self.intermediate_feed_forward_multiplier))]
 
-        self.vocab_dim = mtf.Dimension("vocab", self.vocab_size // self.n_head)
-        self.vocab_dims = [self.head_dim] * self.split_vocab + [self.vocab_dim]
+        self.vocab_dim = mtf.Dimension(self.head_dim.name, self.vocab_size)
         self.batch_dim = mtf.Dimension("batch", self.train_batch_size)
         self.frame_input_sequence = mtf.Dimension("_sequence", self.time_patch_size + 1)
 
@@ -290,7 +292,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.input_pipeline_shape = align_tensor_op(self.input_pipeline_shape)
 
         self.attention_idx = 0
-        self.cached_embeddings = {}
+        self.cached_parameters = {}
 
     def __getitem__(self, key: str) -> typing.Any:
         print(f"Getting {key} via deprecated interface")

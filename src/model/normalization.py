@@ -18,10 +18,10 @@ def _norm(args: BlockArgs) -> mtf.Tensor:
     block_input -= reduce_mean(block_input, output_shape=normalized_shape)
     scale = [rsqrt(mtf.reduce_mean(mtf.square(block_input), output_shape=normalized_shape) + 1e-6), block_input]
     if 'scale' in args:
-        scale.append(normal_var(args.params, feature_shape, mean=1))
+        scale.append(normal_var(args, feature_shape, mean=1))
     block_input = einsum(scale, output_shape=block_input.shape)
     if 'shift' in args:
-        block_input += normal_var(args.params, feature_shape, mean=0)
+        block_input += normal_var(args, feature_shape, mean=0)
     return block_input
 
 def norm(args):

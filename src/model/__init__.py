@@ -6,13 +6,15 @@ import tensorflow as tf
 from .backend import get_intermediate, linear, linear_from_features, linear_to_features
 from .basic import feed_forward_in
 from .embedding import embed
+from .normalization import  norm
 from .frontend import block_part_fn
 from .momentumnet import MomentumOperation
 from .revnet import RevGradOp
+from .activation import activate
 from ..dataclass import BlockArgs, BlockConfig, ModelParameter
 from ..mtf_wrapper import (add_n, cast, constant_scalar, dropout, einsum, one_hot, ones, reciprocal, reduce_logsumexp,
-                           reduce_mean, reduce_sum, sigmoid, sign, zeros_like, reduce_max, log, exp)
-from ..utils_mtf import concat, slice, weighted_add, anonymize, head_embed, anonymize_dim, anonymize_shape
+                           reduce_mean, reduce_sum, sigmoid, sign, zeros_like)
+from ..utils_mtf import concat, slice, weighted_add, anonymize, anonymize_dim, anonymize_shape
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -113,13 +115,15 @@ def build(params: ModelParameter,
         # Language embedding and initial feed forward.
         if params.use_language:
             base_args = BlockArgs(params, txt_tgt, [''])
-            txt_embd = embed(base_args(params.token_embedding), [params.vocab_dim] + params.intermediate)
+            intermediate = params.intermediate[0]
+            intermediate = mtf.Dimension(intermediate.name, int(intermediate.size * params.vocab_weight_factorization))
+            txt_embd = embed(base_args(params.token_embedding), [params.vocab_dim, intermediate])
             txt = einsum([txt_embd, one_hot(txt_src, params.vocab_dim, dtype=params.variable_dtype.activation_dtype)],
                          reduced_dims=[params.vocab_dim])
 
             txt = dropout(txt, params.train, rate=params.input_dropout)
 
-            txt = linear_to_features(base_args(txt), [txt_tgt.shape[-1]] + params.intermediate)
+            txt = linear_to_features(base_args(txt), [txt_tgt.shape[-1], intermediate])
 
             for config_idx, config in enumerate(params.input_block_config):
                 txt = block_part_fn(params, config, txt, f'lang_inp{config_idx}')
@@ -166,13 +170,11 @@ def build(params: ModelParameter,
 
         if params.use_language:
             token_out = slice(out, 0, params.language_token_patch, spatial_ctx)
-
             for config_idx, config in enumerate(params.output_block_config):
                 token_out = block_part_fn(params, config, token_out, f'lang_out{config_idx}')
-
             token_out = linear(base_args(anonymize(token_out, params.head_dim)),
                                old=anonymize_shape(params.feature_dims, params.head_dim),
-                               new=[txt_tgt.shape[-1]] + params.vocab_dims)
+                               new=[txt_tgt.shape[-1], params.vocab_dim])
 
         if params.use_video:
             frame_out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)
@@ -197,14 +199,8 @@ def build(params: ModelParameter,
         accuracy = None
 
         if params.use_language:
-            reduced_shape = token_out.shape - params.vocab_dims
-            max_logit = reduce_max(token_out, output_shape=reduced_shape)
-            msk = txt_msk * cat_msk_tgt * (1 / txt_tgt.size)
-            token_loss = einsum([log(reduce_sum(exp(token_out - max_logit), output_shape=reduced_shape)), msk],
-                                output_shape=[])
-            token_loss += einsum([token_out, *head_embed(params, txt_tgt), constant_scalar(params, -1), msk],
-                                 output_shape=[])
-            token_loss += einsum([max_logit, msk], output_shape=[])
+            token_loss = mtf.layers.softmax_cross_entropy_with_logits(token_out, txt_tgt, params.vocab_dim)
+            token_loss = reduce_mean(token_loss)
             loss_list.append(token_loss)
             if params.calc_accuracy:
                 accuracy = reduce_sum(mtf.cast(mtf.equal(mtf.argmax(token_out, params.vocab_dim), txt_tgt),
