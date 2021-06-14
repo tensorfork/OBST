@@ -44,12 +44,12 @@ def activate_norm(args: BlockArgs, feed_forward_fn: typing.Callable) -> mtf.Tens
 
 def expert_from_feat(args: BlockArgs):
     params = args.params
-    return linear(args, [params.expert_dim] + params.feature_dims, [params.experts] + get_intermediate(args))
+    return linear(args, [params.expert_dim] + params.feature_dims, [params.expert_dim] + get_intermediate(args))
 
 
 def expert_to_feat(args: BlockArgs):
     params = args.params
-    return linear(args, [params.experts] + get_intermediate(args), [params.expert_dim] + params.feature_dims)
+    return linear(args, [params.expert_dim] + get_intermediate(args), [params.expert_dim] + params.feature_dims)
 
 
 def feed_forward_in(args: BlockArgs) -> mtf.Tensor:
