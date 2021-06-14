@@ -215,9 +215,9 @@ def replace_dim(inp: typing.Union[DIM_LIST, mtf.Shape, mtf.Tensor],
     """
     shape = inp
     if isinstance(shape, mtf.Tensor):
-        shape = inp.shape
+        shape = shape.shape
     if isinstance(shape, mtf.Shape):
-        shape = inp.dims
+        shape = shape.dims
     if not check_for_dim(shape, replaced):
         return shape
     if not isinstance(dim, list):
