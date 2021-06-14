@@ -120,6 +120,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.group_linear_factor = 2
         self.embedding_stddev = 0.04
         self.color_quantization_value = 256
+        self.experts = 64
         self.use_discrete_video_loss = False
         self.use_bit_fold_input_pipeline = False
         self.bit_fold_value = 4
@@ -187,6 +188,12 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             self.storage_dtype = getattr(tf, self.storage_dtype)
         if isinstance(self.slice_dtype, str):
             self.slice_dtype = getattr(tf, self.slice_dtype)
+        if self.n_ctx % self.experts:
+            raise ValueError("Context has to be divisible by number of experts. Set \"experts\" to 1 if you're not "
+                             "using MoE")
+        if self.use_video and (self.frame_width * self.frame_height // self.patch_size) % self.experts:
+            raise ValueError("Frame size has to be divisible by number of experts. Set \"experts\" to 1 if you're not "
+                             "using MoE")
         if isinstance(self.calculation_dtype, str):
             self.calculation_dtype = getattr(tf, self.calculation_dtype)
         if self.intermediate_feed_forward_multiplier is None:
@@ -241,6 +248,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.intermediate = [mtf.Dimension("intermediate",
                                            int(self.n_head * self.key_dim.size *
                                                self.intermediate_feed_forward_multiplier))]
+        self.expert_dim = mtf.Dimension("experts", self.experts)
 
         self.vocab_dim = mtf.Dimension(self.head_dim.name, self.vocab_size)
         self.batch_dim = mtf.Dimension("batch", self.train_batch_size)

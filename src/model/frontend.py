@@ -4,7 +4,7 @@ import mesh_tensorflow as mtf
 import tensorflow as tf
 
 from .activation import activate
-from .basic import dropout, feed_forward, rezero
+from .basic import dropout, feed_forward, rezero, mixture_of_experts
 from .convolution import convolution
 from .normalization import norm
 from .spatial import attention, spatial_feed_forward, spatial_mixing
@@ -49,14 +49,15 @@ def split_path(args: BlockArgs) -> mtf.Tensor:
     return out
 
 
-LAYER_FUNCTIONS = {'feed_forward':         feed_forward,
-                   'attention':            attention,
-                   'norm':                 norm,
-                   'rezero':               rezero,
-                   'activation':           activate,
-                   'convolution':          convolution,
-                   'dropout':              dropout,
-                   'spatial_mixing':       spatial_mixing,
+LAYER_FUNCTIONS = {'feed_forward': feed_forward,
+                   'attention': attention,
+                   'norm': norm,
+                   'rezero': rezero,
+                   'activation': activate,
+                   'convolution': convolution,
+                   'dropout': dropout,
+                   'spatial_mixing': spatial_mixing,
                    'spatial_feed_forward': spatial_feed_forward,
-                   'split_path':           split_path
+                   'split_path': split_path,
+                   'mixture_of_experts': mixture_of_experts
                    }

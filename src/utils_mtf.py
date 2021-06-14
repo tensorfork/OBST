@@ -192,7 +192,7 @@ def anonymize(inp: mtf.Tensor,
 
 
 def anonymize_shape(inp: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
-                    dim: typing.Union[mtf.Dimension, str]) -> typing.Union[mtf.Shape, typing.List[mtf.Dimension]]:
+                    dim: typing.Union[mtf.Dimension]) -> typing.Union[mtf.Shape, typing.List[mtf.Dimension]]:
     """
     Anonymize one dimension of a given Mesh TensorFlow shape. See anonymize for details on what anonymization does.
     :param inp: shape or list of dimensions
@@ -202,10 +202,10 @@ def anonymize_shape(inp: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
     return replace_dim(inp, anonymize_dim(dim), unanonymize_dim(dim))
 
 
-def replace_dim(inp: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
-                dim: typing.Union[mtf.Dimension, str],
-                replaced: typing.Optional[typing.Union[mtf.Dimension, str]] = None
-                ) -> typing.Union[mtf.Shape, typing.List[mtf.Dimension]]:
+def replace_dim(inp: typing.Union[DIM_LIST, mtf.Shape, mtf.Tensor],
+                dim: typing.Union[mtf.Dimension, DIM_LIST],
+                replaced: mtf.Dimension
+                ) -> typing.Union[mtf.Shape, DIM_LIST, mtf.Tensor]:
     """
     Replace a dimension in a shape
     :param inp: shape or list of dimensions
@@ -213,15 +213,23 @@ def replace_dim(inp: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
     :param replaced: dimension that will be replaced
     :return: new shape/list with changed dimension
     """
-    if replaced is None:
-        replaced = dim
-    if not check_for_dim(inp, replaced):
-        return inp
-    out = [dim if dim_name(replaced) == cdim.name else cdim
-           for cdim in (inp.dims if isinstance(inp, mtf.Shape) else inp)]
+    shape = inp
+    if isinstance(shape, mtf.Tensor):
+        shape = inp.shape
+    if isinstance(shape, mtf.Shape):
+        shape = inp.dims
+    if not check_for_dim(shape, replaced):
+        return shape
+    if not isinstance(dim, list):
+        dim = [dim]
+    out = []
+    for cdim in shape:
+        out.extend(dim if dim_name(replaced) == cdim.name else [cdim])
     if isinstance(inp, list):
         return out
-    return mtf.Shape(out)
+    if isinstance(inp, mtf.Shape):
+        return mtf.Shape(out)
+    return mtf.reshape(inp, shape)
 
 
 def weighted_add(left: mtf.Tensor, right: mtf.Tensor, alpha: mtf.Tensor) -> mtf.Tensor:
