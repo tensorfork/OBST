@@ -176,7 +176,7 @@ def build(params: ModelParameter,
                                old=anonymize_shape(params.feature_dims, params.head_dim),
                                new=[txt_tgt.shape[-1], params.vocab_dim])
 
-            if params.use_video:
+        if params.use_video:
             frame_out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)
 
             for config_idx, config in enumerate(params.output_block_config):
