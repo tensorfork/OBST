@@ -172,13 +172,11 @@ def build(params: ModelParameter,
             token_out = slice(out, 0, params.language_token_patch, spatial_ctx)
             for config_idx, config in enumerate(params.output_block_config):
                 token_out = block_part_fn(params, config, token_out, f'lang_out{config_idx}')
-            token_out = linear_from_features(base_args(token_out), [intermediate])
-            token_out = norm(base_args(token_out)(['scale', 'shift']))
-            token_out = activate(base_args(token_out)(['lecun_tanh']))
-            txt_embd = embed(base_args(params.token_embedding), [intermediate, txt_tgt.shape[-1], params.vocab_dim])
-            token_out = einsum([token_out, txt_embd], reduced_dims=[intermediate])
+            token_out = linear(base_args(anonymize(token_out, params.head_dim)),
+                               old=anonymize_shape(params.feature_dims, params.head_dim),
+                               new=[txt_tgt.shape[-1], params.vocab_dim])
 
-        if params.use_video:
+            if params.use_video:
             frame_out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)
 
             for config_idx, config in enumerate(params.output_block_config):
