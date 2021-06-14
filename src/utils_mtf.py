@@ -229,7 +229,7 @@ def replace_dim(inp: typing.Union[DIM_LIST, mtf.Shape, mtf.Tensor],
         return out
     if isinstance(inp, mtf.Shape):
         return mtf.Shape(out)
-    return mtf.reshape(inp, shape)
+    return mtf.reshape(inp, out)
 
 
 def weighted_add(left: mtf.Tensor, right: mtf.Tensor, alpha: mtf.Tensor) -> mtf.Tensor:
