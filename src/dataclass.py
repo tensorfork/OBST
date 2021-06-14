@@ -134,6 +134,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.intermediate_feed_forward_multiplier = None
         self.own_color = "\x1b[32;1m"
         self.other_color = "\x1b[0m"
+        self.scale_by_depth = True
         self.block_config = [{'layer': ["norm-group-shift-scale",
                                         "feed_forward-mish-group-glu_add-norm"]
                               },

@@ -46,7 +46,10 @@ class OrthogonalInit(Initializer):
         q *= math_ops.sign(array_ops.diag_part(r))
         if self.transpose:
             q = array_ops.matrix_transpose(q)
-        return tf.cast(array_ops.reshape(q, self.sizes) / self.params.n_blocks ** 0.5, dtype)
+        out = array_ops.reshape(q, self.sizes)
+        if self.params.scale_by_depth:
+            out /= self.params.n_blocks ** 0.5
+        return tf.cast(out, dtype)
 
 
 def get_variable(args: BlockArgs, shape: SHAPE, initializer: typing.Callable) -> mtf.Tensor:
