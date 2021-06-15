@@ -6,6 +6,7 @@ import json
 import time
 import typing
 
+import jsonpickle
 import mesh_tensorflow as mtf
 import numpy as np
 import tensorflow as tf
@@ -197,11 +198,11 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                        output_shape=token_out.shape)
 
                             token_mask = weighted_add(
-                                    mtf.reshape(to_fp32(token_pad), new_shape=params.token_dim_shape),
-                                    to_fp32(token_mask), one_hot_sequence)
+                                mtf.reshape(to_fp32(token_pad), new_shape=params.token_dim_shape),
+                                to_fp32(token_mask), one_hot_sequence)
 
                             frame_pad = to_fp32(
-                                    mtf.greater(mtf.reduce_sum(padding_token, reduced_dim=tkn_per_frame), 0))
+                                mtf.greater(mtf.reduce_sum(padding_token, reduced_dim=tkn_per_frame), 0))
                             token_x_input = weighted_add(frame_pad, to_fp32(token_x_input), one_hot_sequence)
 
                             token_x_input = mtf.cast(token_x_input, dtype=tf.int32)
@@ -264,7 +265,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
                     if end_iterations is None:
                         end_iterations = mtf.constant(params.mesh, value=params.n_ctx,
-                                                   dtype=tf.int32)
+                                                      dtype=tf.int32)
 
                     while_loop_inputs = [initial_pos, token_x_input, token_y_input, sampling_temperature]
 
@@ -329,16 +330,18 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 color_print(params, dim_name)
             print('')
 
-            model_size = {'model_variables':           int(param_count - embed_param_count),
-                          'embedding_variables':       int(embed_param_count),
-                          'body_variables':            int(body_param_count),
-                          'untrainable_variables':     int(var_count - param_count),
+            model_size = {'model_variables': int(param_count - embed_param_count),
+                          'embedding_variables': int(embed_param_count),
+                          'body_variables': int(body_param_count),
+                          'untrainable_variables': int(var_count - param_count),
                           'total_trainable_variables': int(param_count),
-                          'total_variables':           int(var_count)
+                          'total_variables': int(var_count)
                           }
 
             if params.train:
-                json.dump(model_size, tf.io.gfile.GFile(f"{params.model_path}/model_size.info", 'w'), indent=2)
+                size_dump = jsonpickle.dumps(model_size, indent=4)
+                with tf.io.gfile.GFile(f"{params.model_path}/model_size.info", 'w') as f:
+                    f.write(size_dump)
 
             color_print(params, "Lowering graph to TensorFlow...")
             start_time = time.time()
@@ -543,14 +546,17 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             if tf.io.gfile.exists(log_path):
                 _run_log = json.load(tf.io.gfile.GFile(log_path, 'r'))
 
-            curran_stats = {'steps':             params.current_step, 'ctx': params.n_ctx,
-                            'slice_count':       len(hosts_to_hold_ds),
-                            'interleave_size':   params.interleaved_datasets,
-                            'batch_size':        params.train_batch_size,
+            curran_stats = {'steps': params.current_step, 'ctx': params.n_ctx,
+                            'slice_count': len(hosts_to_hold_ds),
+                            'interleave_size': params.interleaved_datasets,
+                            'batch_size': params.train_batch_size,
                             'grad_accumulation': params.grad_accumulation,
-                            'token_patch_size':  params.token_patch_size
+                            'token_patch_size': params.token_patch_size
                             }
-            json.dump((_run_log + [curran_stats]), tf.io.gfile.GFile(log_path, 'w'), indent=2)
+
+            size_dump = jsonpickle.dumps(_run_log + [curran_stats], indent=4)
+            with tf.io.gfile.GFile(f"{params.model_path}/model_size.info", 'w') as f:
+                f.write(size_dump)
 
             if len(_run_log) > 0 and not params.use_random_dataloader:
                 _run_log = [r for r in _run_log if r['steps'] != params.current_step]
@@ -655,13 +661,13 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
             laidout_tensors0 = all_laidout_tensors[0]
             infeed_queue = tpu_feed.InfeedQueue(
-                    number_of_tuple_elements=len(laidout_tensors0),
-                    tuple_types=[x.dtype for x in laidout_tensors0],
-                    tuple_shapes=[x.shape for x in laidout_tensors0])
+                number_of_tuple_elements=len(laidout_tensors0),
+                tuple_types=[x.dtype for x in laidout_tensors0],
+                tuple_shapes=[x.shape for x in laidout_tensors0])
             enqueue_ops = infeed_queue.generate_enqueue_ops(
-                    all_laidout_tensors,
-                    tpu_ordinal_function=_tpu_ordinal_function_impl,
-                    placement_function=_placement_function_impl)
+                all_laidout_tensors,
+                tpu_ordinal_function=_tpu_ordinal_function_impl,
+                placement_function=_placement_function_impl)
 
         input_initializers = [ds.initializer for ds in ds_iterator]
     else:
@@ -681,13 +687,12 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
         laidout_tensors0 = all_laidout_tensors[0]
         infeed_queue = tpu_feed.InfeedQueue(
-                number_of_tuple_elements=len(laidout_tensors0),
-                tuple_types=[x.dtype for x in laidout_tensors0],
-                tuple_shapes=[x.shape for x in laidout_tensors0])
+            number_of_tuple_elements=len(laidout_tensors0),
+            tuple_types=[x.dtype for x in laidout_tensors0],
+            tuple_shapes=[x.shape for x in laidout_tensors0])
         enqueue_ops = infeed_queue.generate_enqueue_ops(all_laidout_tensors,
                                                         tpu_ordinal_function=_tpu_ordinal_function_impl,
                                                         placement_function=_placement_function_impl)
-
 
     color_print(params, "Building split TensorFlow computation...")
     start_time = time.time()
@@ -780,10 +785,10 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     feed_dict = None
                 else:
                     _prompt, _iter_pos, _samp_temp, _end_iter = query_input_fns()
-                    feed_dict = {prompt:    _prompt,
-                                 iter_pos:  _iter_pos,
+                    feed_dict = {prompt: _prompt,
+                                 iter_pos: _iter_pos,
                                  samp_temp: _samp_temp,
-                                 end_iter:  _end_iter
+                                 end_iter: _end_iter
                                  }
 
                 sess.run(enqueue_ops, feed_dict=feed_dict)

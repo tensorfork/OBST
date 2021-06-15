@@ -3,7 +3,7 @@
 """
 
 import argparse
-import json
+import jsonpickle
 import re
 import time
 
@@ -37,7 +37,8 @@ def main(args: argparse.Namespace) -> None:
     # Setup logging
     model_path = args.model if args.model.endswith(".json") else f"session_configs/{args.model}.json"
     with open(model_path) as f:
-        _params = json.load(f)
+        _params = f.read()
+    _params = jsonpickle.loads(_params)
     params = ModelParameter(_params)
     params.train = args.run_mode == 'train'
     params.debug_sample = args.run_mode == 'debug'
@@ -45,7 +46,10 @@ def main(args: argparse.Namespace) -> None:
 
     # Read params of model
     if params.train:
-        json.dump(_params, tf.io.gfile.GFile(f"{params.model_path}/run_config_{int(time.time())}.json", 'w'))
+        param_dump = jsonpickle.dumps(_params, indent=4)
+        with tf.io.gfile.GFile(f"{params.model_path}/run_config_{int(time.time())}.json", 'w') as f:
+            f.write(param_dump)
+
 
     params.current_step = int(estimator_lib._load_global_step_from_checkpoint_dir(params.model_path))
 
