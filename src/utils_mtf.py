@@ -338,7 +338,9 @@ def get_intermediate(args: BlockArgs):
 
 
 def linear_shapes(args: BlockArgs) -> LINEAR_SHAPES:
-    features = mtf.Shape(get_intermediate(args)) + args.params.feature_dims - [args.params.head_dim] * ('group' in args)
+    features = mtf.Shape(deduplicate(get_intermediate(args) + args.params.feature_dims))
+    if 'group' in args:
+        features -= [args.params.head_dim]
     old = shape_crossection(args.tensor.shape, features).dims
     return LINEAR_SHAPES(old, (mtf.Shape(features) - old).dims)
 
