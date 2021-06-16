@@ -226,7 +226,7 @@ class BroadcastBackward(mtf.Operation):
 
 
 def non_replicated_broadcast(x, shape):
-    return BroadcastForward(x, shape).outputs[0]
+    return BroadcastForward(x, mtf.Shape(shape)).outputs[0]
 
 
 def get_variable(params: ModelParameter, name: str, shape: SHAPE, initializer: Initializer, trainable: bool):
