@@ -201,8 +201,8 @@ class BroadcastForward(mtf.Operation):
         self._outputs = [mtf.Tensor(self, output_shape, x.dtype)]
         self._splittable_dims, self._unsplittable_dims = self._initialize_all_dimensions_as_splittable()
 
-    def gradient(self, grad_ys):
-        return [BroadcastBackward(grad_ys, self.inputs[0])]
+    def gradient(self, grad_ys: typing.List[mtf.Tensor]):
+        return [BroadcastBackward(grad_ys[0], self.inputs[0])]
 
     def lower(self, lowering: mtf.Lowering):
         inp, out = self.inputs[0], self.outputs[0]
