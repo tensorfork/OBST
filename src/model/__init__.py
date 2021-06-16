@@ -3,8 +3,8 @@ import typing
 import mesh_tensorflow as mtf
 import tensorflow as tf
 
-from .backend import get_intermediate, linear, linear_from_features, linear_to_features
-from .basic import feed_forward_in
+from .backend import linear, linear_from_features, linear_to_features
+from .basic import activated_linear
 from .embedding import embed
 from .normalization import  norm
 from .frontend import block_part_fn
@@ -14,7 +14,7 @@ from .activation import activate
 from ..dataclass import BlockArgs, BlockConfig, ModelParameter
 from ..mtf_wrapper import (add_n, cast, constant_scalar, dropout, einsum, one_hot, ones, reciprocal, reduce_logsumexp,
                            reduce_mean, reduce_sum, sigmoid, sign, zeros_like)
-from ..utils_mtf import concat, slice, weighted_add, anonymize, anonymize_dim, anonymize_shape
+from ..utils_mtf import concat, slice, weighted_add, anonymize, anonymize_dim, anonymize_shape, get_intermediate
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 

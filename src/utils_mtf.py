@@ -18,6 +18,7 @@ OPT_SHAPE = typing.Optional[SHAPE]
 OPT_DIMS = typing.Optional[DIM_LIST]
 ALL_SHAPES = typing.Union[SHAPE, mtf.Tensor, mtf.Variable]
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
+LINEAR_SHAPES = typing.NamedTuple("LinearShapes", (('old', DIM_LIST), ('new', DIM_LIST)))
 
 
 def unanonymize(inp: mtf.Tensor, dim: typing.Union[mtf.Dimension, str]) -> mtf.Tensor:
@@ -273,6 +274,19 @@ def dims_from_shape(shape: ALL_SHAPES) -> DIM_LIST:
 
 def shape_size(shape: ALL_SHAPES):
     return np.prod([d.size for d in dims_from_shape(shape)])
+
+
+def get_intermediate(args: BlockArgs):
+    if 'group' not in args:
+        return args.params.intermediate
+    return [args.params.head_dim,
+            anonymize_dim(args.params.key_dim, args.params.key_dim.size * args.params.group_linear_factor)]
+
+
+def linear_shapes(args: BlockArgs) -> LINEAR_SHAPES:
+    features = get_intermediate(args) + args.params.feature_dims - [args.params.head_dim] * ('group' in args)
+    old = shape_crossection(args.tensor.shape, features).dims
+    return LINEAR_SHAPES(old.dims, (mtf.Shape(features) - old).dims)
 
 
 def shape_crossection(*shapes: ALL_SHAPES):

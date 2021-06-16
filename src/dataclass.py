@@ -136,11 +136,11 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.other_color = "\x1b[0m"
         self.scale_by_depth = True
         self.block_config = [{'layer': ["norm-group-shift-scale",
-                                        "feed_forward-mish-group-glu_add-norm"]
+                                        "feed_forward-in_relu-group-in_glu_add-in_norm"]
                               },
 
                              {'layer': ["norm-group-std-shift-scale",
-                                        "attention-lecun_tanh-embedded-relative-learned-shared"]
+                                        "attention-in_relu-embedded-relative"]
                               }]
 
         self.input_block_config = []

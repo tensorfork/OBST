@@ -129,9 +129,3 @@ def linear_to_features(args: BlockArgs, old: typing.Optional[typing.List[mtf.Dim
 def linear_from_features(args: BlockArgs, new: typing.Optional[typing.List[mtf.Dimension]] = None) -> mtf.Tensor:
     return linear(args, args.params.feature_dims, new)
 
-
-def get_intermediate(args: BlockArgs):
-    if 'group' not in args:
-        return args.params.intermediate
-    return [args.params.head_dim,
-            anonymize_dim(args.params.key_dim, args.params.key_dim.size * args.params.group_linear_factor)]

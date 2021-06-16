@@ -27,7 +27,7 @@ from .utils_mtf import concat, pad, slice, to_fp32, weighted_add, anonymize
 tf1 = tf.compat.v1
 Dataset = tf1.data.Dataset
 
-
+mtf.einsum()
 class CheckpointLoaderHook(tf.estimator.SessionRunHook):
     """Load checkpoint right after the session started."""
 

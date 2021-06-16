@@ -3,13 +3,13 @@ import typing
 import mesh_tensorflow as mtf
 import tensorflow as tf
 
-from .backend import get_intermediate, normal_var, orthogonal_var
-from .basic import feed_forward_in, feed_forward_out
+from .backend import normal_var, orthogonal_var
+from .basic import activated_linear_in, activated_linear_out
 from .embedding import embed
 from ..dataclass import BlockArgs
 from ..mtf_wrapper import einsum, greater_equal
 from ..utils_core import random_name
-from ..utils_mtf import anonymize, anonymize_dim, compare_range, get_attention_dim, is_masked
+from ..utils_mtf import anonymize, anonymize_dim, compare_range, get_attention_dim, is_masked, get_intermediate
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -94,14 +94,14 @@ def _softmax_attention(args: BlockArgs, val: mtf.Tensor, *lgt_in: mtf.Tensor) ->
 def attention(args: BlockArgs):
     args.params.attention_idx += 1
     dim = get_attention_dim(args).dim
-    base = args(feed_forward_in(args))
+    base = args(activated_linear_in(args))
 
     key = 0
     if 'embedded' in args or 'context' in args:
-        key = feed_forward_out(base)
+        key = activated_linear_out(base)
     if 'embedded' in args or 'positional' in args:
         key += embed(args, [dim] + args.params.feature_dims)
-    return _softmax_attention(args, anonymize(feed_forward_out(base), dim), feed_forward_out(base), anonymize(key, dim))
+    return _softmax_attention(args, anonymize(activated_linear_out(base), dim), activated_linear_out(base), anonymize(key, dim))
 
 
 def spatial_mixing(args: BlockArgs) -> mtf.Tensor:
@@ -109,7 +109,7 @@ def spatial_mixing(args: BlockArgs) -> mtf.Tensor:
     tmp = anonymize_dim(dim)
 
     if 'feed_forward' in args:
-        args = args(feed_forward_in(args))
+        args = args(activated_linear_in(args))
 
     mid = anonymize(args.tensor, dim)
     base = [args.params.head_dim] * ('group' in args)
@@ -131,10 +131,10 @@ def spatial_mixing(args: BlockArgs) -> mtf.Tensor:
         mid *= args.tensor
     if 'feed_forward' not in args:
         return mid
-    return feed_forward_out(args(mid))
+    return activated_linear_out(args(mid))
 
 
 def spatial_feed_forward(args: BlockArgs) -> mtf.Tensor:
-    base = args(feed_forward_in(args))
+    base = args(activated_linear_in(args))
     var = orthogonal_var(args, get_intermediate(base) + [anonymize_dim(get_attention_dim(args).dim)])
-    return _softmax_attention(args, feed_forward_out(base), var, base.tensor)
+    return _softmax_attention(args, activated_linear_out(base), var, base.tensor)

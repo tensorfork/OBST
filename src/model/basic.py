@@ -4,11 +4,11 @@ import mesh_tensorflow as mtf
 import tensorflow as tf
 
 from .activation import activate
-from .backend import get_intermediate, get_variable, linear_from_features, linear_to_features, linear
+from .backend import get_variable, linear, orthogonal_var
 from .normalization import norm
 from ..dataclass import BlockArgs
-from ..mtf_wrapper import dropout as utils_dropout, sigmoid
-from ..utils_mtf import anonymize_dim, get_attention_dim, replace_dim
+from ..mtf_wrapper import dropout as utils_dropout, sigmoid, exp, reduce_max, reduce_sum, einsum, reciprocal
+from ..utils_mtf import linear_shapes
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -19,7 +19,7 @@ def rezero(args: BlockArgs) -> mtf.Tensor:
     return args.tensor * get_variable(args, [], tf.constant_initializer(0))
 
 
-def dropout(args: BlockArgs):
+def dropout(args: BlockArgs, prefix: str = ''):
     keep = 1
     for extra in args.name_extras:
         if extra.startswith('dropout_rate'):
@@ -27,11 +27,22 @@ def dropout(args: BlockArgs):
     return utils_dropout(args.tensor, args.params.train, keep)
 
 
-def from_feat(args: BlockArgs):
-    return linear_from_features(args, get_intermediate(args))
+def wrapped_linear(args: BlockArgs) -> mtf.Tensor:
+    return linear(args, *linear_shapes(args))
 
 
-def activate_norm(args: BlockArgs, feed_forward_fn: typing.Callable) -> mtf.Tensor:
+def mixture_of_experts(args: BlockArgs) -> mtf.Tensor:
+    old, new = linear_shapes(args)
+    gate = linear(args, old, [args.params.expert_dim])
+    gate = exp(gate - reduce_max(gate, reduced_dim=args.params.expert_dim))
+    return einsum([reciprocal(reduce_sum(gate, reduced_dim=args.params.expert_dim)), args.tensor, gate,
+                   orthogonal_var(args, [old, new, args.params.expert_dim])],
+                  output_shape=args.tensor.shape - old + new)
+
+
+def activated_linear(args: BlockArgs, prefix: str) -> mtf.Tensor:
+    args = args([a[len(prefix):] for a in args if a.startswith(prefix)])
+    feed_forward_fn = mixture_of_experts if 'mixture_of_experts' in args else wrapped_linear
     out = dropout(args(activate(args(feed_forward_fn(args)))))
     if 'glu' in args or 'glu_add' in args:
         out *= sigmoid(feed_forward_fn(args))
@@ -42,33 +53,13 @@ def activate_norm(args: BlockArgs, feed_forward_fn: typing.Callable) -> mtf.Tens
     return out
 
 
-def expert_from_feat(args: BlockArgs):
-    params = args.params
-    return linear(args, [params.expert_dim] + params.feature_dims, [params.expert_dim] + get_intermediate(args))
+def activated_linear_in(args: BlockArgs):
+    return activated_linear(args, 'in_')
 
 
-def expert_to_feat(args: BlockArgs):
-    params = args.params
-    return linear(args, [params.expert_dim] + get_intermediate(args), [params.expert_dim] + params.feature_dims)
-
-
-def feed_forward_in(args: BlockArgs) -> mtf.Tensor:
-    return activate_norm(args, from_feat)
-
-
-def feed_forward_out(args: BlockArgs):
-    return linear_to_features(args, get_intermediate(args))
+def activated_linear_out(args: BlockArgs):
+    return activated_linear(args, 'out_')
 
 
 def feed_forward(args: BlockArgs) -> mtf.Tensor:
-    return feed_forward_out(args(feed_forward_in(args)))
-
-
-def mixture_of_experts(args: BlockArgs) -> mtf.Tensor:
-    experts = args.params.experts
-    dim = get_attention_dim(args).dim
-    if dim.size % experts:
-        raise ValueError(f"Make sure that {dim} is divisible by number of experts ({experts})")
-    tensor = replace_dim(args.tensor, [anonymize_dim(dim, dim.size // experts), args.params.expert_dim], dim)
-    tensor = expert_to_feat(args(activate_norm(args(tensor), expert_from_feat)))
-    return mtf.reshape(tensor, args.tensor.shape)
+    return activated_linear_out(args(activated_linear_in(args)))

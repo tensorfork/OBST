@@ -1,10 +1,10 @@
 import mesh_tensorflow as mtf
 import tensorflow as tf
 
-from .backend import get_intermediate, normal_var
+from .backend import normal_var
 from ..dataclass import BlockArgs
 from ..mtf_wrapper import einsum, reduce_mean, rsqrt
-from ..utils_mtf import shape_crossection
+from ..utils_mtf import shape_crossection, get_intermediate
 
 tf1 = tf.compat.v1
 
