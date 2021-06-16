@@ -6,7 +6,7 @@ import tensorflow as tf
 from tensorflow.python.ops.init_ops import Initializer
 
 from .dataclass import BlockArgs, ModelParameter
-from .mtf_wrapper import cast, mtf_range
+from .mtf_wrapper import cast, mtf_range, random_name
 from .utils_core import default
 
 tf1 = tf.compat.v1
@@ -193,30 +193,57 @@ def anonymize(inp: mtf.Tensor,
     return inp
 
 
-class Variable(mtf.Variable):
-    def lower(self, lowering):
-        mesh_impl = lowering.mesh_impl(self)
-        with mtf.utils.outside_all_rewrites():
-            sv = mesh_impl.LaidOutVariable(self, mesh_impl)
-        activation_dtype = self.activation_dtype
+class BroadcastForward(mtf.Operation):
+    """Broadcast - output dims are a superset of input dims, in any order."""
 
-        def slicewise_fn(x):
-            return tf.cast(tf.reshape(x, x.shape[:-1]), activation_dtype)
+    def __init__(self, x, output_shape):
+        super(BroadcastForward, self).__init__([x], name=random_name("broadcast_forward"))
+        self._outputs = [mtf.Tensor(self, output_shape, x.dtype)]
+        self._splittable_dims, self._unsplittable_dims = self._initialize_all_dimensions_as_splittable()
 
-        lowering.variables[self] = sv
-        lowering.tensors[self.outputs[0]] = mesh_impl.slicewise(slicewise_fn, sv.laid_out_tensor)
-        lowering.add_counter(f"variables/{'un' * (1 - self._trainable)}trainable", self.outputs[0].size)
+    def gradient(self, grad_ys):
+        return [BroadcastBackward(grad_ys, self.inputs[0])]
+
+    def lower(self, lowering: mtf.Lowering):
+        inp, out = self.inputs[0], self.outputs[0]
+        lowering.tensors[out] = lowering.mesh_impl(self).broadcast_impl(lowering.tensors[inp], inp.shape, out.shape)
+
+
+class BroadcastBackward(mtf.Operation):
+    def __init__(self, grad_y: mtf.Tensor, inp: mtf.Tensor):
+        super(BroadcastBackward, self).__init__([grad_y], name=random_name("broadcast_backward"))
+        self._outputs = [mtf.Tensor(self, inp.shape, inp.dtype)]
+        self._splittable_dims, self._unsplittable_dims = self._initialize_all_dimensions_as_splittable()
+
+    def lower(self, lowering: mtf.Lowering):
+        grad, out = self.inputs[0], self.outputs[0]
+        dims = [grad.shape.dims.index(d) for d in missing_dims(out, grad)]
+
+        def slicewise_fn(y):
+            return tf.reduce_sum(y, dims)
+
+        lowering.tensors[out] = lowering.mesh_impl(self).slicewise(slicewise_fn, grad)
+
+
+def non_replicated_broadcast(x, shape):
+    return BroadcastForward(x, shape).outputs[0]
 
 
 def get_variable(params: ModelParameter, name: str, shape: SHAPE, initializer: Initializer, trainable: bool):
     full_name = f'{tf1.get_variable_scope().name}/{name}'
-
     if full_name in params.mesh.graph.name_to_variable:
         return params.mesh.graph.name_to_variable[full_name].outputs[0]
-    shape = deduplicate(mtf.Shape(shape) + mtf.Dimension(params.batch_dim.name, params.batch_splits))
-    var = Variable(params.mesh, name, shape, params.variable_dtype, initializer, trainable)
+    shape = deduplicate(mtf.Shape(shape))
+    var = mtf.Variable(params.mesh, name, shape, params.variable_dtype, initializer, trainable)
     params.mesh.graph.name_to_variable[full_name] = var
     return var.outputs[0]
+
+
+def non_replicated_variable(params: ModelParameter, name: str, shape: SHAPE, initializer: Initializer, trainable: bool):
+    var = get_variable(params, name, shape, initializer, trainable)
+    if not params.grad_accumulation or params.batch_splits == 1:
+        return var
+    return non_replicated_broadcast(var, [params.batch_dim] + dims_from_shape(shape))
 
 
 def anonymize_shape(inp: typing.Union[typing.List[mtf.Dimension], mtf.Shape],

@@ -10,7 +10,7 @@ from tensorflow.python.ops.init_ops import Initializer
 from ..dataclass import BlockArgs, ModelParameter
 from ..mtf_wrapper import einsum, scoped
 from ..utils_core import random_name
-from ..utils_mtf import OPT_DIMS, SHAPE, deduplicate, feature_dims_used, get_variable
+from ..utils_mtf import OPT_DIMS, SHAPE, deduplicate, feature_dims_used, non_replicated_variable
 
 tf1 = tf.compat.v1
 
@@ -55,7 +55,7 @@ def get_var(args: BlockArgs, shape: SHAPE, initializer: Initializer) -> mtf.Tens
     params: ModelParameter = args.params
 
     def _var():
-        return get_variable(params, random_name("get_variable"), shape, initializer, True)
+        return non_replicated_variable(params, random_name("get_variable"), shape, initializer, True)
 
     if "shared" not in args:
         return _var()

@@ -13,21 +13,22 @@ from src.model.revnet import RevGradOp
 from .dataclass import ModelParameter
 from .mtf_wrapper import (add_n, cast, constant_float, constant_scalar, einsum, equal, greater, greater_equal, minimum,
                           mod, reduce_max, reduce_mean, reduce_sum, rsqrt, sqrt, square)
-from .utils_mtf import SHAPE, feature_dims_used, to_fp32, weighted_add, get_variable
+from .utils_mtf import SHAPE, feature_dims_used, to_fp32, weighted_add, get_variable, non_replicated_variable
 
 tf = tf2.compat.v1
+zeros = tf.zeros_initializer()
 
 
 def import_float(imported):
     return tf.constant(imported, dtype=tf.float32, shape=[])
 
 
-def get_var(params: ModelParameter, name: str, shape: SHAPE, initializer: Initializer = tf.zeros_initializer()):
+def get_var(params: ModelParameter, name: str, shape: SHAPE, initializer: Initializer = zeros):
     return get_variable(params, name, shape, initializer, False)
 
 
 def variable(params: ModelParameter, base: mtf.Variable, name: str, shape: SHAPE):
-    return get_var(params, f"{base.name}/{params.optimizer}/{name}", shape)
+    return non_replicated_variable(params, f"{base.name}/{params.optimizer}/{name}", shape, zeros, False)
 
 
 def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, manual_step: tf.Tensor,
@@ -69,9 +70,9 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
         window_dim = mtf.Dimension("loss_window", params.reduce_lr_on_plateau_timespan)
 
         divisor_ptr = get_var(params, f"{base}lr_divisor", [], tf.ones_initializer())
-        loss_window_ptr = get_var(params, f"{base}loss_window", [window_dim], tf.zeros_initializer())
-        loss_ema_ptr = get_var(params, f"{base}loss_ema", [], tf.zeros_initializer())
-        last_reduce = get_var(params, f"{base}last_reduce", [], tf.zeros_initializer())
+        loss_window_ptr = get_var(params, f"{base}loss_window", [window_dim])
+        loss_ema_ptr = get_var(params, f"{base}loss_ema", [])
+        last_reduce = get_var(params, f"{base}last_reduce", [])
 
         one_hot = mtf.one_hot(mtf.mod(global_step_mtf, params.reduce_lr_on_plateau_timespan), window_dim)
         sub = (loss_sum - loss_window_ptr) * one_hot
