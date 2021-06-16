@@ -22,12 +22,12 @@ from .model import build
 from .mtf_wrapper import constant_scalar, log
 from .optimizers import get_optimizer
 from .utils_core import color_print
-from .utils_mtf import concat, pad, slice, to_fp32, weighted_add, anonymize
+from .utils_mtf import concat, pad, slice, to_fp32, weighted_add
 
 tf1 = tf.compat.v1
 Dataset = tf1.data.Dataset
 
-mtf.einsum()
+
 class CheckpointLoaderHook(tf.estimator.SessionRunHook):
     """Load checkpoint right after the session started."""
 
