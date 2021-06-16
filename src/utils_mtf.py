@@ -222,7 +222,7 @@ class BroadcastBackward(mtf.Operation):
         def slicewise_fn(y):
             return tf.reduce_sum(y, dims)
 
-        lowering.tensors[out] = lowering.mesh_impl(self).slicewise(slicewise_fn, grad)
+        lowering.tensors[out] = lowering.mesh_impl(self).slicewise(slicewise_fn, lowering.tensors[grad])
 
 
 def non_replicated_broadcast(x, shape):
