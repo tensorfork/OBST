@@ -9,7 +9,7 @@ from .backend import normal_var
 from ..dataclass import BlockArgs, ModelParameter
 from ..mtf_wrapper import einsum, scoped
 from ..utils_core import random_name
-from ..utils_mtf import DIM_LIST, SHAPE, shape_crossection, shape_size
+from ..utils_mtf import DIM_LIST, SHAPE, linear_shapes, shape_size
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -26,13 +26,13 @@ def _multi_dim_range_tf(params: ModelParameter, dims: DIM_LIST) -> mtf.Tensor:
 
 
 class RelativeEmbeddingForward(mtf.Operation):
-    def __init__(self, params: ModelParameter, shape: SHAPE):
-        super().__init__([], params.mesh, name=random_name("rel_embed"))
+    def __init__(self, args: BlockArgs, shape: SHAPE):
+        super().__init__([], args.params.mesh, name=random_name("rel_embed"))
         if isinstance(shape, list):
             shape = mtf.Shape(shape)
-        self.params = params
+        self.args = args
         self.shape = shape
-        self._outputs = [mtf.Tensor(self, shape, params.variable_dtype.activation_dtype)]
+        self._outputs = [mtf.Tensor(self, shape, args.params.variable_dtype.activation_dtype)]
 
     def has_gradient(self):
         return False
@@ -40,11 +40,11 @@ class RelativeEmbeddingForward(mtf.Operation):
     def lower(self, lowering: mtf.Lowering):
         mesh_impl: mtf.simd_mesh_impl.SimdMeshImpl = lowering.mesh_impl(self)
 
-        params = self.params
+        params = self.args.params
         shape = self.shape
 
         position_dims: SHAPE = (shape - params.feature_dims) - params.intermediate
-        feature_dims = shape_crossection(shape, params.feature_dims + params.intermediate).dims
+        feature_dims = linear_shapes(self.args).new
         position_count = shape_size(position_dims)
 
         cosine = 'cosine' in params.position_embedding
@@ -82,7 +82,7 @@ def _embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
 
     variables = []
     position_dims: mtf.Shape = (shape - args.params.feature_dims) - args.params.intermediate
-    feature_dims = shape_crossection(shape, args.params.feature_dims + args.params.intermediate).dims
+    feature_dims = linear_shapes(args).new
 
     if 'absolute' in args:
         out = _embed_var(args, shape)
@@ -111,7 +111,7 @@ def _embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
         out = mtf.reshape(einsum(variables, output_shape=tmp_dims + feature_dims), shape)
 
     elif 'relative' in args:
-        out = RelativeEmbeddingForward(args.params, shape).outputs[0]
+        out = RelativeEmbeddingForward(args, shape).outputs[0]
         if 'learned' in args:
             out *= _embed_var(args, feature_dims)
     else:
