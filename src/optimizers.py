@@ -28,7 +28,7 @@ def get_var(params: ModelParameter, name: str, shape: SHAPE, initializer: Initia
 
 
 def variable(params: ModelParameter, base: mtf.Variable, name: str, shape: SHAPE):
-    return non_replicated_variable(params, f"{base.name}/{params.optimizer}/{name}", shape, zeros, False)
+    return get_variable(params, f"{base.name}/{params.optimizer}/{name}", shape, zeros, False)
 
 
 def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, manual_step: tf.Tensor,

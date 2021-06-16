@@ -208,7 +208,7 @@ class BroadcastForward(mtf.Operation):
         inp, out = self.inputs[0], self.outputs[0]
         lowering.tensors[out] = lowering.mesh_impl(self).broadcast_impl(lowering.tensors[inp], inp.shape, out.shape)
 
-
+mtf.reduce_sum()
 class BroadcastBackward(mtf.Operation):
     def __init__(self, grad_y: mtf.Tensor, inp: mtf.Tensor):
         super(BroadcastBackward, self).__init__([grad_y], name=random_name("broadcast_backward"))
@@ -217,7 +217,7 @@ class BroadcastBackward(mtf.Operation):
 
     def lower(self, lowering: mtf.Lowering):
         grad, out = self.inputs[0], self.outputs[0]
-        dims = [grad.shape.dims.index(d) for d in missing_dims(out, grad)]
+        dims = [grad.shape.dims.index(d) for d in (grad.shape - out.shape).dims]
 
         def slicewise_fn(y):
             return tf.reduce_sum(y, dims)
