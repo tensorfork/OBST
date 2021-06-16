@@ -202,7 +202,7 @@ class BroadcastForward(mtf.Operation):
         self._splittable_dims, self._unsplittable_dims = self._initialize_all_dimensions_as_splittable()
 
     def gradient(self, grad_ys: typing.List[mtf.Tensor]):
-        return [BroadcastBackward(grad_ys[0], self.inputs[0])]
+        return BroadcastBackward(grad_ys[0], self.inputs[0]).outputs
 
     def lower(self, lowering: mtf.Lowering):
         inp, out = self.inputs[0], self.outputs[0]
