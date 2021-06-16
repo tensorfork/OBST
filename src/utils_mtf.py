@@ -359,7 +359,7 @@ def shape_addition(*shapes: ALL_SHAPES):
 
 
 def missing_dims(self: ALL_SHAPES, other: ALL_SHAPES):
-    return (mtf.Shape(other) - mtf.Shape(self)).dims
+    return (mtf.Shape(dims_from_shape(other)) - mtf.Shape(dims_from_shape(self))).dims
 
 
 def compare_range(params: ModelParameter, dim0: mtf.Dimension, dim1: mtf.Dimension, comparison: typing.Callable):
