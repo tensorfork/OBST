@@ -9,7 +9,8 @@ from .embedding import embed
 from ..dataclass import BlockArgs
 from ..mtf_wrapper import einsum, greater_equal
 from ..utils_core import random_name
-from ..utils_mtf import anonymize, anonymize_dim, compare_range, get_attention_dim, is_masked, get_intermediate
+from ..utils_mtf import (anonymize, anonymize_dim, compare_range, get_attention_dim, is_masked, get_intermediate,
+                         linear_shapes)
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -87,8 +88,8 @@ def _softmax_attention(args: BlockArgs, val: mtf.Tensor, *lgt_in: mtf.Tensor) ->
     shape = args.tensor.shape
     lgt_in = list(lgt_in)
     lgt_in[0] *= dim.size ** -0.5
-    lgt = einsum(lgt_in, output_shape=shape - [args.params.key_dim] - get_intermediate(args) + anonymize_dim(dim))
-    return einsum(SoftmaxForward(lgt, dim, is_masked(args)).outputs + [val], shape)
+    logit_shape = shape - (mtf.Shape(linear_shapes(args).old) - [args.params.head_dim]) + anonymize_dim(dim)
+    return einsum(SoftmaxForward(einsum(lgt_in, output_shape=logit_shape), dim, is_masked(args)).outputs + [val], shape)
 
 
 def attention(args: BlockArgs):
@@ -101,7 +102,8 @@ def attention(args: BlockArgs):
         key = activated_linear_out(base)
     if 'embedded' in args or 'positional' in args:
         key += embed(args, [dim] + args.params.feature_dims)
-    return _softmax_attention(args, anonymize(activated_linear_out(base), dim), activated_linear_out(base), anonymize(key, dim))
+    return _softmax_attention(args, anonymize(activated_linear_out(base), dim), activated_linear_out(base),
+                              anonymize(key, dim))
 
 
 def spatial_mixing(args: BlockArgs) -> mtf.Tensor:

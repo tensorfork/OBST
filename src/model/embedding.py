@@ -44,7 +44,7 @@ class RelativeEmbeddingForward(mtf.Operation):
         shape = self.shape
 
         position_dims: SHAPE = (shape - params.feature_dims) - params.intermediate
-        feature_dims = linear_shapes(self.args).new
+        feature_dims = linear_shapes(self.args).old
         position_count = shape_size(position_dims)
 
         cosine = 'cosine' in params.position_embedding
@@ -82,7 +82,7 @@ def _embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
 
     variables = []
     position_dims: mtf.Shape = (shape - args.params.feature_dims) - args.params.intermediate
-    feature_dims = linear_shapes(args).new
+    feature_dims = linear_shapes(args).old
 
     if 'absolute' in args:
         out = _embed_var(args, shape)

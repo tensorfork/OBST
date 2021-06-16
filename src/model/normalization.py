@@ -11,7 +11,7 @@ tf1 = tf.compat.v1
 
 def norm(args: BlockArgs) -> mtf.Tensor:
     block_input = args.tensor
-    feature_shape = mtf.Shape(linear_shapes(args).new)
+    feature_shape = mtf.Shape(linear_shapes(args).old)
     normalized_shape = block_input.shape - (feature_shape - [args.params.head_dim] * ('group' in args))
 
     block_input -= reduce_mean(block_input, output_shape=normalized_shape)

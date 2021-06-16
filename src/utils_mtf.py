@@ -342,7 +342,7 @@ def linear_shapes(args: BlockArgs) -> LINEAR_SHAPES:
     if 'group' in args:
         features -= [args.params.head_dim]
     old = shape_crossection(args.tensor.shape, features).dims
-    return LINEAR_SHAPES(old, (mtf.Shape(features) - old).dims)
+    return LINEAR_SHAPES(old, (features - old).dims)
 
 
 def shape_crossection(*shapes: ALL_SHAPES):
@@ -359,9 +359,7 @@ def shape_addition(*shapes: ALL_SHAPES):
 
 
 def missing_dims(self: ALL_SHAPES, other: ALL_SHAPES):
-    self = dims_from_shape(self)
-    other = dims_from_shape(other)
-    return [d for d in other if d not in self]
+    return (mtf.Shape(other) - mtf.Shape(self)).dims
 
 
 def compare_range(params: ModelParameter, dim0: mtf.Dimension, dim1: mtf.Dimension, comparison: typing.Callable):
