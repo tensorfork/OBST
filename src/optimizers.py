@@ -13,7 +13,7 @@ from src.model.revnet import RevGradOp
 from .dataclass import ModelParameter
 from .mtf_wrapper import (add_n, cast, constant_float, constant_scalar, einsum, equal, greater, greater_equal, minimum,
                           mod, reduce_max, reduce_mean, reduce_sum, rsqrt, sqrt, square)
-from .utils_mtf import SHAPE, feature_dims_used, to_fp32, weighted_add
+from .utils_mtf import SHAPE, feature_dims_used, to_fp32, weighted_add, get_variable
 
 tf = tf2.compat.v1
 
@@ -23,8 +23,7 @@ def import_float(imported):
 
 
 def get_var(params: ModelParameter, name: str, shape: SHAPE, initializer: Initializer = tf.zeros_initializer()):
-    return mtf.get_variable(params.mesh, name, shape=shape, initializer=initializer, trainable=False,
-                            dtype=params.variable_dtype)
+    return get_variable(params, name, shape, initializer, False)
 
 
 def variable(params: ModelParameter, base: mtf.Variable, name: str, shape: SHAPE):

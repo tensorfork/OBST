@@ -1,5 +1,4 @@
 import random
-import string
 import typing
 
 import mesh_tensorflow as mtf
@@ -11,7 +10,7 @@ from tensorflow.python.ops.init_ops import Initializer
 from ..dataclass import BlockArgs, ModelParameter
 from ..mtf_wrapper import einsum, scoped
 from ..utils_core import random_name
-from ..utils_mtf import OPT_DIMS, SHAPE, anonymize_dim, deduplicate, feature_dims_used
+from ..utils_mtf import OPT_DIMS, SHAPE, deduplicate, feature_dims_used, get_variable
 
 tf1 = tf.compat.v1
 
@@ -52,69 +51,68 @@ class OrthogonalInit(Initializer):
         return tf.cast(out, dtype)
 
 
-def get_variable(args: BlockArgs, shape: SHAPE, initializer: typing.Callable) -> mtf.Tensor:
+def get_var(args: BlockArgs, shape: SHAPE, initializer: Initializer) -> mtf.Tensor:
     params: ModelParameter = args.params
-    with tf1.variable_scope("get_variable") as scope:
-        def _var():
-            return mtf.get_variable(params.mesh, random_name("get_variable"), deduplicate(shape),
-                                    dtype=params.variable_dtype, initializer=initializer)
 
-        if "shared" not in args:
-            return _var()
+    def _var():
+        return get_variable(params, random_name("get_variable"), shape, initializer, True)
 
-        name = scope._name
-        scope = name.split('/')
-        body_idx = scope.index("body") + 1
-        block, full_fn_name = scope[body_idx:body_idx + 2]
-        block, config = block.split('_')
-        first_block = block == '0'
-        fn_name = ''.join(c for c in full_fn_name if not c.isdigit())
+    if "shared" not in args:
+        return _var()
 
-        cache = params.cached_parameters
-        for idx in (config, fn_name):
-            if idx not in cache:
-                cache[idx] = {}
-            cache = cache[idx]
+    name = tf1.get_variable_scope().name
+    scope = name.split('/')
+    body_idx = scope.index("body") + 1
+    block, full_fn_name = scope[body_idx:body_idx + 2]
+    block, config = block.split('_')
+    first_block = block == '0'
+    fn_name = ''.join(c for c in full_fn_name if not c.isdigit())
 
-        if "counter" not in cache:
-            cache["counter"] = 0
-            cache["index"] = 0
-            cache["seen"] = set()
-        if idx not in cache["seen"]:
-            cache["index"] += 1
-            cache["counter"] += first_block
-            cache["seen"].add(full_fn_name)
-        cache["index"] %= cache["counter"]
-        fn_id = cache["index"]
+    cache = params.cached_parameters
+    for idx in (config, fn_name):
+        if idx not in cache:
+            cache[idx] = {}
+        cache = cache[idx]
 
-        if fn_id not in cache:
-            cache[fn_id] = {}
-        cache = cache[fn_id]
-        if "counter" not in cache:
-            cache["counter"] = 0
+    if "counter" not in cache:
+        cache["counter"] = 0
+        cache["index"] = 0
+        cache["seen"] = set()
+    if idx not in cache["seen"]:
+        cache["index"] += 1
+        cache["counter"] += first_block
+        cache["seen"].add(full_fn_name)
+    cache["index"] %= cache["counter"]
+    fn_id = cache["index"]
 
-        if first_block:
-            var = _var()
-            cache[cache["counter"]] = var
-            cache["counter"] += 1
-            return var
+    if fn_id not in cache:
+        cache[fn_id] = {}
+    cache = cache[fn_id]
+    if "counter" not in cache:
+        cache["counter"] = 0
 
-        if len(cache) == cache["counter"] + 1:
-            cache["counter"] = 0
-        var = cache[cache["counter"]]
+    if first_block:
+        var = _var()
+        cache[cache["counter"]] = var
         cache["counter"] += 1
         return var
+
+    if len(cache) == cache["counter"] + 1:
+        cache["counter"] = 0
+    var = cache[cache["counter"]]
+    cache["counter"] += 1
+    return var
 
 
 def orthogonal_var(args: BlockArgs, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
                    fan_in_dims: OPT_DIMS = None) -> mtf.Tensor:
     shape = deduplicate(shape)
-    return scoped("orthogonal_var", get_variable, args, shape, OrthogonalInit(args.params, shape, fan_in_dims))
+    return scoped("orthogonal_var", get_var, args, shape, OrthogonalInit(args.params, shape, fan_in_dims))
 
 
 def normal_var(args: BlockArgs, shape: SHAPE, stddev: float = 0.02, mean: float = 0.) -> mtf.Tensor:
     shape = deduplicate(shape)
-    return scoped("normal_var", get_variable, args, shape, tf.random_normal_initializer(stddev=stddev, mean=mean))
+    return scoped("normal_var", get_var, args, shape, tf.random_normal_initializer(stddev=stddev, mean=mean))
 
 
 def linear(args: BlockArgs, old: typing.List[mtf.Dimension], new: typing.List[mtf.Dimension]) -> mtf.Tensor:
@@ -128,4 +126,3 @@ def linear_to_features(args: BlockArgs, old: typing.Optional[typing.List[mtf.Dim
 
 def linear_from_features(args: BlockArgs, new: typing.Optional[typing.List[mtf.Dimension]] = None) -> mtf.Tensor:
     return linear(args, args.params.feature_dims, new)
-

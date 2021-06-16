@@ -4,7 +4,7 @@ import mesh_tensorflow as mtf
 import tensorflow as tf
 
 from .activation import activate
-from .backend import get_variable, linear, orthogonal_var
+from .backend import get_var, linear, orthogonal_var
 from .normalization import norm
 from ..dataclass import BlockArgs
 from ..mtf_wrapper import dropout as utils_dropout, sigmoid, exp, reduce_max, reduce_sum, einsum, reciprocal
@@ -16,7 +16,7 @@ tf1 = tf.compat.v1
 
 
 def rezero(args: BlockArgs) -> mtf.Tensor:
-    return args.tensor * get_variable(args, [], tf.constant_initializer(0))
+    return args.tensor * get_var(args, [], tf.constant_initializer(0))
 
 
 def dropout(args: BlockArgs, prefix: str = ''):
