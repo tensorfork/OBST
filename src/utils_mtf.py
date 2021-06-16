@@ -193,14 +193,28 @@ def anonymize(inp: mtf.Tensor,
     return inp
 
 
+class Variable(mtf.Variable):
+    def lower(self, lowering):
+        mesh_impl = lowering.mesh_impl(self)
+        with mtf.utils.outside_all_rewrites():
+            sv = mesh_impl.LaidOutVariable(self, mesh_impl)
+        activation_dtype = self.activation_dtype
+
+        def slicewise_fn(x):
+            return tf.cast(tf.reshape(x, x.shape[:-1]), activation_dtype)
+
+        lowering.variables[self] = sv
+        lowering.tensors[self.outputs[0]] = mesh_impl.slicewise(slicewise_fn, sv.laid_out_tensor)
+        lowering.add_counter(f"variables/{'un' * (1 - self._trainable)}trainable", self.outputs[0].size)
+
+
 def get_variable(params: ModelParameter, name: str, shape: SHAPE, initializer: Initializer, trainable: bool):
     full_name = f'{tf1.get_variable_scope().name}/{name}'
 
     if full_name in params.mesh.graph.name_to_variable:
         return params.mesh.graph.name_to_variable[full_name].outputs[0]
-
-    var = mtf.Variable(params.mesh, name, mtf.convert_to_shape(deduplicate(shape)), params.variable_dtype, initializer,
-                       trainable)
+    shape = deduplicate(mtf.Shape(shape) + mtf.Dimension(params.batch_dim.name, params.batch_splits))
+    var = Variable(params.mesh, name, shape, params.variable_dtype, initializer, trainable)
     params.mesh.graph.name_to_variable[full_name] = var
     return var.outputs[0]
 
