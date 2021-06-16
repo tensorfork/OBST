@@ -241,7 +241,7 @@ def get_variable(params: ModelParameter, name: str, shape: SHAPE, initializer: I
 
 def non_replicated_variable(params: ModelParameter, name: str, shape: SHAPE, initializer: Initializer, trainable: bool):
     var = get_variable(params, name, shape, initializer, trainable)
-    if not params.grad_accumulation or params.batch_splits == 1:
+    if params.grad_accumulation < 2 or params.batch_splits == 1:
         return var
     return non_replicated_broadcast(var, [params.batch_dim] + dims_from_shape(shape))
 
