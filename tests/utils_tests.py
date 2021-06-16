@@ -32,7 +32,7 @@ def tests_wrap(build_func, run_func, mesh_shape=None, layout_rules=None, devices
             mesh_impl = mtf.placement_mesh_impl.PlacementMeshImpl(mesh_shape, layout_rules, devices)
             lowering = mtf.Lowering(mtf_graph, {mesh: mesh_impl})
 
-            outputs = [lowering.export_to_tf_tensor(outputs) for outputs in outputs]
+            outputs = [lowering.export_to_tf_tensor(output) for output in outputs]
 
             sess.run(tf1.global_variables_initializer())
             sess.run(lowering.copy_masters_to_slices())
