@@ -66,15 +66,17 @@ class OperationTest(BaseTest):
         params = {'calculation_dtype': calculation_dtype,
                   "slice_dtype": slice_dtype,
                   "storage_dtype": storage_dtype,
+                  "scale_by_depth": False,
                   "n_embd_per_head": n_embd_per_head,
                   "n_head": n_head,
                   "train_batch_size": batch_size,
-                  "n_ctx": n_ctx}
+                  "n_ctx": n_ctx,
+                  "n_blocks": 1}
         self.args = BlockArgs(ModelParameter(params), None, [''])
         self.args.params.layout = self.layout_rules
         self.args.params.mesh_shape = self.mesh_shape
 
-    def _build(self, inp: mtf.Tensor, *args, **kwargs) -> mtf.Tensor:
+    def _build(self, inp: mtf.Tensor) -> mtf.Tensor:
         pass
 
     def _run(self, out: np.array) -> None:
@@ -88,7 +90,7 @@ class OperationTest(BaseTest):
         inp = mtf.random_normal(mesh, [params.batch_dim, params.sequence_dim] + params.feature_dims,
                                 dtype=params.variable_dtype.activation_dtype)
 
-        return [self._build(inp, *args, **kwargs)], None
+        return [self._build(inp)], None
 
     def run(self, sess: tf1.Session, outputs: typing.List[tf.Tensor], args: typing.Any) -> None:
         self._run(sess.run(outputs)[0])
@@ -103,6 +105,21 @@ class ReZero(OperationTest):
         assert np.all(out == 0)
 
 
+class AllSumFeedForwardIn(OperationTest):
+    def _build(self, inp: mtf.Tensor) -> mtf.Tensor:
+        params = self.args.params
+        return basic.orthogonal_var(self.args, params.feature_dims + params.intermediate)
+
+    def _run(self, out: np.array) -> None:
+        params = self.args.params
+        mean = np.mean(out)
+        size = np.prod([d.size for d in (params.feature_dims + params.intermediate)])
+        intermediate = np.prod([d.size for d in params.intermediate])
+        min_fan = min(size // intermediate, intermediate)
+        analytical_var = (min_fan * (1 - min_fan / size) ** 2 + (size - min_fan) * (min_fan / size) ** 2) / size
+        assert np.isclose(np.std(out), analytical_var ** 0.5, 0.03) and np.abs(mean) < 0.05
+
+
 @pytest.mark.parametrize("test", [ReZero])
 @pytest.mark.parametrize("calculation_dtype", ["bfloat16", "float32"])
 @pytest.mark.parametrize("storage_dtype", ["bfloat16", "float32"])
@@ -112,6 +129,6 @@ class ReZero(OperationTest):
 @pytest.mark.parametrize("batch_size", [1, 4])
 @pytest.mark.parametrize("n_ctx", [1, 8, 64])
 def op_test(test: typing.Type, calculation_dtype: str, storage_dtype: str, slice_dtype: str, embd_per_head: int,
-            n_head: int, batch_size: int, n_ctx:int):
+            n_head: int, batch_size: int, n_ctx: int):
     test(calculation_dtype=calculation_dtype, storage_dtype=storage_dtype, slice_dtype=slice_dtype,
-         embd_per_head=embd_per_head, n_head=n_head, batch_size=batch_size, n_ctx=n_ctx)()
+         n_embd_per_head=embd_per_head, n_head=n_head, batch_size=batch_size, n_ctx=n_ctx)()
