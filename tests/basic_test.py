@@ -7,6 +7,7 @@ import tensorflow as tf
 
 from src.dataclass import BlockArgs, ModelParameter
 from src.model import basic, backend
+from src.utils_mtf import get_intermediate
 
 tf1 = tf.compat.v1
 
@@ -97,7 +98,9 @@ class ReZero(OperationTest):
 
 
 class VariableCheck(OperationTest):
-    _var_fn: typing.Union[backend.orthogonal_var, backend.normal_var] = backend.orthogonal_var
+    @staticmethod
+    def _var_fn() -> typing.Union[backend.orthogonal_var, backend.normal_var]:
+        return backend.orthogonal_var
 
     def _in_dims(self) -> typing.List[mtf.Dimension]:
         return []
@@ -113,7 +116,7 @@ class VariableCheck(OperationTest):
         return 0
 
     def _build(self, inp: mtf.Tensor) -> mtf.Tensor:
-        return self._var_fn(self.args, self._in_dims() + self._out_dims())
+        return self._var_fn()(self.args, self._in_dims() + self._out_dims())
 
     def _run(self, out: np.array) -> None:
         relative_tolerance = 1 / np.prod([d.size for d in self._shape()]) ** (0.05 if self.fp16 else 0.5)
@@ -122,7 +125,9 @@ class VariableCheck(OperationTest):
 
 
 class OrthogonalCheck(VariableCheck):
-    _var_fn = backend.orthogonal_var
+    @staticmethod
+    def _var_fn() -> typing.Union[backend.orthogonal_var, backend.normal_var]:
+        return backend.orthogonal_var
 
     def _target_std(self) -> float:
         size = np.prod([d.size for d in self._shape()])
@@ -139,7 +144,32 @@ class AllSumFeedForwardIn(OrthogonalCheck):
         return self.args.params.intermediate
 
 
-@pytest.mark.parametrize("test", [ReZero, AllSumFeedForwardIn])
+class AllSumFeedForwardOut(OrthogonalCheck):
+    def _in_dims(self) -> typing.List[mtf.Dimension]:
+        return self.args.params.intermediate
+
+    def _out_dims(self) -> typing.List[mtf.Dimension]:
+        return self.args.params.feature_dims
+
+
+class GroupFeedForwardIn(OrthogonalCheck):
+    def _in_dims(self) -> typing.List[mtf.Dimension]:
+        return get_intermediate(self.args(['group']))
+
+    def _out_dims(self) -> typing.List[mtf.Dimension]:
+        return self.args.params.feature_dims
+
+
+class GroupFeedForwardOut(OrthogonalCheck):
+    def _in_dims(self) -> typing.List[mtf.Dimension]:
+        return self.args.params.feature_dims
+
+    def _out_dims(self) -> typing.List[mtf.Dimension]:
+        return get_intermediate(self.args(['group']))
+
+
+@pytest.mark.parametrize("test",
+                         [ReZero, AllSumFeedForwardIn, AllSumFeedForwardOut, GroupFeedForwardIn, GroupFeedForwardOut])
 @pytest.mark.parametrize("calculation_dtype", ["bfloat16", "float32"])
 @pytest.mark.parametrize("storage_dtype", ["bfloat16", "float32"])
 @pytest.mark.parametrize("slice_dtype", ["bfloat16", "float32"])

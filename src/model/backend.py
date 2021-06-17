@@ -106,6 +106,7 @@ def get_var(args: BlockArgs, shape: SHAPE, initializer: Initializer) -> mtf.Tens
 
 def orthogonal_var(args: BlockArgs, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
                    fan_in_dims: OPT_DIMS = None) -> mtf.Tensor:
+    print(args, shape, fan_in_dims)
     shape = deduplicate(shape)
     return scoped("orthogonal_var", get_var, args, shape, OrthogonalInit(args.params, shape, fan_in_dims))
 
