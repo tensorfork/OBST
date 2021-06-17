@@ -24,7 +24,7 @@ class OrthogonalInit(Initializer):
         self.seed = random.randint(0, 2 ** 32)
         sizes = [d.size for d in mtf.Shape(shape) - fan_in_dims]
         features_used = feature_dims_used(params, shape)
-        if fan_in_dims is None:
+        if not fan_in_dims:
             if features_used:
                 if shape.index(params.key_dim) == len(sizes) - 1:
                     fan_in = np.prod(sizes[:-2])
