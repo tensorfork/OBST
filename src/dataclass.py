@@ -347,7 +347,7 @@ def align_tensor_op(x):
 
 
 class BlockArgs:
-    def __init__(self, params: ModelParameter, tensor: mtf.Tensor, name_extras: typing.List[str]):
+    def __init__(self, params: ModelParameter, tensor: typing.Optional[mtf.Tensor], name_extras: typing.List[str]):
         self.params = params
         self.tensor = tensor
         self.name_extras = name_extras
