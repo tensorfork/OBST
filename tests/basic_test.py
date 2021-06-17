@@ -61,13 +61,15 @@ class BaseTest:
 
 class OperationTest(BaseTest):
     def __init__(self, calculation_dtype="bfloat16", storage_dtype="bfloat16", slice_dtype="float32",
-                 n_embd_per_head=16, n_head=1, *args, **kwargs):
+                 n_embd_per_head=16, n_head=1, batch_size=1, n_ctx=1, *args, **kwargs):
         super(OperationTest, self).__init__(*args, **kwargs)
         params = {'calculation_dtype': calculation_dtype,
                   "slice_dtype": slice_dtype,
                   "storage_dtype": storage_dtype,
                   "n_embd_per_head": n_embd_per_head,
-                  "n_head": n_head}
+                  "n_head": n_head,
+                  "train_batch_size": batch_size,
+                  "n_ctx": n_ctx}
         self.args = BlockArgs(ModelParameter(params), None, [''])
         self.args.params.layout = self.layout_rules
         self.args.params.mesh_shape = self.mesh_shape
@@ -78,15 +80,13 @@ class OperationTest(BaseTest):
     def _run(self, out: np.array) -> None:
         pass
 
-    def build(self, graph: mtf.Graph, mesh: mtf.Mesh, dim_size: int, dim_count: int,
+    def build(self, graph: mtf.Graph, mesh: mtf.Mesh,
               *args, **kwargs) -> typing.Tuple[typing.List[mtf.Tensor], typing.Any]:
-        self.args.params.mesh = mesh
-        self.args.params.graph = graph
-        print(np.prod([dim_size] * dim_count))
-        inp = tf1.random.normal(shape=[dim_size] * dim_count,
-                                dtype=self.args.params.variable_dtype.activation_dtype)
-        mtf_shape = [mtf.Dimension(str(i), dim_size) for i in range(dim_count)]
-        inp = mtf.import_tf_tensor(mesh, inp, shape=mtf_shape)
+        params = self.args.params
+        params.mesh = mesh
+        params.graph = graph
+        inp = mtf.random_normal(mesh, [params.batch_dim, params.sequence_dim] + params.feature_dims,
+                                dtype=params.variable_dtype.activation_dtype)
 
         return [self._build(inp, *args, **kwargs)], None
 
@@ -107,15 +107,11 @@ class ReZero(OperationTest):
 @pytest.mark.parametrize("calculation_dtype", ["bfloat16", "float32"])
 @pytest.mark.parametrize("storage_dtype", ["bfloat16", "float32"])
 @pytest.mark.parametrize("slice_dtype", ["bfloat16", "float32"])
-@pytest.mark.parametrize("dim_size,dim_count",
-                         [(1, 1),
-                          (1, 16),
-                          (16, 1),
-                          (2, 8),
-                          (8, 4),
-                          (64, 1),
-                          (64, 2),
-                          (8192, 1)])
-def op_test(test: typing.Type, calculation_dtype: str, storage_dtype: str, slice_dtype: str, dim_size: int,
-            dim_count: int):
-    test(calculation_dtype=calculation_dtype, storage_dtype=storage_dtype, slice_dtype=slice_dtype)(dim_size, dim_count)
+@pytest.mark.parametrize("embd_per_head", [1, 8, 64])
+@pytest.mark.parametrize("n_head", [1, 2])
+@pytest.mark.parametrize("batch_size", [1, 4])
+@pytest.mark.parametrize("n_ctx", [1, 8, 64])
+def op_test(test: typing.Type, calculation_dtype: str, storage_dtype: str, slice_dtype: str, embd_per_head: int,
+            n_head: int, batch_size: int, n_ctx:int):
+    test(calculation_dtype=calculation_dtype, storage_dtype=storage_dtype, slice_dtype=slice_dtype,
+         embd_per_head=embd_per_head, n_head=n_head, batch_size=batch_size, n_ctx=n_ctx)()
