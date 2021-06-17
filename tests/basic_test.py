@@ -3,6 +3,7 @@ import typing
 import jsonpickle
 import mesh_tensorflow as mtf
 import numpy as np
+import pytest
 import tensorflow as tf
 
 from src.dataclass import BlockArgs, ModelParameter
@@ -32,8 +33,8 @@ class BaseTest:
         if default_session is not None:
             default_session.close()
 
-    def build(self, graph: mtf.Graph, mesh: mtf.Mesh, *args, **kwargs) -> typing.Tuple[
-        typing.List[mtf.Tensor], typing.Any]:
+    def build(self, graph: mtf.Graph, mesh: mtf.Mesh,
+              *args, **kwargs) -> typing.Tuple[typing.List[mtf.Tensor], typing.Any]:
         pass
 
     def run(self, sess: tf1.Session, outputs: typing.List[tf.Tensor], args: typing.Any) -> None:
@@ -78,7 +79,7 @@ class OperationTest(BaseTest):
               *args, **kwargs) -> typing.Tuple[typing.List[mtf.Tensor], typing.Any]:
         self.args.params.mesh = mesh
         self.args.params.graph = graph
-
+        print(np.prod([dim_size] * dim_count))
         inp = tf1.random.normal(shape=[dim_size] * dim_count,
                                 dtype=self.args.params.variable_dtype.activation_dtype)
         mtf_shape = [mtf.Dimension(str(i), dim_size) for i in range(dim_count)]
@@ -99,5 +100,15 @@ class ReZero(OperationTest):
         assert np.all(out == 0)
 
 
-def rezero_test():
-    ReZero()(1, 1)
+@pytest.mark.parametrize("test", [ReZero])
+@pytest.mark.parametrize("dim_size,dim_count",
+                         [(1, 1),
+                          (1, 16),
+                          (16, 1),
+                          (2, 8),
+                          (8, 4),
+                          (64, 1),
+                          (64, 2),
+                          (8192, 1)])
+def op_test(test: typing.Type, dim_size:int, dim_count:int):
+    test()(dim_size, dim_count)
