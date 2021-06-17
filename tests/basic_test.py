@@ -84,7 +84,7 @@ class OperationTest(BaseTest):
         self._run(sess.run(outputs)[0])
 
 
-class ReZero(BaseTest):
+class ReZero(OperationTest):
     def _build(self, inp: mtf.Tensor) -> mtf.Tensor:
         return basic.rezero(self.args(inp))
 
