@@ -3,29 +3,22 @@ import tensorflow as tf
 
 from .backend import normal_var
 from ..dataclass import BlockArgs
-from ..mtf_wrapper import constant_scalar, einsum, reduce_mean, rsqrt
-from ..utils_mtf import get_attention_dim
+from ..mtf_wrapper import einsum, reduce_mean, rsqrt
+from ..utils_mtf import linear_shapes
 
 tf1 = tf.compat.v1
 
 
 def norm(args: BlockArgs) -> mtf.Tensor:
     block_input = args.tensor
-    normalized_shape = block_input.shape - [args.params.key_dim]
+    feature_shape = mtf.Shape(linear_shapes(args).old)
+    normalized_shape = block_input.shape - (feature_shape - [args.params.head_dim] * ('group' in args))
 
-    if 'instance' not in args:
-        normalized_shape = normalized_shape - [get_attention_dim(args).dim]
-    if 'group' not in args:
-        normalized_shape = normalized_shape - [args.params.head_dim]
-
-    if 'mean' in args:
-        block_input -= reduce_mean(block_input, output_shape=normalized_shape)
-
-    scale = [mtf.pow(mtf.reduce_mean(mtf.square(block_input), output_shape=normalized_shape) + 1e-6, -0.5)]
+    block_input -= reduce_mean(block_input, output_shape=normalized_shape)
+    scale = [rsqrt(mtf.reduce_mean(mtf.square(block_input), output_shape=normalized_shape) + 1e-6), block_input]
     if 'scale' in args:
-        scale.append(normal_var(args.params, args.params.feature_dims, mean=1))
-    if scale:
-        block_input = mtf.einsum([block_input] + scale, output_shape=block_input.shape)
+        scale.append(normal_var(args, feature_shape, mean=1))
+    block_input = einsum(scale, output_shape=block_input.shape)
     if 'shift' in args:
-        block_input += normal_var(args.params, args.params.feature_dims, mean=0)
+        block_input += normal_var(args, feature_shape, mean=0)
     return block_input

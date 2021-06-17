@@ -4,16 +4,20 @@ import mesh_tensorflow as mtf
 import tensorflow as tf
 
 from .backend import linear, linear_from_features, linear_to_features
+from .basic import activated_linear
 from .embedding import embed
+from .normalization import  norm
 from .frontend import block_part_fn
+from .momentumnet import MomentumOperation
 from .revnet import RevGradOp
+from .activation import activate
 from ..dataclass import BlockArgs, BlockConfig, ModelParameter
-from ..mtf_wrapper import (add_n, cast, constant_scalar, dropout, einsum, exp, log, one_hot, ones, reciprocal,
-                           reduce_logsumexp, reduce_max, reduce_sum, sigmoid, sign, zeros_like)
-from ..utils_mtf import concat, head_argmax, head_embed, slice, weighted_add, anonymize_dim, anonymize, anonymize_shape
+from ..mtf_wrapper import (add_n, cast, constant_scalar, dropout, einsum, one_hot, ones, reciprocal, reduce_logsumexp,
+                           reduce_mean, reduce_sum, sigmoid, sign, zeros_like)
+from ..utils_mtf import concat, slice, weighted_add, anonymize, anonymize_dim, anonymize_shape, get_intermediate
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
-import numpy as np
+
 tf1 = tf.compat.v1
 
 
@@ -49,7 +53,8 @@ def build(params: ModelParameter,
     :param txt_msk: Optional mask to remove loss for certain token positions
     :return: (Generated Video, Total Loss, Video Loss, Token Loss)
     """
-    with mtf.utils.outside_all_rewrites(), tf1.variable_scope(params.model_mode):
+    with mtf.utils.outside_all_rewrites(), tf1.variable_scope(params.model_mode, reuse=tf1.AUTO_REUSE,
+                                                              use_resource=True):
         cat_msk_src = _default_ones(params, cat_msk_src)
         cat_msk_tgt = _default_ones(params, cat_msk_tgt)
         vid_msk_src = _default_ones(params, vid_msk_src)
@@ -110,13 +115,15 @@ def build(params: ModelParameter,
         # Language embedding and initial feed forward.
         if params.use_language:
             base_args = BlockArgs(params, txt_tgt, [''])
-            txt_embd = embed(base_args(params.token_embedding),
-                             [params.head_dim, params.vocab_dim] + params.intermediate)
-            txt = einsum([txt_embd, *head_embed(params, txt_src)], reduced_dims=[params.vocab_dim, params.head_dim])
+            intermediate = params.intermediate[0]
+            intermediate = mtf.Dimension(intermediate.name, int(intermediate.size * params.vocab_weight_factorization))
+            txt_embd = embed(base_args(params.token_embedding), [params.vocab_dim, intermediate])
+            txt = einsum([txt_embd, one_hot(txt_src, params.vocab_dim, dtype=params.variable_dtype.activation_dtype)],
+                         reduced_dims=[params.vocab_dim])
 
             txt = dropout(txt, params.train, rate=params.input_dropout)
 
-            txt = linear_to_features(base_args(txt), [txt_tgt.shape[-1]] + params.intermediate)
+            txt = linear_to_features(base_args(txt), [txt_tgt.shape[-1], intermediate])
 
             for config_idx, config in enumerate(params.input_block_config):
                 txt = block_part_fn(params, config, txt, f'lang_inp{config_idx}')
@@ -131,40 +138,43 @@ def build(params: ModelParameter,
                 for dim in (src.shape - params.feature_dims).dims[1:]:
                     src += embed(base_args(params.position_embedding), [dim] + params.feature_dims)
 
-            if params.use_revnet:
-                out = (src, None, src, None)
+            if params.memory_reduction_strategy == "revnet":
+                out = (src, zeros_like(src), src, zeros_like(src))
 
                 def _layer_builder(block_input: typing.Tuple[mtf.Tensor, mtf.Tensor, mtf.Tensor, mtf.Tensor],
                                    block_config: BlockConfig, index: int):
-                    x1, x1_backwards, x2, x2_backwards = block_input
-                    if x1_backwards is None:
-                        x1_backwards = zeros_like(x1)
-                    if x2_backwards is None:
-                        x2_backwards = zeros_like(x2)
-                    return RevGradOp(params, block_config, x1, x1_backwards, x2, x2_backwards, str(index)).outputs
-            else:
+                    return RevGradOp(params, block_config, *block_input, str(index)).outputs
+            elif params.memory_reduction_strategy == 'checkpoint':
                 out = src
 
                 def _layer_builder(block_input: mtf.Tensor, block_config: BlockConfig, index: int):
                     return mtf.recompute_grad(lambda x: block_part_fn(params, block_config, x, str(index)),
                                               [block_input])
+            elif params.memory_reduction_strategy == 'momentum':
+                out = (src, zeros_like(src), src, zeros_like(src))
 
+                def _layer_builder(block_input: typing.Tuple[mtf.Tensor, mtf.Tensor, mtf.Tensor, mtf.Tensor],
+                                   block_config: BlockConfig, index: int):
+                    return MomentumOperation(params, block_config, *block_input, str(index)).outputs
+            elif params.memory_reduction_strategy == 'none':
+                out = src
+
+                def _layer_builder(block_input: mtf.Tensor, block_config: BlockConfig, index: int):
+                    return block_part_fn(params, block_config, block_input, str(index))
             for i in range(params.n_blocks):
                 for block_part in params.block_config:
                     out = _layer_builder(out, block_part, i)
 
-            if params.use_revnet:
+            if params.memory_reduction_strategy in ('revnet', 'momentum'):
                 out = out[0] + out[2]
 
         if params.use_language:
             token_out = slice(out, 0, params.language_token_patch, spatial_ctx)
-
             for config_idx, config in enumerate(params.output_block_config):
                 token_out = block_part_fn(params, config, token_out, f'lang_out{config_idx}')
-
             token_out = linear(base_args(anonymize(token_out, params.head_dim)),
                                old=anonymize_shape(params.feature_dims, params.head_dim),
-                               new=[txt_tgt.shape[-1]] + params.vocab_dims)
+                               new=[txt_tgt.shape[-1], params.vocab_dim])
 
         if params.use_video:
             frame_out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)
@@ -189,24 +199,12 @@ def build(params: ModelParameter,
         accuracy = None
 
         if params.use_language:
-            reduced_shape = token_out.shape - params.vocab_dims
-            max_logit = reduce_max(token_out, output_shape=reduced_shape)
-            msk = txt_msk * cat_msk_tgt * (1 / txt_tgt.size)
-            token_loss = einsum([log(reduce_sum(exp(token_out - max_logit), output_shape=reduced_shape)), msk],
-                                output_shape=[])
-            token_loss += einsum([token_out, *head_embed(params, txt_tgt), constant_scalar(params, -1), msk],
-                                 output_shape=[])
-            token_loss += einsum([max_logit, msk], output_shape=[])
+            token_loss = mtf.layers.softmax_cross_entropy_with_logits(token_out, txt_tgt, params.vocab_dim)
+            token_loss = reduce_mean(token_loss)
             loss_list.append(token_loss)
-
-            if txt_msk is not None:
-                token_loss = einsum([constant_scalar(params, txt_msk.size), reciprocal(reduce_sum(txt_msk)),
-                                     constant_scalar(params, cat_msk_tgt.size), reciprocal(reduce_sum(cat_msk_tgt)),
-                                     token_loss], output_shape=[])
-
             if params.calc_accuracy:
-                accuracy = einsum([cast(mtf.equal(head_argmax(token_out, params.vocab_dims), txt_tgt),
-                                        params.variable_dtype.activation_dtype), msk], output_shape=[])
+                accuracy = reduce_sum(mtf.cast(mtf.equal(mtf.argmax(token_out, params.vocab_dim), txt_tgt),
+                                               params.variable_dtype.activation_dtype), []) / txt_tgt.size
 
         if params.use_video:
 

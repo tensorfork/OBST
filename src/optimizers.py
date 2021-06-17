@@ -7,32 +7,28 @@ import typing
 import mesh_tensorflow as mtf
 import numpy as np
 import tensorflow as tf2
+from tensorflow.python.ops.init_ops import Initializer
 
 from src.model.revnet import RevGradOp
 from .dataclass import ModelParameter
 from .mtf_wrapper import (add_n, cast, constant_float, constant_scalar, einsum, equal, greater, greater_equal, minimum,
                           mod, reduce_max, reduce_mean, reduce_sum, rsqrt, sqrt, square)
-from .utils_mtf import anonymize, anonymize_dim, feature_dims_used, to_fp32, weighted_add
+from .utils_mtf import SHAPE, feature_dims_used, to_fp32, weighted_add, get_variable, non_replicated_variable
 
 tf = tf2.compat.v1
+zeros = tf.zeros_initializer()
 
 
 def import_float(imported):
     return tf.constant(imported, dtype=tf.float32, shape=[])
 
 
-def sum_dim(inp: mtf.Tensor, dims: typing.List[mtf.Dimension]):
-    return einsum([inp, anonymize(dims, dims)], output_shape=mtf.Shape(dims) + [anonymize_dim(d) for d in dims])
+def get_var(params: ModelParameter, name: str, shape: SHAPE, initializer: Initializer = zeros):
+    return get_variable(params, name, shape, initializer, False)
 
 
-def _min_norm_element_from2(params: ModelParameter, v1v1: mtf.Tensor, v1v2: mtf.Tensor,
-                            v2v2: mtf.Tensor, min_gamma: float = 0.001):
-    gamma = constant_float(params, value=(1 - min_gamma), shape=[]) * to_fp32(greater_equal(v1v2, v1v1))
-    gamma += constant_float(params, value=min_gamma, shape=[]) * \
-             to_fp32(greater_equal(v1v2, v2v2)) * to_fp32(equal(gamma, 0))
-    gamma += (-1.0 * ((v1v2 - v2v2) / (v1v1 + v2v2 - 2 * v1v2))) * to_fp32(equal(gamma, 0))
-
-    return gamma
+def variable(params: ModelParameter, base: mtf.Variable, name: str, shape: SHAPE):
+    return get_variable(params, f"{base.name}/{params.optimizer}/{name}", shape, zeros, False)
 
 
 def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, manual_step: tf.Tensor,
@@ -50,6 +46,8 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
     dtype = params.variable_dtype.activation_dtype
     tf_learning_rate = tf.constant(value=params.learning_rate, shape=[], dtype=tf.float32)
     global_steps_float = tf.cast(global_step, tf.float32)
+    global_step_mtf = mtf.import_fully_replicated(params.mesh, global_step, [], "mtf_learning_rate")
+    update_ops = []
 
     def import_mtf(imported, name):
         return mtf.import_fully_replicated(params.mesh, tf.cast(imported, dtype), [], name)
@@ -66,6 +64,35 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                                       (tf.maximum(global_steps_float - start_step, import_float(0.))),
                                       import_float(params.learning_rate_decay_min * 1.))
 
+    if params.reduce_lr_on_plateau_timespan:
+        base = "reduce_lr_on_plateau/"
+        loss_sum = mtf.add_n(loss_list)
+        window_dim = mtf.Dimension("loss_window", params.reduce_lr_on_plateau_timespan)
+
+        divisor_ptr = get_var(params, f"{base}lr_divisor", [], tf.ones_initializer())
+        loss_window_ptr = get_var(params, f"{base}loss_window", [window_dim])
+        loss_ema_ptr = get_var(params, f"{base}loss_ema", [])
+        last_reduce = get_var(params, f"{base}last_reduce", [])
+
+        one_hot = mtf.one_hot(mtf.mod(global_step_mtf, params.reduce_lr_on_plateau_timespan), window_dim)
+        sub = (loss_sum - loss_window_ptr) * one_hot
+        loss_window = loss_window_ptr - sub
+        window_mean = reduce_mean(loss_window, output_shape=[])
+        loss_ema = loss_ema_ptr * (2 / params.reduce_lr_on_plateau_timespan)
+        loss_ema += loss_sum * (1 - 2 / params.reduce_lr_on_plateau_timespan)
+        reduce = mtf.cast(mtf.logical_and(mtf.greater(global_step_mtf,
+                                                      last_reduce + params.reduce_lr_on_plateau_timespan),
+                                          mtf.greater(window_mean, loss_ema)),
+                          params.variable_dtype.activation_dtype)
+        reduce = reduce * (params.reduce_lr_on_plateau_reduction - 1) + 1
+        divisor = divisor_ptr * reduce
+        tf_learning_rate /= divisor
+
+        update_ops.append(mtf.assign(divisor_ptr, divisor))
+        update_ops.append(mtf.assign_sub(loss_window_ptr, sub))
+        update_ops.append(mtf.assign(loss_ema_ptr, loss_ema))
+        update_ops.append(mtf.assign(last_reduce, weighted_add(last_reduce, global_step_mtf, reduce)))
+
     learning_rate = import_mtf(tf_learning_rate, "learning_rate")
     step = cast(equal(mod(tf.cast(manual_step + 1, dtype),
                           import_mtf(params.grad_accumulation * 1., "grad_accum")),
@@ -75,16 +102,8 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
     beta2 = 1 - step * import_mtf(1 - params.opt_beta2, "beta2")
     epsilon = params.opt_epsilon
 
-    def _variable(mesh, name, shape, dtype):
-        return mtf.get_variable(mesh, name, shape=shape,
-                                initializer=tf.zeros_initializer(), trainable=False, dtype=dtype)
-
-    def variable(var, name, shape):
-        return _variable(var.mesh, f"{var.name}/{params.optimizer}/{name}", shape, params.variable_dtype)
-
     debug_gradients_dict = {}
     first_grad = {}
-    update_ops = []
 
     if params.multi_loss_strategy == "mgda":
         loss_1__loss_1 = constant_float(params, 0, shape=[params.head_dim])
@@ -94,10 +113,14 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
     for loss_idx, loss in enumerate(loss_list):
 
         if params.multi_loss_strategy == "mgda" and loss_idx == 2:
-            gamma = _min_norm_element_from2(params,
-                                            reduce_sum(loss_1__loss_1, output_shape=[]),
-                                            reduce_sum(loss_1__loss_2, output_shape=[]),
-                                            reduce_sum(loss_2__loss_2, output_shape=[]))
+            v1v1 = reduce_sum(loss_1__loss_1, output_shape=[])
+            v1v2 = reduce_sum(loss_1__loss_2, output_shape=[])
+            v2v2 = reduce_sum(loss_2__loss_2, output_shape=[])
+            min_gamma = 0.001
+            gamma = constant_float(params, value=(1 - min_gamma), shape=[]) * to_fp32(greater_equal(v1v2, v1v1))
+            gamma += constant_float(params, value=min_gamma, shape=[]) * \
+                     to_fp32(greater_equal(v1v2, v2v2)) * to_fp32(equal(gamma, 0))
+            gamma += (-1.0 * ((v1v2 - v2v2) / (v1v1 + v2v2 - 2 * v1v2))) * to_fp32(equal(gamma, 0))
 
             loss = mtf.add(mtf.multiply(loss_list[0], gamma),
                            mtf.multiply(loss_list[1], (1 - gamma)))
@@ -156,7 +179,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
 
                         if params.debug_gradients:
                             flat_shape = mtf.Shape([mtf.Dimension('flat_dim', var.size)])
-                            flat_grad = variable(var, f"loss_{loss_idx}", flat_shape)
+                            flat_grad = variable(params, var, f"loss_{loss_idx}", flat_shape)
                             update_ops.append(mtf.assign(flat_grad, mtf.reshape(grad, new_shape=flat_shape)))
                             debug_gradients_dict[f"loss_{loss_idx}/{var.name}"] = flat_grad
 
@@ -204,7 +227,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                                         continue
 
                         if params.grad_accumulation > 1:
-                            grad_buffer = variable(var, "grad_accumulation", var.shape)
+                            grad_buffer = variable(params, var, "grad_accumulation", var.shape)
                             next_grad = grad + mtf.identity(grad_buffer)
                             update_ops.append(mtf.assign(grad_buffer, next_grad * mstep))
                             grad = next_grad * step / params.grad_accumulation
@@ -225,30 +248,22 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                             grad = einsum([minimum(rsqrt(einsum([grad, grad], []) + 1e-6), 1 / params.gradient_clip),
                                            grad, constant_scalar(params, params.gradient_clip)], grad.shape)
                         if var.shape.ndims <= 1 or params.optimizer == 'adam':
-                            exp_avg_p2_ptr = variable(var, 'exp_avg_p2', var.shape)
+                            exp_avg_p2_ptr = variable(params, var, 'exp_avg_p2', var.shape)
                             exp_avg_p2 = weighted_add(exp_avg_p2_ptr, square(grad), beta2)
                             update_ops.append(mtf.assign(exp_avg_p2_ptr, exp_avg_p2))
                             if params.opt_beta1:
-                                exp_avg_p1_ptr = variable(var, 'exp_avg_p1', var.shape)
+                                exp_avg_p1_ptr = variable(params, var, 'exp_avg_p1', var.shape)
                                 grad = weighted_add(exp_avg_p1_ptr, grad, beta1)
                                 update_ops.append(mtf.assign(exp_avg_p1_ptr, grad))
                             weight_update = grad * rsqrt(exp_avg_p2 + epsilon)
 
-                        elif params.optimizer == 'shampoo':
-                            shape = grad.shape
-                            buffers = []
-
-                            if all(f in grad.shape.dims for f in params.feature_dims):
-                                shape = shape - params.feature_dims
-                                buffers.append(sum_dim(grad, params.feature_dims))
-                            buffers.extend([sum_dim(grad, [d]) for d in shape.dims])
 
                         elif params.optimizer == 'sgd':
                             weight_update = grad
 
                         elif params.optimizer == 'novograd':
-                            exp_avg_p1 = exp_avg_p1_ptr = variable(var, "exp_avg_p1", var.shape)
-                            exp_avg_p2 = exp_avg_p2_ptr = variable(var, "exp_avg_p2", [])
+                            exp_avg_p1 = exp_avg_p1_ptr = variable(params, var, "exp_avg_p1", var.shape)
+                            exp_avg_p2 = exp_avg_p2_ptr = variable(params, var, "exp_avg_p2", [])
 
                             exp_avg_p2 = weighted_add(exp_avg_p2, reduce_sum(square(grad)), beta2)
                             weight_update = beta1 * exp_avg_p1 + grad * rsqrt(exp_avg_p2 + epsilon)
@@ -257,11 +272,11 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                                                mtf.assign(exp_avg_p2_ptr, exp_avg_p2)])
 
                         elif params.optimizer == 'sm3':
-                            update = variable(var, "dim0", [var.shape.dims[0]])
+                            update = variable(params, var, "dim0", [var.shape.dims[0]])
                             buffer = [update]
 
                             for i in range(1, var.shape.ndims):
-                                buffer.append(variable(var, f"dim{i}", [var.shape.dims[i]]))
+                                buffer.append(variable(params, var, f"dim{i}", [var.shape.dims[i]]))
                                 update = minimum(update, buffer[-1])
 
                             update += square(grad)

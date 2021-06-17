@@ -1,8 +1,8 @@
 
 numpy==1.19.2
 mesh-tensorflow==0.1.19
-tensorflow==2.4.1
-tokenizers==0.9.3
+tensorflow==2.5.0
+tokenizers==0.10.3
 transformers==3.5.1
 
 tpunicorn

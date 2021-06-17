@@ -3,9 +3,10 @@ import typing
 import mesh_tensorflow as mtf
 import numpy as np
 import tensorflow as tf
+from tensorflow.python.ops.init_ops import Initializer
 
 from .dataclass import BlockArgs, ModelParameter
-from .mtf_wrapper import cast, floordiv, mod, mtf_range, one_hot
+from .mtf_wrapper import cast, mtf_range, random_name
 from .utils_core import default
 
 tf1 = tf.compat.v1
@@ -18,26 +19,7 @@ OPT_SHAPE = typing.Optional[SHAPE]
 OPT_DIMS = typing.Optional[DIM_LIST]
 ALL_SHAPES = typing.Union[SHAPE, mtf.Tensor, mtf.Variable]
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
-
-
-def head_argmax(tensor: mtf.Tensor, dims: typing.List[mtf.Dimension]) -> mtf.Tensor:
-    dims = sorted(dims, key=lambda x: x.size)
-    dims.reverse()
-    dim = dims.pop(0)
-    val, ind = mtf.top_1(tensor, dim)
-    size = dim.size
-    for dim in dims:
-        val, ind0 = mtf.top_1(val, dim)
-        ind = mtf.einsum([ind, one_hot(ind0, dim, dtype=ind.dtype)], reduced_dims=[dim]) * size + ind0
-        size = dim.size
-    return ind
-
-
-def head_embed(params: ModelParameter, int_tokens: mtf.Tensor) -> typing.Tuple[mtf.Tensor, mtf.Tensor]:
-    return (one_hot(floordiv(int_tokens, params.vocab_size), params.head_dim,
-                    dtype=params.variable_dtype.activation_dtype),
-            one_hot(mod(int_tokens, params.vocab_size), params.vocab_dim,
-                    dtype=params.variable_dtype.activation_dtype))
+LINEAR_SHAPES = typing.NamedTuple("LinearShapes", (('old', DIM_LIST), ('new', DIM_LIST)))
 
 
 def unanonymize(inp: mtf.Tensor, dim: typing.Union[mtf.Dimension, str]) -> mtf.Tensor:
@@ -211,8 +193,61 @@ def anonymize(inp: mtf.Tensor,
     return inp
 
 
+class BroadcastForward(mtf.Operation):
+    """Broadcast - output dims are a superset of input dims, in any order."""
+
+    def __init__(self, x, output_shape):
+        super(BroadcastForward, self).__init__([x], name=random_name("broadcast_forward"))
+        self._outputs = [mtf.Tensor(self, output_shape, x.dtype)]
+        self._splittable_dims, self._unsplittable_dims = self._initialize_all_dimensions_as_splittable()
+
+    def gradient(self, grad_ys: typing.List[mtf.Tensor]):
+        return BroadcastBackward(grad_ys[0], self.inputs[0]).outputs
+
+    def lower(self, lowering: mtf.Lowering):
+        inp, out = self.inputs[0], self.outputs[0]
+        lowering.tensors[out] = lowering.mesh_impl(self).broadcast_impl(lowering.tensors[inp], inp.shape, out.shape)
+
+
+class BroadcastBackward(mtf.Operation):
+    def __init__(self, grad_y: mtf.Tensor, inp: mtf.Tensor):
+        super(BroadcastBackward, self).__init__([grad_y], name=random_name("broadcast_backward"))
+        self._outputs = [mtf.Tensor(self, inp.shape, inp.dtype)]
+        self._splittable_dims, self._unsplittable_dims = self._initialize_all_dimensions_as_splittable()
+
+    def lower(self, lowering: mtf.Lowering):
+        grad, out = self.inputs[0], self.outputs[0]
+        dims = [grad.shape.dims.index(d) for d in (grad.shape - out.shape).dims]
+
+        def slicewise_fn(y):
+            return tf.reduce_sum(y, dims)
+
+        lowering.tensors[out] = lowering.mesh_impl(self).slicewise(slicewise_fn, lowering.tensors[grad])
+
+
+def non_replicated_broadcast(x, shape):
+    return BroadcastForward(x, mtf.Shape(shape)).outputs[0]
+
+
+def get_variable(params: ModelParameter, name: str, shape: SHAPE, initializer: Initializer, trainable: bool):
+    full_name = f'{tf1.get_variable_scope().name}/{name}'
+    if full_name in params.mesh.graph.name_to_variable:
+        return params.mesh.graph.name_to_variable[full_name].outputs[0]
+    shape = deduplicate(mtf.Shape(shape))
+    var = mtf.Variable(params.mesh, name, shape, params.variable_dtype, initializer, trainable)
+    params.mesh.graph.name_to_variable[full_name] = var
+    return var.outputs[0]
+
+
+def non_replicated_variable(params: ModelParameter, name: str, shape: SHAPE, initializer: Initializer, trainable: bool):
+    var = get_variable(params, name, shape, initializer, trainable)
+    if params.grad_accumulation < 2 or params.batch_splits == 1:
+        return var
+    return non_replicated_broadcast(var, [params.batch_dim] + dims_from_shape(shape))
+
+
 def anonymize_shape(inp: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
-                    dim: typing.Union[mtf.Dimension, str]) -> typing.Union[mtf.Shape, typing.List[mtf.Dimension]]:
+                    dim: typing.Union[mtf.Dimension]) -> typing.Union[mtf.Shape, typing.List[mtf.Dimension]]:
     """
     Anonymize one dimension of a given Mesh TensorFlow shape. See anonymize for details on what anonymization does.
     :param inp: shape or list of dimensions
@@ -222,10 +257,10 @@ def anonymize_shape(inp: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
     return replace_dim(inp, anonymize_dim(dim), unanonymize_dim(dim))
 
 
-def replace_dim(inp: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
-                dim: typing.Union[mtf.Dimension, str],
-                replaced: typing.Optional[typing.Union[mtf.Dimension, str]] = None
-                ) -> typing.Union[mtf.Shape, typing.List[mtf.Dimension]]:
+def replace_dim(inp: typing.Union[DIM_LIST, mtf.Shape, mtf.Tensor],
+                dim: typing.Union[mtf.Dimension, DIM_LIST],
+                replaced: mtf.Dimension
+                ) -> typing.Union[mtf.Shape, DIM_LIST, mtf.Tensor]:
     """
     Replace a dimension in a shape
     :param inp: shape or list of dimensions
@@ -233,15 +268,23 @@ def replace_dim(inp: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
     :param replaced: dimension that will be replaced
     :return: new shape/list with changed dimension
     """
-    if replaced is None:
-        replaced = dim
-    if not check_for_dim(inp, replaced):
-        return inp
-    out = [dim if dim_name(replaced) == cdim.name else cdim
-           for cdim in (inp.dims if isinstance(inp, mtf.Shape) else inp)]
+    shape = inp
+    if isinstance(shape, mtf.Tensor):
+        shape = shape.shape
+    if isinstance(shape, mtf.Shape):
+        shape = shape.dims
+    if not check_for_dim(shape, replaced):
+        return shape
+    if not isinstance(dim, list):
+        dim = [dim]
+    out = []
+    for cdim in shape:
+        out.extend(dim if dim_name(replaced) == cdim.name else [cdim])
     if isinstance(inp, list):
         return out
-    return mtf.Shape(out)
+    if isinstance(inp, mtf.Shape):
+        return mtf.Shape(out)
+    return mtf.reshape(inp, out)
 
 
 def weighted_add(left: mtf.Tensor, right: mtf.Tensor, alpha: mtf.Tensor) -> mtf.Tensor:
@@ -287,6 +330,21 @@ def shape_size(shape: ALL_SHAPES):
     return np.prod([d.size for d in dims_from_shape(shape)])
 
 
+def get_intermediate(args: BlockArgs):
+    if 'group' not in args:
+        return args.params.intermediate
+    return [args.params.head_dim,
+            anonymize_dim(args.params.key_dim, args.params.key_dim.size * args.params.group_linear_factor)]
+
+
+def linear_shapes(args: BlockArgs) -> LINEAR_SHAPES:
+    features = mtf.Shape(deduplicate(get_intermediate(args) + args.params.feature_dims))
+    if 'group' in args:
+        features -= [args.params.head_dim]
+    old = shape_crossection(args.tensor.shape, features).dims
+    return LINEAR_SHAPES(old, (features - old).dims)
+
+
 def shape_crossection(*shapes: ALL_SHAPES):
     shapes = [dims_from_shape(s) for s in shapes]
     out = [dim for dim in shape_addition(*shapes) if all(dim in shape for shape in shapes)]
@@ -301,36 +359,7 @@ def shape_addition(*shapes: ALL_SHAPES):
 
 
 def missing_dims(self: ALL_SHAPES, other: ALL_SHAPES):
-    self = dims_from_shape(self)
-    other = dims_from_shape(other)
-    return [d for d in other if d not in self]
-
-
-def compare_range(params: ModelParameter, dim0: mtf.Dimension, dim1: mtf.Dimension, comparison: typing.Callable):
-    with tf1.variable_scope(f"compare{dim0.name}_{dim1.name}"):
-        return cast(comparison(mtf_range(params.mesh, dim0, tf.int32),
-                               mtf_range(params.mesh, dim1, tf.int32)),
-                    params.variable_dtype.activation_dtype)
-
-
-def shape_union(*shapes: ALL_SHAPES):
-    out = set(dims_from_shape(shapes[0]))
-    for s in shapes[1:]:
-        out = out.union(set(dims_from_shape(s)))
-    return mtf.Shape(list(out))
-
-
-def shape_addition(*shapes: ALL_SHAPES):
-    dims = []
-    for s in shapes:
-        dims.extend(dims_from_shape(s))
-    return mtf.Shape(deduplicate(dims))
-
-
-def missing_dims(self: ALL_SHAPES, other: ALL_SHAPES):
-    self = dims_from_shape(self)
-    other = dims_from_shape(other)
-    return [d for d in other if d not in self]
+    return (mtf.Shape(dims_from_shape(other)) - mtf.Shape(dims_from_shape(self))).dims
 
 
 def compare_range(params: ModelParameter, dim0: mtf.Dimension, dim1: mtf.Dimension, comparison: typing.Callable):

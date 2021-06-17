@@ -23,12 +23,10 @@ class ModelParameter(typing.Dict[str, typing.Any]):
     def __init__(self, config: typing.Dict[str, typing.Any]):
         super().__init__()
 
-        self.position_embedding = "absolute"  # relative(additional args: -learned -shared) or
-                                              # absolute(additional args: -split -shared) or
-                                              #  axial(additional args: -shared)
+        self.position_embedding = "absolute"  # "absolute" or "relative"(-learned) or "axial"
         self.token_embedding = "absolute"
-        self.empty_frame_embedding = "absolute"  # embedding options above or None
-        self.shared_position_embedding = False
+        self.empty_frame_embedding = "absolute"
+        self.output_embedding = "absolute"  # embedding options above
         self.use_video = True
         self.save_graph = False
         self.use_language = True
@@ -51,6 +49,8 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.three_axes = True
         self.dataset_configs = []
         self.data_seed = 456772
+        self.parallel_batch = None
+        self.parallel_interleave = None
         self.use_random_dataloader = False
         self.train = True
         self.debug_sample = False
@@ -73,6 +73,9 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.grad_accumulation = 1
         self.macro_batching = 1
         self.macro_batch_loss_smoothing = False
+        self.reduce_lr_on_plateau_timespan = 0
+        self.reduce_lr_on_plateau_reduction = 2
+        self.momentumnet_alpha = 0.99
         self.current_step = 0
         self.batch_splits = 1
         self.head_splits = 32.
@@ -87,16 +90,17 @@ class ModelParameter(typing.Dict[str, typing.Any]):
                                                  "loop_optimization":             True,
                                                  "function_optimization":         True,
                                                  "debug_stripper":                True,
-                                                 "disable_model_pruning":         False,
                                                  "scoped_allocator_optimization": True,
                                                  "pin_to_host_optimization":      True,
                                                  "implementation_selector":       True,
                                                  "auto_mixed_precision":          True,
                                                  "disable_meta_optimizer":        False,
+                                                 "disable_model_pruning":         False,
                                                  "min_graph_nodes":               0
                                                  }
         self.language_token_per_frame = 0
         self.weight_decay = 0.001
+        self.vocab_weight_factorization = 0.125
         self.train_steps = 150_000
         self.warmup_steps = 3000
         self.rezero_lr_multiplier = 0.1
@@ -116,6 +120,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.group_linear_factor = 2
         self.embedding_stddev = 0.04
         self.color_quantization_value = 256
+        self.experts = 64
         self.use_discrete_video_loss = False
         self.use_bit_fold_input_pipeline = False
         self.bit_fold_value = 4
@@ -123,22 +128,23 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.model_mode = 'jannet'
         self.optimizer = 'adam'
         self.multi_loss_strategy = "linear"
-        self.use_revnet = True
+        self.memory_reduction_strategy = "revnet"
         self.debug_gradients = False
         self.use_initial_position_embedding = False
         self.intermediate_feed_forward_multiplier = None
         self.own_color = "\x1b[32;1m"
         self.other_color = "\x1b[0m"
-        self.block_config = [{'layer': ["norm-group-instance-mean-std-shift-scale",
-                                        "feed_forward-relu-group"]
+        self.scale_by_depth = True
+        self.block_config = [{'layer': ["norm-group-shift-scale",
+                                        "feed_forward-in_relu-group-in_glu_add-in_norm"]
                               },
 
-                             {'layer': ["norm-group-instance-mean-std-shift-scale",
-                                        "attention-relu-embedded-kernel_softmax"]
+                             {'layer': ["norm-group-std-shift-scale",
+                                        "attention-in_relu-embedded-relative"]
                               }]
 
         self.input_block_config = []
-        self.output_block_config = []
+        self.output_block_config = [{'layer': ["norm-shift-scale"]}]
 
         self.mesh: typing.Optional[mtf.Mesh] = None
         self.d_assignment: typing.Optional[DeviceAssignment] = None
@@ -160,6 +166,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         if isinstance(self.position_embedding, str):
             self.position_embedding = self.position_embedding.split('-')
             self.token_embedding = self.token_embedding.split('-')
+            self.output_embedding = self.output_embedding.split('-')
             self.empty_frame_embedding = self.empty_frame_embedding.split('-')
 
         self.multi_loss_strategy = self.multi_loss_strategy.lower()
@@ -182,6 +189,12 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             self.storage_dtype = getattr(tf, self.storage_dtype)
         if isinstance(self.slice_dtype, str):
             self.slice_dtype = getattr(tf, self.slice_dtype)
+        if self.n_ctx % self.experts:
+            raise ValueError("Context has to be divisible by number of experts. Set \"experts\" to 1 if you're not "
+                             "using MoE")
+        if self.use_video and (self.frame_width * self.frame_height // self.patch_size) % self.experts:
+            raise ValueError("Frame size has to be divisible by number of experts. Set \"experts\" to 1 if you're not "
+                             "using MoE")
         if isinstance(self.calculation_dtype, str):
             self.calculation_dtype = getattr(tf, self.calculation_dtype)
         if self.intermediate_feed_forward_multiplier is None:
@@ -205,7 +218,6 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             if self.split_vocab:
                 full_partition_size = self.head_splits * 128
                 self.vocab_size += full_partition_size - self.vocab_size % full_partition_size
-                self.vocab_size //= self.n_head
             elif self.vocab_size % 256 > 0:
                 self.vocab_size += 256 - self.vocab_size % 256
         self.mesh_shape = ','.join([f"b:{self.batch_splits:.0f}"] * split_batch +
@@ -213,7 +225,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.layout = ','.join([f"batch:b"] * split_batch +
                                [f"heads:h"] * split_heads)
         self.variable_dtype = mtf.VariableDType(self.storage_dtype, self.slice_dtype, self.calculation_dtype)
-        self.block_config = [BlockConfig(conf, use_revnet=self.use_revnet) for conf in self.block_config]
+        self.block_config = [BlockConfig(conf, use_revnet=self.memory_reduction_strategy) for conf in self.block_config]
         self.input_block_config = [BlockConfig(conf, use_revnet=False) for conf in self.input_block_config]
         self.output_block_config = [BlockConfig(conf, use_revnet=False) for conf in self.output_block_config]
         self.time_patch_size = self.n_ctx // self.time_patch
@@ -237,9 +249,9 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.intermediate = [mtf.Dimension("intermediate",
                                            int(self.n_head * self.key_dim.size *
                                                self.intermediate_feed_forward_multiplier))]
+        self.expert_dim = mtf.Dimension("experts", self.experts)
 
-        self.vocab_dim = mtf.Dimension("vocab", self.vocab_size)
-        self.vocab_dims = [self.head_dim] * self.split_vocab + [self.vocab_dim]
+        self.vocab_dim = mtf.Dimension(self.head_dim.name, self.vocab_size)
         self.batch_dim = mtf.Dimension("batch", self.train_batch_size)
         self.frame_input_sequence = mtf.Dimension("_sequence", self.time_patch_size + 1)
 
@@ -289,7 +301,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.input_pipeline_shape = align_tensor_op(self.input_pipeline_shape)
 
         self.attention_idx = 0
-        self.cached_embeddings = {}
+        self.cached_parameters = {}
 
     def __getitem__(self, key: str) -> typing.Any:
         print(f"Getting {key} via deprecated interface")
@@ -347,8 +359,8 @@ class BlockArgs:
                 new.params = a
             elif isinstance(a, mtf.Tensor):
                 new.tensor = a
-            elif isinstance(a, list):
-                new.name_extras = a
+            elif isinstance(a, (list, tuple)):
+                new.name_extras = list(a)
             elif isinstance(a, str):
                 new.name_extras.append(str)
             else:

@@ -15,6 +15,7 @@ SHAPE = typing.Union[mtf.Shape, DIM_LIST]
 TENSORS = typing.List[mtf.Tensor]
 OPT_SHAPE = typing.Optional[SHAPE]
 OPT_DIMS = typing.Optional[DIM_LIST]
+OPT_DIM = typing.Optional[mtf.Dimension]
 
 
 def scoped(name: str, fn: typing.Callable, *args, **kwargs):
@@ -31,19 +32,19 @@ def one_hot(indices: mtf.Tensor, output_dim: mtf.Dimension, on_value: float = 1.
     return scoped("one_hot", mtf.one_hot, indices, output_dim, on_value, off_value, dtype)
 
 
-def reduce_mean(tensor: mtf.Tensor, output_shape: OPT_SHAPE = None, reduced_dim: OPT_DIMS = None) -> mtf.Tensor:
+def reduce_mean(tensor: mtf.Tensor, output_shape: OPT_SHAPE = None, reduced_dim: OPT_DIM = None) -> mtf.Tensor:
     return scoped("reduce_mean", mtf.reduce_mean, tensor, None, output_shape, reduced_dim)
 
 
-def reduce_sum(tensor: mtf.Tensor, output_shape: OPT_SHAPE = None, reduced_dim: OPT_DIMS = None) -> mtf.Tensor:
+def reduce_sum(tensor: mtf.Tensor, output_shape: OPT_SHAPE = None, reduced_dim: OPT_DIM = None) -> mtf.Tensor:
     return scoped("reduce_sum", mtf.reduce_sum, tensor, None, output_shape, reduced_dim)
 
 
-def reduce_max(tensor: mtf.Tensor, output_shape: OPT_SHAPE = None, reduced_dim: OPT_DIMS = None) -> mtf.Tensor:
+def reduce_max(tensor: mtf.Tensor, output_shape: OPT_SHAPE = None, reduced_dim: OPT_DIM = None) -> mtf.Tensor:
     return scoped("reduce_max", mtf.reduce_max, tensor, None, output_shape, reduced_dim)
 
 
-def reduce_logsumexp(tensor: mtf.Tensor, reduced_dim: OPT_DIMS = None) -> mtf.Tensor:
+def reduce_logsumexp(tensor: mtf.Tensor, reduced_dim: OPT_DIM = None) -> mtf.Tensor:
     return scoped("reduce_logsumexp", mtf.reduce_logsumexp, tensor, reduced_dim)
 
 
@@ -74,6 +75,10 @@ def greater(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None) -> m
 
 def less(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None) -> mtf.Tensor:
     return scoped("less", mtf.less, x1, x2, output_shape)
+
+
+def less_equal(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None) -> mtf.Tensor:
+    return scoped("less_equal", mtf.less_equal, x1, x2, output_shape)
 
 
 def equal(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None) -> mtf.Tensor:
@@ -117,11 +122,11 @@ def sigmoid(tensor: mtf.Tensor) -> mtf.Tensor:
 
 
 def sqrt(tensor: mtf.Tensor) -> mtf.Tensor:
-    return scoped("sqrt", mtf.sqrt, tensor)
+    return scoped("sqrt", lambda x: mtf.pow(x, 0.5), tensor)
 
 
 def rsqrt(tensor: mtf.Tensor) -> mtf.Tensor:
-    return scoped("rsqrt", mtf.rsqrt, tensor)
+    return scoped("rsqrt", lambda x: mtf.pow(x, -0.5), tensor)
 
 
 def square(tensor: mtf.Tensor) -> mtf.Tensor:
@@ -148,6 +153,14 @@ def add_n(*xs: typing.Union[typing.List[TENSORS], TENSORS]) -> mtf.Tensor:
     if len(xs) == 1 and not isinstance(xs[0], mtf.Tensor):
         xs = xs[0]
     return scoped("add_n", mtf.add_n, xs)
+
+
+def add(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: typing.Optional[SHAPE] = None):
+    return scoped("add", mtf.add, x1, x2, output_shape)
+
+
+def multiply(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: typing.Optional[SHAPE] = None):
+    return scoped("multiply", mtf.multiply, x1, x2, output_shape)
 
 
 def ones(mesh: mtf.Mesh, shape: SHAPE, dtype: tf.dtypes) -> mtf.Tensor:

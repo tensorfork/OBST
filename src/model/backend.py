@@ -9,9 +9,8 @@ from tensorflow.python.ops.init_ops import Initializer
 
 from ..dataclass import BlockArgs, ModelParameter
 from ..mtf_wrapper import einsum, scoped
-from ..utils_core import default, random_name
-from ..utils_mtf import OPT_DIMS, SHAPE, anonymize_dim, deduplicate, feature_dims_used
-
+from ..utils_core import random_name
+from ..utils_mtf import OPT_DIMS, SHAPE, deduplicate, feature_dims_used, non_replicated_variable
 
 tf1 = tf.compat.v1
 
@@ -46,41 +45,84 @@ class OrthogonalInit(Initializer):
         q *= math_ops.sign(array_ops.diag_part(r))
         if self.transpose:
             q = array_ops.matrix_transpose(q)
-        return tf.cast(array_ops.reshape(q, self.sizes) / self.params.n_blocks ** 0.5, dtype)
+        out = array_ops.reshape(q, self.sizes)
+        if self.params.scale_by_depth:
+            out /= self.params.n_blocks ** 0.5
+        return tf.cast(out, dtype)
 
 
-def get_variable(params: ModelParameter, shape: SHAPE, initializer: typing.Callable) -> mtf.Tensor:
-    return scoped(random_name("get_variable"), mtf.get_variable, params.mesh, random_name("get_variable"),
-                  deduplicate(shape), dtype=params.variable_dtype, initializer=initializer)
+def get_var(args: BlockArgs, shape: SHAPE, initializer: Initializer) -> mtf.Tensor:
+    params: ModelParameter = args.params
+
+    def _var():
+        return non_replicated_variable(params, random_name("get_variable"), shape, initializer, True)
+
+    if "shared" not in args:
+        return _var()
+
+    name = tf1.get_variable_scope().name
+    scope = name.split('/')
+    body_idx = scope.index("body") + 1
+    block, full_fn_name = scope[body_idx:body_idx + 2]
+    block, config = block.split('_')
+    first_block = block == '0'
+    fn_name = ''.join(c for c in full_fn_name if not c.isdigit())
+
+    cache = params.cached_parameters
+    for idx in (config, fn_name):
+        if idx not in cache:
+            cache[idx] = {}
+        cache = cache[idx]
+
+    if "counter" not in cache:
+        cache["counter"] = 0
+        cache["index"] = 0
+        cache["seen"] = set()
+    if idx not in cache["seen"]:
+        cache["index"] += 1
+        cache["counter"] += first_block
+        cache["seen"].add(full_fn_name)
+    cache["index"] %= cache["counter"]
+    fn_id = cache["index"]
+
+    if fn_id not in cache:
+        cache[fn_id] = {}
+    cache = cache[fn_id]
+    if "counter" not in cache:
+        cache["counter"] = 0
+
+    if first_block:
+        var = _var()
+        cache[cache["counter"]] = var
+        cache["counter"] += 1
+        return var
+
+    if len(cache) == cache["counter"] + 1:
+        cache["counter"] = 0
+    var = cache[cache["counter"]]
+    cache["counter"] += 1
+    return var
 
 
-def orthogonal_var(params: ModelParameter, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
+def orthogonal_var(args: BlockArgs, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
                    fan_in_dims: OPT_DIMS = None) -> mtf.Tensor:
     shape = deduplicate(shape)
-    return scoped("orthogonal_var", get_variable, params, shape, OrthogonalInit(params, shape, fan_in_dims))
+    return scoped("orthogonal_var", get_var, args, shape, OrthogonalInit(args.params, shape, fan_in_dims))
 
 
-def normal_var(params: ModelParameter, shape: SHAPE, stddev: float = 0.02, mean: float = 0.) -> mtf.Tensor:
+def normal_var(args: BlockArgs, shape: SHAPE, stddev: float = 0.02, mean: float = 0.) -> mtf.Tensor:
     shape = deduplicate(shape)
-    return scoped("normal_var", get_variable, params, shape, tf.random_normal_initializer(stddev=stddev, mean=mean))
-
+    return scoped("normal_var", get_var, args, shape, tf.random_normal_initializer(stddev=stddev, mean=mean))
 
 
 def linear(args: BlockArgs, old: typing.List[mtf.Dimension], new: typing.List[mtf.Dimension]) -> mtf.Tensor:
-    return einsum([args.tensor, orthogonal_var(args.params, old + new)],
+    return einsum([args.tensor, orthogonal_var(args, old + new)],
                   deduplicate((args.tensor.shape - old).dims + new))
 
 
 def linear_to_features(args: BlockArgs, old: typing.Optional[typing.List[mtf.Dimension]] = None) -> mtf.Tensor:
-    return linear(args, default(old, args.params.feature_dims), args.params.feature_dims)
+    return linear(args, old, args.params.feature_dims)
 
 
 def linear_from_features(args: BlockArgs, new: typing.Optional[typing.List[mtf.Dimension]] = None) -> mtf.Tensor:
-    return linear(args, args.params.feature_dims, default(new, args.params.intermediate))
-
-
-def get_intermediate(args: BlockArgs):
-    if 'group' not in args:
-        return args.params.intermediate
-    return [args.params.head_dim,
-            anonymize_dim(args.params.key_dim, args.params.key_dim.size * args.params.group_linear_factor)]
+    return linear(args, args.params.feature_dims, new)

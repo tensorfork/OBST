@@ -4,11 +4,11 @@ import mesh_tensorflow as mtf
 import tensorflow as tf
 
 from .activation import activate
-from .backend import get_intermediate, get_variable, linear_from_features, linear_to_features, orthogonal_var
+from .backend import get_var, linear, orthogonal_var
 from .normalization import norm
 from ..dataclass import BlockArgs
-from ..mtf_wrapper import dropout as utils_dropout, einsum, greater_equal, sigmoid
-from ..utils_mtf import anonymize, anonymize_dim, compare_range, deduplicate, get_attention_dim, is_masked
+from ..mtf_wrapper import dropout as utils_dropout, sigmoid, exp, reduce_max, reduce_sum, einsum, reciprocal
+from ..utils_mtf import linear_shapes
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -16,10 +16,10 @@ tf1 = tf.compat.v1
 
 
 def rezero(args: BlockArgs) -> mtf.Tensor:
-    return args.tensor * get_variable(args.params, [], tf.constant_initializer(0))
+    return args.tensor * get_var(args, [], tf.constant_initializer(0))
 
 
-def dropout(args: BlockArgs):
+def dropout(args: BlockArgs, prefix: str = ''):
     keep = 1
     for extra in args.name_extras:
         if extra.startswith('dropout_rate'):
@@ -27,47 +27,39 @@ def dropout(args: BlockArgs):
     return utils_dropout(args.tensor, args.params.train, keep)
 
 
-def feed_forward_in(args: BlockArgs):
-    def _from_feat():
-        return linear_from_features(args, get_intermediate(args))
+def wrapped_linear(args: BlockArgs) -> mtf.Tensor:
+    return linear(args, *linear_shapes(args))
 
-    out = dropout(args(activate(args(_from_feat()))))
+
+def mixture_of_experts(args: BlockArgs) -> mtf.Tensor:
+    old, new = linear_shapes(args)
+    gate = linear(args, old, [args.params.expert_dim])
+    gate = exp(gate - reduce_max(gate, reduced_dim=args.params.expert_dim))
+    return einsum([reciprocal(reduce_sum(gate, reduced_dim=args.params.expert_dim)), args.tensor, gate,
+                   orthogonal_var(args, [old, new, args.params.expert_dim])],
+                  output_shape=args.tensor.shape - old + new)
+
+
+def activated_linear(args: BlockArgs, prefix: str) -> mtf.Tensor:
+    args = args([a[len(prefix):] for a in args if a.startswith(prefix)])
+    feed_forward_fn = mixture_of_experts if 'mixture_of_experts' in args else wrapped_linear
+    out = dropout(args(activate(args(feed_forward_fn(args)))))
     if 'glu' in args or 'glu_add' in args:
-        out *= sigmoid(_from_feat())
+        out *= sigmoid(feed_forward_fn(args))
     if 'glu_add' in args:
-        out += activate(args(_from_feat()))
+        out += activate(args(feed_forward_fn(args)))
+    if 'norm' in args:
+        out = norm(args(out))
     return out
 
 
-def feed_forward_out(args: BlockArgs):
-    return linear_to_features(args, get_intermediate(args))
+def activated_linear_in(args: BlockArgs):
+    return activated_linear(args, 'in_')
+
+
+def activated_linear_out(args: BlockArgs):
+    return activated_linear(args, 'out_')
 
 
 def feed_forward(args: BlockArgs) -> mtf.Tensor:
-    return feed_forward_out(args(feed_forward_in(args)))
-
-
-def spatial_mixing(args: BlockArgs) -> mtf.Tensor:
-    dim = get_attention_dim(args)
-    tmp = anonymize_dim(dim)
-
-    if 'feed_forward' in args:
-        args = args(feed_forward_in(args))
-    if 'norm' in args:
-        args = args(norm(args('group')))
-
-    mid = anonymize(args.tensor, dim)
-    old = [args.params.head_dim, tmp]
-    new = [args.params.head_dim, dim]
-
-    inputs = [mid, orthogonal_var(args.params, old + new)]
-    if is_masked(args):
-        inputs.append(compare_range(args.params, dim, tmp, greater_equal))
-    if 'multiply_gate' in args:
-        inputs.append(args.tensor)
-
-    mid = einsum(inputs, deduplicate((args.tensor.shape - old).dims + new))
-
-    if 'feed_forward' not in args:
-        return mid
-    return feed_forward_out(args(mid))
+    return activated_linear_out(args(activated_linear_in(args)))
