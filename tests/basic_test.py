@@ -72,6 +72,7 @@ class OperationTest(BaseTest):
                   "train_batch_size": batch_size,
                   "n_ctx": n_ctx,
                   "n_blocks": 1}
+        self.fp16 = "16" in (calculation_dtype + slice_dtype + storage_dtype)
         self.args = BlockArgs(ModelParameter(params), None, [''])
         self.args.params.layout = self.layout_rules
         self.args.params.mesh_shape = self.mesh_shape
@@ -117,14 +118,16 @@ class AllSumFeedForwardIn(OperationTest):
         intermediate = np.prod([d.size for d in params.intermediate])
         min_fan = min(size // intermediate, intermediate)
         analytical_var = (min_fan * (1 - min_fan / size) ** 2 + (size - min_fan) * (min_fan / size) ** 2) / size
-        assert np.isclose(np.std(out), analytical_var ** 0.5, 0.03) and np.abs(mean) < 0.05
+        base = 1 / size ** (0.05 if self.fp16 else 0.5)
+        assert np.isclose(np.std(out), analytical_var ** 0.5, 2 * base)
+        assert np.abs(mean) < 1 * base, ValueError
 
 
-@pytest.mark.parametrize("test", [ReZero])
+@pytest.mark.parametrize("test", [ReZero, AllSumFeedForwardIn])
 @pytest.mark.parametrize("calculation_dtype", ["bfloat16", "float32"])
 @pytest.mark.parametrize("storage_dtype", ["bfloat16", "float32"])
 @pytest.mark.parametrize("slice_dtype", ["bfloat16", "float32"])
-@pytest.mark.parametrize("embd_per_head", [1, 8, 64])
+@pytest.mark.parametrize("embd_per_head", [1, 8, 64, 512])
 @pytest.mark.parametrize("n_head", [1, 2])
 @pytest.mark.parametrize("batch_size", [1, 4])
 @pytest.mark.parametrize("n_ctx", [1, 8, 64])
