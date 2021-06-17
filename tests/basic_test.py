@@ -104,6 +104,9 @@ class ReZero(OperationTest):
 
 
 @pytest.mark.parametrize("test", [ReZero])
+@pytest.mark.parametrize("calculation_dtype", ["bfloat16", "float32"])
+@pytest.mark.parametrize("storage_dtype", ["bfloat16", "float32"])
+@pytest.mark.parametrize("slice_dtype", ["bfloat16", "float32"])
 @pytest.mark.parametrize("dim_size,dim_count",
                          [(1, 1),
                           (1, 16),
@@ -113,5 +116,6 @@ class ReZero(OperationTest):
                           (64, 1),
                           (64, 2),
                           (8192, 1)])
-def op_test(test: typing.Type, dim_size: int, dim_count: int):
-    test()(dim_size, dim_count)
+def op_test(test: typing.Type, calculation_dtype: str, storage_dtype: str, slice_dtype: str, dim_size: int,
+            dim_count: int):
+    test(calculation_dtype=calculation_dtype, storage_dtype=storage_dtype, slice_dtype=slice_dtype)(dim_size, dim_count)
