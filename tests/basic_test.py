@@ -1,6 +1,5 @@
 import typing
 
-import jsonpickle
 import mesh_tensorflow as mtf
 import numpy as np
 import pytest
@@ -61,11 +60,15 @@ class BaseTest:
 
 
 class OperationTest(BaseTest):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, calculation_dtype="bfloat16", storage_dtype="bfloat16", slice_dtype="float32",
+                 n_embd_per_head=16, n_head=1, *args, **kwargs):
         super(OperationTest, self).__init__(*args, **kwargs)
-        with open("tests/test_config.json", 'r') as f:
-            config = f.read()
-        self.args = BlockArgs(ModelParameter(jsonpickle.loads(config)), None, [''])
+        params = {'calculation_dtype': calculation_dtype,
+                  "slice_dtype": slice_dtype,
+                  "storage_dtype": storage_dtype,
+                  "n_embd_per_head": n_embd_per_head,
+                  "n_head": n_head}
+        self.args = BlockArgs(ModelParameter(params), None, [''])
         self.args.params.layout = self.layout_rules
         self.args.params.mesh_shape = self.mesh_shape
 
@@ -110,5 +113,5 @@ class ReZero(OperationTest):
                           (64, 1),
                           (64, 2),
                           (8192, 1)])
-def op_test(test: typing.Type, dim_size:int, dim_count:int):
+def op_test(test: typing.Type, dim_size: int, dim_count: int):
     test()(dim_size, dim_count)

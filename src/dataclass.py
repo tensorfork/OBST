@@ -189,9 +189,6 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             self.storage_dtype = getattr(tf, self.storage_dtype)
         if isinstance(self.slice_dtype, str):
             self.slice_dtype = getattr(tf, self.slice_dtype)
-        if self.n_ctx % self.experts:
-            raise ValueError("Context has to be divisible by number of experts. Set \"experts\" to 1 if you're not "
-                             "using MoE")
         if self.use_video and (self.frame_width * self.frame_height // self.patch_size) % self.experts:
             raise ValueError("Frame size has to be divisible by number of experts. Set \"experts\" to 1 if you're not "
                              "using MoE")
