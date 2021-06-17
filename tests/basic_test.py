@@ -6,7 +6,7 @@ import pytest
 import tensorflow as tf
 
 from src.dataclass import BlockArgs, ModelParameter
-from src.model import basic
+from src.model import basic, backend
 
 tf1 = tf.compat.v1
 
@@ -60,20 +60,10 @@ class BaseTest:
 
 
 class OperationTest(BaseTest):
-    def __init__(self, calculation_dtype="bfloat16", storage_dtype="bfloat16", slice_dtype="float32",
-                 n_embd_per_head=16, n_head=1, batch_size=1, n_ctx=1, *args, **kwargs):
-        super(OperationTest, self).__init__(*args, **kwargs)
-        params = {'calculation_dtype': calculation_dtype,
-                  "slice_dtype": slice_dtype,
-                  "storage_dtype": storage_dtype,
-                  "scale_by_depth": False,
-                  "n_embd_per_head": n_embd_per_head,
-                  "n_head": n_head,
-                  "train_batch_size": batch_size,
-                  "n_ctx": n_ctx,
-                  "n_blocks": 1}
-        self.fp16 = "16" in (calculation_dtype + slice_dtype + storage_dtype)
-        self.args = BlockArgs(ModelParameter(params), None, [''])
+    def __init__(self, **kwargs):
+        super(OperationTest, self).__init__(**kwargs)
+        self.fp16 = "16" in (kwargs['calculation_dtype'] + kwargs['slice_dtype'] + kwargs['storage_dtype'])
+        self.args = BlockArgs(ModelParameter(kwargs), None, [''])
         self.args.params.layout = self.layout_rules
         self.args.params.mesh_shape = self.mesh_shape
 
@@ -106,21 +96,47 @@ class ReZero(OperationTest):
         assert np.all(out == 0)
 
 
-class AllSumFeedForwardIn(OperationTest):
+class VariableCheck(OperationTest):
+    _var_fn: typing.Union[backend.orthogonal_var, backend.normal_var] = backend.orthogonal_var
+
+    def _in_dims(self) -> typing.List[mtf.Dimension]:
+        return []
+
+    def _out_dims(self) -> typing.List[mtf.Dimension]:
+        return []
+
+    def _shape(self) -> typing.List[mtf.Dimension]:
+        return self._in_dims() + self._out_dims()
+
+    @staticmethod
+    def _target_std() -> float:
+        return 0
+
     def _build(self, inp: mtf.Tensor) -> mtf.Tensor:
-        params = self.args.params
-        return basic.orthogonal_var(self.args, params.feature_dims + params.intermediate)
+        return self._var_fn(self.args, self._in_dims() + self._out_dims())
 
     def _run(self, out: np.array) -> None:
-        params = self.args.params
-        mean = np.mean(out)
-        size = np.prod([d.size for d in (params.feature_dims + params.intermediate)])
-        intermediate = np.prod([d.size for d in params.intermediate])
+        relative_tolerance = 1 / np.prod([d.size for d in self._shape()]) ** (0.05 if self.fp16 else 0.5)
+        assert np.isclose(np.std(out), self._target_std(), 2 * relative_tolerance)
+        assert np.abs(np.mean(out)) < 1 * relative_tolerance, ValueError
+
+
+class OrthogonalCheck(VariableCheck):
+    _var_fn = backend.orthogonal_var
+
+    def _target_std(self) -> float:
+        size = np.prod([d.size for d in self._shape()])
+        intermediate = np.prod([d.size for d in self._in_dims()])
         min_fan = min(size // intermediate, intermediate)
-        analytical_var = (min_fan * (1 - min_fan / size) ** 2 + (size - min_fan) * (min_fan / size) ** 2) / size
-        base = 1 / size ** (0.05 if self.fp16 else 0.5)
-        assert np.isclose(np.std(out), analytical_var ** 0.5, 2 * base)
-        assert np.abs(mean) < 1 * base, ValueError
+        return ((min_fan * (1 - min_fan / size) ** 2 + (size - min_fan) * (min_fan / size) ** 2) / size) ** 0.5
+
+
+class AllSumFeedForwardIn(OrthogonalCheck):
+    def _in_dims(self) -> typing.List[mtf.Dimension]:
+        return self.args.params.feature_dims
+
+    def _out_dims(self) -> typing.List[mtf.Dimension]:
+        return self.args.params.intermediate
 
 
 @pytest.mark.parametrize("test", [ReZero, AllSumFeedForwardIn])
