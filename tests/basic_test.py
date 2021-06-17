@@ -7,7 +7,7 @@ import tensorflow as tf
 
 from src.dataclass import BlockArgs, ModelParameter
 from src.model import basic, backend
-from src.utils_mtf import get_intermediate
+from src.utils_mtf import get_intermediate, deduplicate
 
 tf1 = tf.compat.v1
 
@@ -109,7 +109,7 @@ class VariableCheck(OperationTest):
         return []
 
     def _shape(self) -> typing.List[mtf.Dimension]:
-        return self._in_dims() + self._out_dims()
+        return deduplicate(self._in_dims() + self._out_dims())
 
     @staticmethod
     def _target_std() -> float:
@@ -121,7 +121,7 @@ class VariableCheck(OperationTest):
     def _run(self, out: np.array) -> None:
         relative_tolerance = 1 / np.prod([d.size for d in self._shape()]) ** (0.05 if self.fp16 else 0.5)
         assert np.isclose(np.std(out), self._target_std(), 2 * relative_tolerance)
-        assert np.abs(np.mean(out)) < 1 * relative_tolerance, ValueError
+        assert np.abs(np.mean(out)) < 1 * relative_tolerance
 
 
 class OrthogonalCheck(VariableCheck):
@@ -131,9 +131,14 @@ class OrthogonalCheck(VariableCheck):
 
     def _target_std(self) -> float:
         size = np.prod([d.size for d in self._shape()])
-        intermediate = np.prod([d.size for d in self._in_dims()])
+        feature_dims = self.args.params.feature_dims
+        inp = feature_dims if self._in_dims() == feature_dims or self._out_dims() == feature_dims else self._in_dims()
+        intermediate = np.prod([d.size for d in inp])
         min_fan = min(size // intermediate, intermediate)
-        return ((min_fan * (1 - min_fan / size) ** 2 + (size - min_fan) * (min_fan / size) ** 2) / size) ** 0.5
+        std = ((min_fan * (1 - min_fan / size) ** 2 + (size - min_fan) * (min_fan / size) ** 2) / size) ** 0.5
+        if not self.args.params.scale_by_depth:
+            return std
+        return std / self.args.params.n_blocks ** 0.5
 
 
 class AllSumFeedForwardIn(OrthogonalCheck):
@@ -168,15 +173,30 @@ class GroupFeedForwardOut(OrthogonalCheck):
         return get_intermediate(self.args(['group']))
 
 
+def curry_class(base: typing.Type, **kwargs) -> typing.Callable:
+    def _fn(**kw):
+        return base(**kw, **kwargs)
+    _fn.__name__ = f'{base.__name__}({",".join(f"{k}={v}" for k, v in kwargs.items())})'
+    return _fn
+
+
 @pytest.mark.parametrize("test",
-                         [ReZero, AllSumFeedForwardIn, AllSumFeedForwardOut, GroupFeedForwardIn, GroupFeedForwardOut])
+                         [ReZero,
+                          curry_class(AllSumFeedForwardIn, scale_by_depth=True),
+                          curry_class(AllSumFeedForwardOut, scale_by_depth=True),
+                          curry_class(GroupFeedForwardIn, scale_by_depth=True),
+                          curry_class(GroupFeedForwardOut, scale_by_depth=True),
+                          curry_class(AllSumFeedForwardIn, scale_by_depth=False),
+                          curry_class(AllSumFeedForwardOut, scale_by_depth=False),
+                          curry_class(GroupFeedForwardIn, scale_by_depth=False),
+                          curry_class(GroupFeedForwardOut, scale_by_depth=False)])
 @pytest.mark.parametrize("calculation_dtype", ["bfloat16", "float32"])
 @pytest.mark.parametrize("storage_dtype", ["bfloat16", "float32"])
 @pytest.mark.parametrize("slice_dtype", ["bfloat16", "float32"])
-@pytest.mark.parametrize("embd_per_head", [1, 8, 64, 512])
+@pytest.mark.parametrize("embd_per_head", [1, 16, 256])
 @pytest.mark.parametrize("n_head", [1, 2])
 @pytest.mark.parametrize("batch_size", [1, 4])
-@pytest.mark.parametrize("n_ctx", [1, 8, 64])
+@pytest.mark.parametrize("n_ctx", [1, 64])
 def op_test(test: typing.Type, calculation_dtype: str, storage_dtype: str, slice_dtype: str, embd_per_head: int,
             n_head: int, batch_size: int, n_ctx: int):
     test(calculation_dtype=calculation_dtype, storage_dtype=storage_dtype, slice_dtype=slice_dtype,
