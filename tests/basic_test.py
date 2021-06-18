@@ -28,7 +28,7 @@ class Dropout(OperationTest):
 
     def _run(self, out: np.array) -> None:
         params = self.args.params
-        self._is_close(np.sum(out == 0) / out.size, params.input_dropout)
+        self._is_close(np.sum(out == 0) / out.size, params.input_dropout, 0.2)
 
 
 @pytest.mark.parametrize("test",

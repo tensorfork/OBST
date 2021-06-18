@@ -73,8 +73,8 @@ class OperationTest(BaseTest):
     def _run(self, out: np.array) -> None:
         pass
 
-    def _is_close(self, x: np.array, y: np.array):
-        assert np.isclose(x, y, 1e-3, self.tolerance)
+    def _is_close(self, x: np.array, y: np.array, rtol: float = 1e-3):
+        assert np.isclose(x, y, rtol, self.tolerance)
 
     def build(self, graph: mtf.Graph, mesh: mtf.Mesh,
               *args, **kwargs) -> typing.Tuple[typing.List[mtf.Tensor], typing.Any]:
