@@ -98,10 +98,6 @@ class ReZero(OperationTest):
 
 
 class VariableCheck(OperationTest):
-    @staticmethod
-    def _var_fn() -> typing.Union[backend.orthogonal_var, backend.normal_var]:
-        return backend.orthogonal_var
-
     def _in_dims(self) -> typing.List[mtf.Dimension]:
         return []
 
@@ -115,19 +111,56 @@ class VariableCheck(OperationTest):
     def _target_std() -> float:
         return 0
 
+    @staticmethod
+    def _target_mean() -> float:
+        return 0
+
     def _build(self, inp: mtf.Tensor) -> mtf.Tensor:
-        return self._var_fn()(self.args, self._in_dims() + self._out_dims())
+        return mtf.zeros(inp.mesh, self._shape())
 
     def _run(self, out: np.array) -> None:
         relative_tolerance = 1 / np.prod([d.size for d in self._shape()]) ** (0.05 if self.fp16 else 0.5)
         assert np.isclose(np.std(out), self._target_std(), 2 * relative_tolerance)
-        assert np.abs(np.mean(out)) < 1 * relative_tolerance
+        assert np.isclose(np.mean(out), self._target_mean(), 1e-3, 1 * relative_tolerance)
+
+
+class NormalCheck(VariableCheck):
+    def _build(self, inp: mtf.Tensor) -> mtf.Tensor:
+        return backend.normal_var(self.args, self._shape(), self._target_std(), self._target_mean())
+
+
+class NormShiftCheck(VariableCheck):
+    @staticmethod
+    def _target_std() -> float:
+        return 0.02
+
+    @staticmethod
+    def _target_mean() -> float:
+        return 0
+
+
+class NormScaleCheck(VariableCheck):
+    @staticmethod
+    def _target_std() -> float:
+        return 0.02
+
+    @staticmethod
+    def _target_mean() -> float:
+        return 1
+
+
+class EmbeddingCheck(VariableCheck):
+    def _target_std(self) -> float:
+        return self.args.params.embedding_stddev
+
+    @staticmethod
+    def _target_mean() -> float:
+        return 0
 
 
 class OrthogonalCheck(VariableCheck):
-    @staticmethod
-    def _var_fn() -> typing.Union[backend.orthogonal_var, backend.normal_var]:
-        return backend.orthogonal_var
+    def _build(self, inp: mtf.Tensor) -> mtf.Tensor:
+        return backend.orthogonal_var(self.args, self._shape())
 
     def _target_std(self) -> float:
         size = np.prod([d.size for d in self._shape()])
@@ -176,6 +209,7 @@ class GroupFeedForwardOut(OrthogonalCheck):
 def curry_class(base: typing.Type, **kwargs) -> typing.Callable:
     def _fn(**kw):
         return base(**kw, **kwargs)
+
     _fn.__name__ = f'{base.__name__}({",".join(f"{k}={v}" for k, v in kwargs.items())})'
     return _fn
 
@@ -189,7 +223,8 @@ def curry_class(base: typing.Type, **kwargs) -> typing.Callable:
                           curry_class(AllSumFeedForwardIn, scale_by_depth=False),
                           curry_class(AllSumFeedForwardOut, scale_by_depth=False),
                           curry_class(GroupFeedForwardIn, scale_by_depth=False),
-                          curry_class(GroupFeedForwardOut, scale_by_depth=False)])
+                          curry_class(GroupFeedForwardOut, scale_by_depth=False),
+                          NormShiftCheck, NormScaleCheck, EmbeddingCheck])
 @pytest.mark.parametrize("calculation_dtype", ["bfloat16", "float32"])
 @pytest.mark.parametrize("storage_dtype", ["bfloat16", "float32"])
 @pytest.mark.parametrize("slice_dtype", ["bfloat16", "float32"])
