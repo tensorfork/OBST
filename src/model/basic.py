@@ -19,7 +19,7 @@ def rezero(args: BlockArgs) -> mtf.Tensor:
     return args.tensor * get_var(args, [], tf.constant_initializer(0))
 
 
-def dropout(args: BlockArgs, prefix: str = ''):
+def dropout(args: BlockArgs):
     keep = 1
     for extra in args.name_extras:
         if extra.startswith('dropout_rate'):

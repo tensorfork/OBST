@@ -5,8 +5,8 @@ import numpy as np
 import pytest
 import tensorflow as tf
 
+from backend import OperationTest, curry_class
 from src.model import basic
-from backend import OperationTest
 
 tf1 = tf.compat.v1
 
@@ -22,8 +22,19 @@ class ReZero(OperationTest):
         assert np.all(out == 0)
 
 
+class Dropout(OperationTest):
+    def _build(self, inp: mtf.Tensor) -> mtf.Tensor:
+        return basic.dropout(self.args(inp)([f'dropout_rate{self.args.params.input_dropout}']))
+
+    def _run(self, out: np.array) -> None:
+        params = self.args.params
+        self._is_close(np.sum(out == 0) / out.size, params.input_dropout)
+
+
 @pytest.mark.parametrize("test",
-                         [ReZero])
+                         [ReZero,
+                          curry_class(Dropout, input_dropout=0), curry_class(Dropout, input_dropout=0.1),
+                          curry_class(Dropout, input_dropout=0.25), curry_class(Dropout, input_dropout=0.5)])
 @pytest.mark.parametrize("calculation_dtype", ["bfloat16", "float32"])
 @pytest.mark.parametrize("storage_dtype", ["bfloat16", "float32"])
 @pytest.mark.parametrize("slice_dtype", ["bfloat16", "float32"])

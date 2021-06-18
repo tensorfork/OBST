@@ -60,16 +60,21 @@ class BaseTest:
 class OperationTest(BaseTest):
     def __init__(self, **kwargs):
         super(OperationTest, self).__init__(**kwargs)
+        params = ModelParameter(kwargs)
         self.fp16 = "16" in (kwargs['calculation_dtype'] + kwargs['slice_dtype'] + kwargs['storage_dtype'])
-        self.args = BlockArgs(ModelParameter(kwargs), None, [''])
+        self.args = BlockArgs(params, None, [''])
         self.args.params.layout = self.layout_rules
         self.args.params.mesh_shape = self.mesh_shape
+        self.tolerance = 1 / (params.train_batch_size * params.n_ctx * params.n_embd) ** (0.05 if self.fp16 else 0.5)
 
     def _build(self, inp: mtf.Tensor) -> mtf.Tensor:
         pass
 
     def _run(self, out: np.array) -> None:
         pass
+
+    def _is_close(self, x: np.array, y: np.array):
+        assert np.isclose(x, y, 1e-3, self.tolerance)
 
     def build(self, graph: mtf.Graph, mesh: mtf.Mesh,
               *args, **kwargs) -> typing.Tuple[typing.List[mtf.Tensor], typing.Any]:
@@ -83,3 +88,11 @@ class OperationTest(BaseTest):
 
     def run(self, sess: tf1.Session, outputs: typing.List[tf.Tensor], args: typing.Any) -> None:
         self._run(sess.run(outputs)[0])
+
+
+def curry_class(base: typing.Type, **kwargs) -> typing.Callable:
+    def _fn(**kw):
+        return base(**kw, **kwargs)
+
+    _fn.__name__ = f'{base.__name__}({",".join(f"{k}={v}" for k, v in kwargs.items())})'
+    return _fn

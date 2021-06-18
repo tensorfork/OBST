@@ -5,9 +5,9 @@ import numpy as np
 import pytest
 import tensorflow as tf
 
+from backend import OperationTest, curry_class
 from src.model import backend
 from src.utils_mtf import get_intermediate, deduplicate
-from backend import OperationTest
 
 tf1 = tf.compat.v1
 
@@ -36,9 +36,8 @@ class VariableCheck(OperationTest):
         return mtf.zeros(inp.mesh, self._shape())
 
     def _run(self, out: np.array) -> None:
-        relative_tolerance = 1 / np.prod([d.size for d in self._shape()]) ** (0.05 if self.fp16 else 0.5)
-        assert np.isclose(np.std(out), self._target_std(), 2 * relative_tolerance)
-        assert np.isclose(np.mean(out), self._target_mean(), 1e-3, 1 * relative_tolerance)
+        self._is_close(np.std(out), self._target_std())
+        self._is_close(np.mean(out), self._target_mean())
 
 
 class NormalCheck(VariableCheck):
@@ -143,14 +142,6 @@ class DoubleSharedVariable(SharedOrthogonalVariable):
     def _build(self, inp: mtf.Tensor) -> mtf.Tensor:
         return mtf.stack([mtf.stack([self._get_shared_var(0), self._get_shared_var(1)], "non_shared")
                           for _ in range(self.args.params.n_blocks)], "items")
-
-
-def curry_class(base: typing.Type, **kwargs) -> typing.Callable:
-    def _fn(**kw):
-        return base(**kw, **kwargs)
-
-    _fn.__name__ = f'{base.__name__}({",".join(f"{k}={v}" for k, v in kwargs.items())})'
-    return _fn
 
 
 @pytest.mark.parametrize("test",
