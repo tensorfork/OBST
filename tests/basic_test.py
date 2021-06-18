@@ -206,6 +206,28 @@ class GroupFeedForwardOut(OrthogonalCheck):
         return get_intermediate(self.args(['group']))
 
 
+class SharedOrthogonalVariable(GroupFeedForwardIn):
+    def _get_shared_var(self, idx: int) -> mtf.Tensor:
+        with tf1.variable_scope(f"gpt/body/{self.args.params.attention_idx}_0/feed_forward_{idx}/"):
+            out = backend.orthogonal_var(self.args(['shared']), self._shape())
+            self.args.params.attention_idx += idx == 0
+            return out
+
+    def _run(self, out: np.array) -> None:
+        assert all(np.array_equal(out[0], out[i]) for i in range(1, out.shape[0]))
+
+
+class SingleSharedVariable(SharedOrthogonalVariable):
+    def _build(self, inp: mtf.Tensor) -> mtf.Tensor:
+        return mtf.stack([self._get_shared_var(0) for _ in range(self.args.params.n_blocks)], "items")
+
+
+class DoubleSharedVariable(SharedOrthogonalVariable):
+    def _build(self, inp: mtf.Tensor) -> mtf.Tensor:
+        return mtf.stack([mtf.stack([self._get_shared_var(0), self._get_shared_var(1)], "non_shared")
+                          for _ in range(self.args.params.n_blocks)], "items")
+
+
 def curry_class(base: typing.Type, **kwargs) -> typing.Callable:
     def _fn(**kw):
         return base(**kw, **kwargs)
@@ -224,7 +246,7 @@ def curry_class(base: typing.Type, **kwargs) -> typing.Callable:
                           curry_class(AllSumFeedForwardOut, scale_by_depth=False),
                           curry_class(GroupFeedForwardIn, scale_by_depth=False),
                           curry_class(GroupFeedForwardOut, scale_by_depth=False),
-                          NormShiftCheck, NormScaleCheck, EmbeddingCheck])
+                          NormShiftCheck, NormScaleCheck, EmbeddingCheck, SingleSharedVariable, DoubleSharedVariable])
 @pytest.mark.parametrize("calculation_dtype", ["bfloat16", "float32"])
 @pytest.mark.parametrize("storage_dtype", ["bfloat16", "float32"])
 @pytest.mark.parametrize("slice_dtype", ["bfloat16", "float32"])
