@@ -34,7 +34,8 @@ class Dropout(OperationTest):
 @pytest.mark.parametrize("test",
                          [ReZero,
                           curry_class(Dropout, input_dropout=0), curry_class(Dropout, input_dropout=0.1),
-                          curry_class(Dropout, input_dropout=0.25), curry_class(Dropout, input_dropout=0.5)])
+                          curry_class(Dropout, input_dropout=0.25), curry_class(Dropout, input_dropout=0.5),
+                          curry_class(Dropout, input_dropout=0.9)])
 @pytest.mark.parametrize("calculation_dtype", ["bfloat16", "float32"])
 @pytest.mark.parametrize("storage_dtype", ["bfloat16", "float32"])
 @pytest.mark.parametrize("slice_dtype", ["bfloat16", "float32"])
