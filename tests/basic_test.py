@@ -12,6 +12,8 @@ tf1 = tf.compat.v1
 
 tf1.disable_v2_behavior()
 
+RELU_STD = 1 / 1.42
+
 
 class ReZero(OperationTest):
     def _build(self, inp: mtf.Tensor) -> mtf.Tensor:
@@ -27,23 +29,33 @@ class Dropout(OperationTest):
         return basic.dropout(self.args(inp)([f'dropout_rate{self.args.params.input_dropout}']))
 
     def _run(self, out: np.array) -> None:
-        params = self.args.params
-        self._is_close(np.sum(out == 0) / out.size, params.input_dropout, 0.2)
+        self._is_close(np.sum(out == 0) / out.size, self.args.params.input_dropout, 0.2)
+
+
+class Activate(OperationTest):
+    @staticmethod
+    def _activation() -> str:
+        return ''
+
+    def _build(self, inp: mtf.Tensor) -> mtf.Tensor:
+        return basic.activate(self.args(inp)([self._activation()]))
+
+
+class Identity(Activate):
+    def _run(self, out: np.array) -> None:
+        self._is_close(np.std(out), 1)
+
+
+class ReLU(Activate):
+    @staticmethod
+    def _activation() -> str:
+        return 'relu'
+
+    def _run(self, out: np.array) -> None:
+        self._is_close(np.std(out), RELU_STD)
 
 
 class Linear(OperationTest):
-    def _build(self, inp: mtf.Tensor) -> mtf.Tensor:
-        for _ in range(self.args.params.train_steps):
-            inp = basic.wrapped_linear(self.args(inp))
-        return inp
-
-    def _run(self, out: np.array) -> None:
-        params = self.args.params
-        self.tolerance *= self.args.params.train_steps
-        self._is_close(np.mean(np.std(out, -1)), (1 / params.n_blocks ** 0.5) if params.scale_by_depth else 1, 0.2)
-
-
-class ActivationLinear(OperationTest):
     @staticmethod
     def _activation() -> str:
         return ''
@@ -58,25 +70,23 @@ class ActivationLinear(OperationTest):
         return inp
 
     def _run(self, out: np.array) -> None:
-        params = self.args.params
-        self.tolerance *= self.args.params.train_steps
+        self.tolerance *= self.args.params.train_steps ** 0.5
         target_std = self._target_std()
-        if params.scale_by_depth:
-            target_std /= params.n_blocks ** 0.5
+        if self.args.params.scale_by_depth:
+            target_std /= self.args.params.n_blocks ** 0.5
         self._is_close(np.mean(np.std(out, -1)), target_std, 0.2)
 
 
-class ReLULinear(ActivationLinear):
+class ReLULinear(Linear):
     @staticmethod
     def _activation() -> str:
         return 'relu'
 
     def _target_std(self) -> float:
-        return 1.42 ** (-self.args.params.train_steps)
+        return RELU_STD ** self.args.params.train_steps
 
 
-@pytest.mark.parametrize("test",
-                         [ReZero, Dropout])
+@pytest.mark.parametrize("test", [ReZero, Dropout, Identity, ReLU])
 @pytest.mark.parametrize("calculation_dtype", ["bfloat16", "float32"])
 @pytest.mark.parametrize("storage_dtype", ["bfloat16", "float32"])
 @pytest.mark.parametrize("slice_dtype", ["bfloat16", "float32"])
