@@ -23,10 +23,10 @@ class ModelParameter(typing.Dict[str, typing.Any]):
     def __init__(self, config: typing.Dict[str, typing.Any]):
         super().__init__()
 
-        self.position_embedding = "absolute"  # "absolute" or "relative"(-learned) or "axial"
+        self.position_embedding = "absolute"  # "absolute" or "relative"(-learned) or "axial" | orthogonal for variables
         self.token_embedding = "absolute"
         self.empty_frame_embedding = "absolute"
-        self.output_embedding = "absolute"  # embedding options above
+        self.output_embedding = "absolute-orthogonal"  # embedding options above
         self.use_video = True
         self.save_graph = False
         self.use_language = True
@@ -82,22 +82,22 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.head_splits = 32.
         self.prefix = "datasets/full_hd_video"
         self.model_path = "gs://text-datasets/video-transformer/ctx=32-layer=64-heads=8-feat=256"
-        self.tensorflow_optimization_settings = {"layout_optimizer":              True,
-                                                 "constant_folding":              True,
-                                                 "shape_optimization":            True,
-                                                 "remapping":                     True,
-                                                 "arithmetic_optimization":       True,
-                                                 "dependency_optimization":       True,
-                                                 "loop_optimization":             True,
-                                                 "function_optimization":         True,
-                                                 "debug_stripper":                True,
+        self.tensorflow_optimization_settings = {"layout_optimizer": True,
+                                                 "constant_folding": True,
+                                                 "shape_optimization": True,
+                                                 "remapping": True,
+                                                 "arithmetic_optimization": True,
+                                                 "dependency_optimization": True,
+                                                 "loop_optimization": True,
+                                                 "function_optimization": True,
+                                                 "debug_stripper": True,
                                                  "scoped_allocator_optimization": True,
-                                                 "pin_to_host_optimization":      True,
-                                                 "implementation_selector":       True,
-                                                 "auto_mixed_precision":          True,
-                                                 "disable_meta_optimizer":        False,
-                                                 "disable_model_pruning":         False,
-                                                 "min_graph_nodes":               0
+                                                 "pin_to_host_optimization": True,
+                                                 "implementation_selector": True,
+                                                 "auto_mixed_precision": True,
+                                                 "disable_meta_optimizer": False,
+                                                 "disable_model_pruning": False,
+                                                 "min_graph_nodes": 0
                                                  }
         self.language_token_per_frame = 0
         self.weight_decay = 0.001
@@ -257,16 +257,16 @@ class ModelParameter(typing.Dict[str, typing.Any]):
 
         if self.three_axes:
             frame_input_shape += [
-                    mtf.Dimension("height", self.frame_height_patch),
-                    mtf.Dimension("width", self.frame_width_patch),
-                    ]
+                mtf.Dimension("height", self.frame_height_patch),
+                mtf.Dimension("width", self.frame_width_patch),
+            ]
 
         else:
             frame_input_shape += [
-                    mtf.Dimension(
-                            "height", self.frame_height_patch * self.frame_width_patch
-                            )
-                    ]
+                mtf.Dimension(
+                    "height", self.frame_height_patch * self.frame_width_patch
+                )
+            ]
 
         frame_input_shape += [mtf.Dimension("color_channels", self.channel_color_size)]
         self.frame_input_shape = mtf.Shape(frame_input_shape)

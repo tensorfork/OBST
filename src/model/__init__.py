@@ -3,18 +3,18 @@ import typing
 import mesh_tensorflow as mtf
 import tensorflow as tf
 
+from .activation import activate
 from .backend import linear, linear_from_features, linear_to_features
 from .basic import activated_linear
 from .embedding import embed
-from .normalization import  norm
 from .frontend import block_part_fn
 from .momentumnet import MomentumOperation
+from .normalization import norm
 from .revnet import RevGradOp
-from .activation import activate
 from ..dataclass import BlockArgs, BlockConfig, ModelParameter
 from ..mtf_wrapper import (add_n, cast, constant_scalar, dropout, einsum, one_hot, ones, reciprocal, reduce_logsumexp,
                            reduce_mean, reduce_sum, sigmoid, sign, zeros_like)
-from ..utils_mtf import concat, slice, weighted_add, anonymize, anonymize_dim, anonymize_shape, get_intermediate
+from ..utils_mtf import concat, slice, weighted_add, anonymize, anonymize_shape
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -172,9 +172,11 @@ def build(params: ModelParameter,
             token_out = slice(out, 0, params.language_token_patch, spatial_ctx)
             for config_idx, config in enumerate(params.output_block_config):
                 token_out = block_part_fn(params, config, token_out, f'lang_out{config_idx}')
-            token_out = linear(base_args(anonymize(token_out, params.head_dim)),
-                               old=anonymize_shape(params.feature_dims, params.head_dim),
-                               new=[txt_tgt.shape[-1], params.vocab_dim])
+            old = anonymize_shape(params.feature_dims, params.head_dim)
+            new = [txt_tgt.shape[-1], params.vocab_dim]
+            token_out = einsum([anonymize(token_out, params.head_dim),
+                                embed(base_args(params.output_embedding), old + new)],
+                               output_shape=token_out.shape - old + new)
 
         if params.use_video:
             frame_out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)

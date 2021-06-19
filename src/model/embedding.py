@@ -5,7 +5,7 @@ import mesh_tensorflow as mtf
 import numpy as np
 import tensorflow as tf
 
-from .backend import normal_var
+from .backend import normal_var, orthogonal_var
 from ..dataclass import BlockArgs, ModelParameter
 from ..mtf_wrapper import einsum, scoped
 from ..utils_core import random_name
@@ -73,6 +73,8 @@ class RelativeEmbeddingForward(mtf.Operation):
 
 
 def _embed_var(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
+    if 'orthogonal' in args:
+        return orthogonal_var(args, shape)
     return normal_var(args, shape, args.params.embedding_stddev)
 
 
