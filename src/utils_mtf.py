@@ -317,6 +317,7 @@ def feature_dims_used(params: ModelParameter, shape: typing.Union[SHAPE, mtf.Ten
         shape = shape.shape
     if dims is None:
         dims = params.feature_dims + [anonymize_dim(dim) for dim in params.feature_dims]
+        return bool(sum(f in dims_from_shape(shape) for f in dims) // 2)
     return all(f in dims_from_shape(shape) for f in dims)
 
 
