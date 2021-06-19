@@ -316,7 +316,7 @@ def feature_dims_used(params: ModelParameter, shape: typing.Union[SHAPE, mtf.Ten
     if isinstance(shape, (mtf.Tensor, mtf.Variable)):
         shape = shape.shape
     if dims is None:
-        dims = params.feature_dims
+        dims = params.feature_dims + [anonymize_dim(dim) for dim in params.feature_dims]
     return all(f in dims_from_shape(shape) for f in dims)
 
 
