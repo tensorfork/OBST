@@ -229,18 +229,20 @@ def non_replicated_broadcast(x, shape):
     return BroadcastForward(x, mtf.Shape(shape)).outputs[0]
 
 
-def get_variable(params: ModelParameter, name: str, shape: SHAPE, initializer: Initializer, trainable: bool):
+def get_variable(params: ModelParameter, name: str, shape: SHAPE, initializer: Initializer, trainable: bool,
+                 dtype: mtf.VariableDType):
     full_name = f'{tf1.get_variable_scope().name}/{name}'
     if full_name in params.mesh.graph.name_to_variable:
         return params.mesh.graph.name_to_variable[full_name].outputs[0]
     shape = deduplicate(mtf.Shape(shape))
-    var = mtf.Variable(params.mesh, name, shape, params.variable_dtype, initializer, trainable)
+    var = mtf.Variable(params.mesh, name, shape, dtype, initializer, trainable)
     params.mesh.graph.name_to_variable[full_name] = var
     return var.outputs[0]
 
 
-def non_replicated_variable(params: ModelParameter, name: str, shape: SHAPE, initializer: Initializer, trainable: bool):
-    var = get_variable(params, name, shape, initializer, trainable)
+def non_replicated_variable(params: ModelParameter, name: str, shape: SHAPE, initializer: Initializer, trainable: bool,
+                            dtype: mtf.VariableDType):
+    var = get_variable(params, name, shape, initializer, trainable, dtype)
     if params.grad_accumulation < 2 or params.batch_splits == 1:
         return var
     return non_replicated_broadcast(var, [params.batch_dim] + dims_from_shape(shape))

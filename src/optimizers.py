@@ -24,11 +24,11 @@ def import_float(imported):
 
 
 def get_var(params: ModelParameter, name: str, shape: SHAPE, initializer: Initializer = zeros):
-    return get_variable(params, name, shape, initializer, False)
+    return get_variable(params, name, shape, initializer, False, params.optimizer_dtype)
 
 
 def variable(params: ModelParameter, base: mtf.Variable, name: str, shape: SHAPE):
-    return get_variable(params, f"{base.name}/{params.optimizer}/{name}", shape, zeros, False)
+    return get_variable(params, f"{base.name}/{params.optimizer}/{name}", shape, zeros, False, params.optimizer_dtype)
 
 
 def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, manual_step: tf.Tensor,

@@ -69,6 +69,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.storage_dtype = "float32"
         self.slice_dtype = "float32"
         self.calculation_dtype = "float32"
+        self.optimizer_slice_dtype = "float32"
         self.train_batch_size = 1
         self.grad_accumulation = 1
         self.macro_batching = 1
@@ -169,6 +170,11 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             self.output_embedding = self.output_embedding.split('-')
             self.empty_frame_embedding = self.empty_frame_embedding.split('-')
 
+            self.slice_dtype = getattr(tf, self.slice_dtype)
+            self.storage_dtype = getattr(tf, self.storage_dtype)
+            self.calculation_dtype = getattr(tf, self.calculation_dtype)
+            self.optimizer_slice_dtype = getattr(tf, self.optimizer_slice_dtype)
+
         self.multi_loss_strategy = self.multi_loss_strategy.lower()
         if self.multi_loss_strategy not in ["linear", "pcgrad", "mgda"]:
             print(f'{self.multi_loss_strategy} is not in the support option list for multi loss strategies: '
@@ -185,15 +191,9 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             self.n_embd = self.n_embd_per_head * self.n_head
         if self.n_embd_per_head is None:
             self.n_embd_per_head = self.n_embd // self.n_head
-        if isinstance(self.storage_dtype, str):
-            self.storage_dtype = getattr(tf, self.storage_dtype)
-        if isinstance(self.slice_dtype, str):
-            self.slice_dtype = getattr(tf, self.slice_dtype)
         if self.use_video and (self.frame_width * self.frame_height // self.patch_size) % self.experts:
             raise ValueError("Frame size has to be divisible by number of experts. Set \"experts\" to 1 if you're not "
                              "using MoE")
-        if isinstance(self.calculation_dtype, str):
-            self.calculation_dtype = getattr(tf, self.calculation_dtype)
         if self.intermediate_feed_forward_multiplier is None:
             self.intermediate_feed_forward_multiplier = self.group_linear_factor / self.n_head
         if not self.use_video and self.language_token_per_frame != self.n_ctx:
@@ -222,6 +222,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.layout = ','.join([f"batch:b"] * split_batch +
                                [f"heads:h"] * split_heads)
         self.variable_dtype = mtf.VariableDType(self.storage_dtype, self.slice_dtype, self.calculation_dtype)
+        self.optimizer_dtype = mtf.VariableDType(self.storage_dtype, self.optimizer_slice_dtype, self.calculation_dtype)
         self.block_config = [BlockConfig(conf, use_revnet=self.memory_reduction_strategy) for conf in self.block_config]
         self.input_block_config = [BlockConfig(conf, use_revnet=False) for conf in self.input_block_config]
         self.output_block_config = [BlockConfig(conf, use_revnet=False) for conf in self.output_block_config]

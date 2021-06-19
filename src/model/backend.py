@@ -52,7 +52,8 @@ def get_var(args: BlockArgs, shape: SHAPE, initializer: Initializer) -> mtf.Tens
     params: ModelParameter = args.params
 
     def _var():
-        return non_replicated_variable(params, random_name("get_variable"), shape, initializer, True)
+        return non_replicated_variable(params, random_name("get_variable"), shape, initializer, True,
+                                       params.variable_dtype)
 
     if "shared" not in args:
         return _var()
