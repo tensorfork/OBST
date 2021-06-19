@@ -45,7 +45,7 @@ class NormalCheck(VariableCheck):
         return backend.normal_var(self.args, self._shape(), self._target_std(), self._target_mean())
 
 
-class NormShiftCheck(VariableCheck):
+class NormShiftCheck(NormalCheck):
     @staticmethod
     def _target_std() -> float:
         return 0.02
@@ -55,7 +55,7 @@ class NormShiftCheck(VariableCheck):
         return 0
 
 
-class NormScaleCheck(VariableCheck):
+class NormScaleCheck(NormalCheck):
     @staticmethod
     def _target_std() -> float:
         return 0.02
@@ -65,7 +65,7 @@ class NormScaleCheck(VariableCheck):
         return 1
 
 
-class EmbeddingCheck(VariableCheck):
+class EmbeddingCheck(NormalCheck):
     def _target_std(self) -> float:
         return self.args.params.embedding_stddev
 
