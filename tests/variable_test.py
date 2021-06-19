@@ -11,8 +11,6 @@ from src.utils_mtf import get_intermediate, deduplicate
 
 tf1 = tf.compat.v1
 
-tf1.disable_v2_behavior()
-
 
 class VariableCheck(OperationTest):
     def _in_dims(self) -> typing.List[mtf.Dimension]:

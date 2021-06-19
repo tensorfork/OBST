@@ -10,6 +10,8 @@ tf1 = tf.compat.v1
 
 tf1.disable_v2_behavior()
 
+RELU_STD = 1 / 1.42
+
 
 class BaseTest:
     def __init__(self,
@@ -65,7 +67,7 @@ class OperationTest(BaseTest):
         self.args = BlockArgs(params, None, [''])
         self.args.params.layout = self.layout_rules
         self.args.params.mesh_shape = self.mesh_shape
-        self.tolerance = 1 / (params.train_batch_size * params.n_ctx * params.n_embd) ** (0.05 if self.fp16 else 1/3)
+        self.tolerance = 1 / (params.train_batch_size * params.n_ctx * params.n_embd) ** (0.05 if self.fp16 else 1 / 3)
 
     def _build(self, inp: mtf.Tensor) -> mtf.Tensor:
         pass
