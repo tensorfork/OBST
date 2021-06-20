@@ -154,6 +154,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.num_hosts = 0
         self.num_cores_per_host = 0
         self.masked_attention_dimensions = [0]
+        self.split_grad_accumulation = True
         self.log_dict_keys = []
 
         if hasattr(config, 'dict'):

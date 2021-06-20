@@ -243,9 +243,9 @@ def get_variable(params: ModelParameter, name: str, shape: SHAPE, initializer: I
 def non_replicated_variable(params: ModelParameter, name: str, shape: SHAPE, initializer: Initializer, trainable: bool,
                             dtype: mtf.VariableDType):
     var = get_variable(params, name, shape, initializer, trainable, dtype)
-    if params.grad_accumulation < 2 or params.batch_splits == 1:
-        return var
-    return non_replicated_broadcast(var, [params.batch_dim] + dims_from_shape(shape))
+    if params.grad_accumulation > 1 and params.batch_splits > 1 and params.split_grad_accumulation:
+        return non_replicated_broadcast(var, [params.batch_dim] + dims_from_shape(shape))
+    return var
 
 
 def anonymize_shape(inp: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
