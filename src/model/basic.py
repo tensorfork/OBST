@@ -36,7 +36,7 @@ def mixture_of_experts(args: BlockArgs) -> mtf.Tensor:
     gate = linear(args, old, [args.params.expert_dim])
     gate = exp(gate - reduce_max(gate, reduced_dim=args.params.expert_dim))
     return einsum([reciprocal(reduce_sum(gate, reduced_dim=args.params.expert_dim)), args.tensor, gate,
-                   orthogonal_var(args, [old, new, args.params.expert_dim])],
+                   orthogonal_var(args, old + new + [args.params.expert_dim])],
                   output_shape=args.tensor.shape - old + new)
 
 
