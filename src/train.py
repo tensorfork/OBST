@@ -600,13 +600,13 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 options.experimental_optimization.autotune = True
                 options.experimental_optimization.autotune_buffers = True
                 options.experimental_optimization.filter_fusion = True
-                options.experimental_optimization.hoist_random_uniform = True
+                # options.experimental_optimization.hoist_random_uniform = True
                 options.experimental_optimization.map_and_batch_fusion = True
                 options.experimental_optimization.map_and_filter_fusion = False
                 options.experimental_optimization.map_fusion = True
                 options.experimental_optimization.map_parallelization = True
-                options.experimental_optimization.map_vectorization.enabled = True
-                options.experimental_optimization.map_vectorization.use_choose_fastest = True
+                # options.experimental_optimization.map_vectorization.enabled = True
+                # options.experimental_optimization.map_vectorization.use_choose_fastest = True
                 options.experimental_optimization.noop_elimination = True
                 options.experimental_optimization.parallel_batch = True
                 options.experimental_optimization.shuffle_and_repeat_fusion = True
