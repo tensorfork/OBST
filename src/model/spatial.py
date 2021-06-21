@@ -111,7 +111,7 @@ def attention(args: BlockArgs):
         qry *= dim.size ** -0.5
         logit_shape = shape - (mtf.Shape(linear_shapes(args).old) - [args.params.head_dim]) + anonymize_dim(dim)
         logit = einsum([qry, anonymize(key, dim)], output_shape=logit_shape)
-        if "shared_key_value":
+        if "shared_key_value" in args:
             val = key
     if 'biased_softmax' in args:
         logit += _masked_map(args)
