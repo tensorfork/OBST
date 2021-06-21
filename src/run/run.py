@@ -1,5 +1,3 @@
-import collections
-import json
 import time
 import typing
 
@@ -7,23 +5,20 @@ import jsonpickle
 import mesh_tensorflow as mtf
 import numpy as np
 import tensorflow as tf
-from tensorflow.python.data.experimental.ops.distribute_options import AutoShardPolicy
 from tensorflow.python.framework import ops
 from tensorflow.python.ops import summary_ops_v2 as summary, variables
-from tensorflow.python.tpu import tpu, tpu_feed
+from tensorflow.python.tpu import tpu
 from tensorflow.python.tpu.ops import tpu_ops
 from tensorflow.python.training import checkpoint_management
 
 from src.dataclass import ModelParameter
 from src.model import build
-from src.mtf_wrapper import constant_scalar, log
 from src.optimizers import get_optimizer
-from src.utils_core import color_print
-from src.utils_mtf import concat, pad, slice, to_fp32, weighted_add
-
 from src.run.dataloader_placement import place_dataloader, infeed_from_session
-from src.run.inference import autoregressive_model
-from src.run.utils_run import CheckpointLoaderHook, add_summary, add_histogram, _import_tensor
+from src.run.inference import get_infrence_model
+from src.run.train import get_train_model
+from src.run.utils_run import CheckpointLoaderHook, add_summary, add_histogram, _import_tensor, analyze_model
+from src.utils_core import color_print
 
 tf1 = tf.compat.v1
 Dataset = tf1.data.Dataset
@@ -104,96 +99,38 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     end_iterations = _import_tensor(params, args[4], mtf.Shape([initial_pos_dim]), "end_iterations")
                     end_iterations = mtf.reduce_sum(end_iterations, output_shape=[])
 
-            if params.train or not params.use_autoregressive_sampling:
-                loss, loss_list, video_loss, accuracy, token_loss, frame_out, token_out = build(params,
-                                                                                                frame_input,
-                                                                                                cat_mask_src,
-                                                                                                cat_mask_tag,
-                                                                                                token_x_input,
-                                                                                                token_y_input,
-                                                                                                frame_mask_src,
-                                                                                                frame_mask_tag,
-                                                                                                token_mask)
-            else:
-                token_out, frame_out = autoregressive_model(params,
-                                                            frame_input,
-                                                            cat_mask_src,
-                                                            cat_mask_tag,
-                                                            token_x_input,
-                                                            token_y_input,
-                                                            frame_mask_src,
-                                                            frame_mask_tag,
-                                                            token_mask,
-                                                            initial_pos,
-                                                            sampling_temperature,
-                                                            end_iterations)
 
 
             if params.train:
-                if params.multi_loss_strategy == "linear":
-                    loss_list = [loss]
-                elif params.multi_loss_strategy == "mgda":
-                    loss_list = loss_list + [None]
-
-                update_ops, learning_rate, debug_gradients_dict = get_optimizer(loss_list, params, manual_global_step)
+                frame_out, token_out, learning_rate, loss, video_loss, \
+                token_loss, accuracy, update_ops, debug_gradients_dict = get_train_model(params)(frame_input,
+                                                                                                 cat_mask_src,
+                                                                                                 cat_mask_tag,
+                                                                                                 token_x_input,
+                                                                                                 token_y_input,
+                                                                                                 frame_mask_src,
+                                                                                                 frame_mask_tag,
+                                                                                                 token_mask,
+                                                                                                 manual_global_step)
             else:
-                if params.use_language:
-                    token_out = mtf.anonymize(token_out)
-                if params.use_video:
-                    if params.use_discrete_video_loss:
-                        frame_out = mtf.argmax(frame_out, reduced_dim=params.discrete_color_dim)
-                    frame_out = mtf.anonymize(frame_out)
+                token_out, frame_out = get_infrence_model(params)(frame_input,
+                                                                  cat_mask_src,
+                                                                  cat_mask_tag,
+                                                                  token_x_input,
+                                                                  token_y_input,
+                                                                  frame_mask_src,
+                                                                  frame_mask_tag,
+                                                                  token_mask,
+                                                                  initial_pos,
+                                                                  sampling_temperature,
+                                                                  end_iterations)
 
-            color_print(params, f"Built in {time.time() - start_time:.1f}s")
-            param_count = int(sum([variable.size for variable in graph.trainable_variables]))
-            var_count = int(sum([variable.size for variable in graph.all_variables]))
-            embed_param_count = int(sum([variable.size for variable in
-                                         graph.trainable_variables if 'embed' in variable.name]))
-            body_param_count = int(sum([variable.size for variable in
-                                        graph.trainable_variables if 'body' in variable.name]))
-
-            print('')
-
-            constant = '  variables: '
-            variable_mapping = [('Model', param_count - embed_param_count),
-                                ('Embedding', embed_param_count),
-                                ('Body with Embed', body_param_count),
-                                ('Untrainable', var_count - param_count),
-                                ('', 0),
-                                ('Total trainable', param_count),
-                                ('Total', var_count)]
-            variable_mapping = [(name, f'{int(count):,}') for name, count in variable_mapping]
-            max_str = max(len(name) for name, _ in variable_mapping)
-            max_int = max(len(count) for _, count in variable_mapping)
-            for name, count in variable_mapping:
-                if not name:
-                    color_print(params, '-' * (max_str + max_int + len(constant)))
-                    continue
-                color_print(params, f'{name:<{max_str}s}{constant}{count:>{max_int}s}')
-
-            color_print(params, "\nDimensions:")
-            for dim_name in sorted(list(set([item for variable in graph.all_variables
-                                             for item in variable.shape.dimension_names]))):
-                color_print(params, dim_name)
-            print('')
-
-            model_size = {'model_variables': int(param_count - embed_param_count),
-                          'embedding_variables': int(embed_param_count),
-                          'body_variables': int(body_param_count),
-                          'untrainable_variables': int(var_count - param_count),
-                          'total_trainable_variables': int(param_count),
-                          'total_variables': int(var_count)
-                          }
-
-            if params.train:
-                size_dump = jsonpickle.dumps(model_size, indent=4)
-                with tf.io.gfile.GFile(f"{params.model_path}/model_size.info", 'w') as f:
-                    f.write(size_dump)
-
+            analyze_model(params, time_to_build=(time.time() - start_time), graph=graph)
             color_print(params, "Lowering graph to TensorFlow...")
             start_time = time.time()
             lowering = mtf.Lowering(graph, {params.mesh: params.mesh_impl})
             color_print(params, f"Lowered in {time.time() - start_time:.1f}s")
+
             if params.train:
                 log_dict = {'learning_rate': tf.cast(learning_rate, tf.float32)}
                 if params.use_video:

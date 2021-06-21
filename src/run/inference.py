@@ -9,9 +9,10 @@ from ..utils_mtf import concat, pad, slice, to_fp32, weighted_add
 tf1 = tf.compat.v1
 Dataset = tf1.data.Dataset
 
+
 def autoregressive_model(params: ModelParameter,
-                         frame_input=None, cat_mask_src=None, cat_mask_tag=None, token_x_input=None,
-                         token_y_input=None, frame_mask_src=None, frame_mask_tag=None, token_mask=None,
+                         frame_input=None, token_x_input=None, token_y_input=None,
+                         frame_mask_src=None, frame_mask_tag=None, token_mask=None,
                          initial_pos=None, sampling_temperature=None, end_iterations=None):
 
     if params.use_video:
@@ -19,7 +20,6 @@ def autoregressive_model(params: ModelParameter,
         tkn_per_frame = mtf.Dimension("language_token_per_frame",
                                       params.language_token_per_frame)
         shape = [params.batch_dim, params.sequence_dim, tkn_per_frame, params.vocab_dim]
-        steps = params.time_patch_size
 
         def body_fn(position, token_x_input, token_y_input, frame_input,
                     frame_mask_src, frame_mask_tag, token_mask, *states):
@@ -117,8 +117,7 @@ def autoregressive_model(params: ModelParameter,
             sampling_temperature = constant_scalar(params, params.sampling_temperature, dtype=tf.float32)
 
         if end_iterations is None:
-            end_iterations = mtf.constant(params.mesh, value=params.n_ctx,
-                                          dtype=tf.int32)
+            end_iterations = mtf.constant(params.mesh, value=params.n_ctx, dtype=tf.int32)
 
         while_loop_inputs = [initial_pos, token_x_input, token_y_input, sampling_temperature]
 
@@ -138,3 +137,42 @@ def autoregressive_model(params: ModelParameter,
         frame_out = loop_out[3]
 
     return token_out, frame_out
+
+
+
+def get_infrence_model(params: ModelParameter):
+    def infrence_model(frame_input, cat_mask_src, cat_mask_tag, token_x_input, token_y_input, frame_mask_src, frame_mask_tag,
+                       token_mask, initial_pos, sampling_temperature, end_iterations):
+
+        if params.use_autoregressive_sampling:
+            token_out, frame_out = autoregressive_model(params,
+                                                        frame_input,
+                                                        token_x_input,
+                                                        token_y_input,
+                                                        frame_mask_src,
+                                                        frame_mask_tag,
+                                                        token_mask,
+                                                        initial_pos,
+                                                        sampling_temperature,
+                                                        end_iterations)
+        else:
+            _, _, _, _, _, frame_out, token_out = build(params,
+                                                                                            frame_input,
+                                                                                            cat_mask_src,
+                                                                                            cat_mask_tag,
+                                                                                            token_x_input,
+                                                                                            token_y_input,
+                                                                                            frame_mask_src,
+                                                                                            frame_mask_tag,
+                                                                                            token_mask)
+
+        if params.use_language:
+            token_out = mtf.anonymize(token_out)
+        if params.use_video:
+            if params.use_discrete_video_loss:
+                frame_out = mtf.argmax(frame_out, reduced_dim=params.discrete_color_dim)
+            frame_out = mtf.anonymize(frame_out)
+
+        return token_out, frame_out
+
+    return infrence_model
