@@ -25,7 +25,7 @@ def block_part_fn(params: ModelParameter, block_part_config: BlockConfig, block_
             name, *extras = layer.split('-')
             out = scoped(name + '_', LAYER_FUNCTIONS[name], BlockArgs(params, out, extras))
 
-        if not block_part_config.use_revnet and block_part_config.skip:
+        if block_part_config.skip and block_part_config.memory_reduction_strategy in ("none", "checkpoint"):
             out += block_input
 
     return out

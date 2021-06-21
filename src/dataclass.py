@@ -10,12 +10,12 @@ from tensorflow.python.tpu.device_assignment import DeviceAssignment
 
 
 class BlockConfig:
-    def __init__(self, config, use_revnet=True):
+    def __init__(self, config, memory_reduction_strategy: str):
         if isinstance(config, BlockConfig):
             config = config.__dict__
         self.layer = []
         self.skip = False
-        self.use_revnet = use_revnet
+        self.memory_reduction_strategy = memory_reduction_strategy
         self.__dict__.update(config)
 
 
@@ -224,7 +224,8 @@ class ModelParameter(typing.Dict[str, typing.Any]):
                                [f"heads:h"] * split_heads)
         self.variable_dtype = mtf.VariableDType(self.storage_dtype, self.slice_dtype, self.calculation_dtype)
         self.optimizer_dtype = mtf.VariableDType(self.storage_dtype, self.optimizer_slice_dtype, self.calculation_dtype)
-        self.block_config = [BlockConfig(conf, use_revnet=self.memory_reduction_strategy) for conf in self.block_config]
+        self.block_config = [BlockConfig(conf, memory_reduction_strategy=self.memory_reduction_strategy) for conf in
+                             self.block_config]
         self.input_block_config = [BlockConfig(conf, use_revnet=False) for conf in self.input_block_config]
         self.output_block_config = [BlockConfig(conf, use_revnet=False) for conf in self.output_block_config]
         self.time_patch_size = self.n_ctx // self.time_patch
