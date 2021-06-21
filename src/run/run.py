@@ -21,7 +21,7 @@ from src.optimizers import get_optimizer
 from src.utils_core import color_print
 from src.utils_mtf import concat, pad, slice, to_fp32, weighted_add
 
-from src.run.dataloader_placement import place_dataloader
+from src.run.dataloader_placement import place_dataloader, infeed_from_session
 from src.run.inference import autoregressive_model
 from src.run.utils_run import CheckpointLoaderHook, add_summary, add_histogram, _import_tensor
 
@@ -302,43 +302,9 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         return ret
 
     if query_input_fns is None:
-        input_initializers, enqueue_ops = place_dataloader(params, input_fn)
-
+        input_initializers, enqueue_ops, infeed_queue = place_dataloader(params, input_fn)
     else:
-        num_cores = params.mesh_impl.device_assignment.num_replicas
-        d_assignment = params.mesh_impl.device_assignment
-        ordered_ordinals = []
-        ordered_hosts = []
-
-        for pnum in range(num_cores):
-            physical_pnum = params.mesh_impl.l2p(pnum)
-            host_device = d_assignment.host_device(replica=physical_pnum)
-            ordered_hosts.append(host_device)
-
-            # For MTF, there's always 1 core per replica. So logical_core=0.
-            ordered_ordinals.append(d_assignment.tpu_ordinal(replica=physical_pnum, logical_core=0))
-
-        def _tpu_ordinal_function_impl(pnum):
-            return ordered_ordinals[pnum]
-
-        def _placement_function_impl(pnum):
-            return ordered_hosts[pnum]
-
-        prompt = tf1.placeholder(dtype=tf.int32, shape=[t.size for t in params.token_dim_shape])
-        iter_pos = tf1.placeholder(dtype=tf.int32, shape=[1])
-        samp_temp = tf1.placeholder(dtype=tf.float32, shape=[1])
-        end_iter = tf1.placeholder(dtype=tf.int32, shape=[1])
-
-        all_laidout_tensors = [[prompt, prompt, iter_pos, samp_temp, end_iter] for _ in range(params.num_cores)]
-
-        laidout_tensors0 = all_laidout_tensors[0]
-        infeed_queue = tpu_feed.InfeedQueue(
-            number_of_tuple_elements=len(laidout_tensors0),
-            tuple_types=[x.dtype for x in laidout_tensors0],
-            tuple_shapes=[x.shape for x in laidout_tensors0])
-        enqueue_ops = infeed_queue.generate_enqueue_ops(all_laidout_tensors,
-                                                        tpu_ordinal_function=_tpu_ordinal_function_impl,
-                                                        placement_function=_placement_function_impl)
+        enqueue_ops, infeed_queue, (prompt, iter_pos, samp_temp, end_iter) = infeed_from_session(params)
 
     color_print(params, "Building split TensorFlow computation...")
     start_time = time.time()
