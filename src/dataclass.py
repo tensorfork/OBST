@@ -226,8 +226,8 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.optimizer_dtype = mtf.VariableDType(self.storage_dtype, self.optimizer_slice_dtype, self.calculation_dtype)
         self.block_config = [BlockConfig(conf, memory_reduction_strategy=self.memory_reduction_strategy) for conf in
                              self.block_config]
-        self.input_block_config = [BlockConfig(conf, use_revnet=False) for conf in self.input_block_config]
-        self.output_block_config = [BlockConfig(conf, use_revnet=False) for conf in self.output_block_config]
+        self.input_block_config = [BlockConfig(conf, memory_reduction_strategy="checkpoint") for conf in self.input_block_config]
+        self.output_block_config = [BlockConfig(conf, memory_reduction_strategy="checkpoint") for conf in self.output_block_config]
         self.time_patch_size = self.n_ctx // self.time_patch
         self.frame_height_patch = self.frame_height // self.patch_size
         self.frame_width_patch = self.frame_width // self.patch_size
