@@ -121,4 +121,4 @@ def attention(args: BlockArgs):
         logit += _masked_map(args)
     if val == 0:
         val = anonymize(args.tensor if "input_as_value" else activated_linear_out(base), dim)
-    return einsum(logit + [val], shape)
+    return einsum([logit, val], shape)
