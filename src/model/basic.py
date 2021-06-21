@@ -66,4 +66,6 @@ def feed_forward(args: BlockArgs) -> mtf.Tensor:
 
 
 def group_linear(args: BlockArgs):
-    return linear(args, args.params.feature_dims, anonymize_shape(args.params.feature_dims, args.params.key_dim))
+    return mtf.reshape(linear(args('group'), args.params.feature_dims,
+                              anonymize_shape(args.params.feature_dims, args.params.key_dim)),
+                       args.tensor.shape)
