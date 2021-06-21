@@ -1,6 +1,3 @@
-"""
-Contains functions to create a training loop and log its outputs to tensorboard
-"""
 import collections
 import json
 import time
@@ -17,62 +14,19 @@ from tensorflow.python.tpu import tpu, tpu_feed
 from tensorflow.python.tpu.ops import tpu_ops
 from tensorflow.python.training import checkpoint_management
 
-from .dataclass import ModelParameter
-from .model import build
-from .mtf_wrapper import constant_scalar, log
-from .optimizers import get_optimizer
-from .utils_core import color_print
-from .utils_mtf import concat, pad, slice, to_fp32, weighted_add
+from src.dataclass import ModelParameter
+from src.model import build
+from src.mtf_wrapper import constant_scalar, log
+from src.optimizers import get_optimizer
+from src.utils_core import color_print
+from src.utils_mtf import concat, pad, slice, to_fp32, weighted_add
+
+from src.run.dataloader_placement import place_dataloader
+from src.run.inference import autoregressive_model
+from src.run.utils_run import CheckpointLoaderHook, add_summary, add_histogram, _import_tensor
 
 tf1 = tf.compat.v1
 Dataset = tf1.data.Dataset
-
-
-class CheckpointLoaderHook(tf.estimator.SessionRunHook):
-    """Load checkpoint right after the session started."""
-
-    def __init__(self, checkpoint_dir):
-        self.checkpoint_dir = checkpoint_dir
-
-    def after_create_session(self, session, coord):
-        saver_collection = tf1.get_collection(tf1.GraphKeys.SAVERS)
-        if saver_collection:
-            check_point = tf.train.latest_checkpoint(self.checkpoint_dir)
-            if check_point:
-                saver_collection[0].restore(session, check_point)
-
-
-def add_summary(tf_loss, value, global_step):
-    """Add all summaries."""
-
-    def _host_loss_summary(local_tf_loss, local_value, local_global_step):
-        """Add summary.scalar in host side."""
-        gs = tf.cast(local_global_step, tf.int64)
-        with tf.control_dependencies([summary.scalar(key, local_value[key], step=gs) for key in local_value.keys()]):
-            return tf.identity(local_tf_loss)
-
-    # Cast the global step to tf.int32, since
-    # outside_compilation does not support tf.int64.
-    return tpu.outside_compilation(_host_loss_summary, tf_loss, value, tf.cast(global_step, tf.int32))
-
-
-def add_histogram(tf_loss, value, global_step):
-    """Add all summaries."""
-
-    def _host_loss_summary(local_tf_loss, local_value, local_global_step):
-        """Add summary.scalar in host side."""
-        gs = tf.cast(local_global_step, tf.int64)
-        with tf.control_dependencies([summary.histogram(key, local_value[key], step=gs) for key in local_value.keys()]):
-            return tf.identity(local_tf_loss)
-
-    # Cast the global step to tf.int32, since
-    # outside_compilation does not support tf.int64.
-    return tpu.outside_compilation(_host_loss_summary, tf_loss, value, tf.cast(global_step, tf.int32))
-
-
-def _import_tensor(params, tensor, shape, name):
-    return mtf.import_laid_out_tensor(params.mesh, params.mesh_impl.LaidOutTensor([tensor]), shape, name)
-
 
 def computation_func(params: ModelParameter, input_fn: typing.Callable,
                      session_config, cluster_resolver, callback_fns, query_input_fns=None):
@@ -161,126 +115,19 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                                                                 frame_mask_tag,
                                                                                                 token_mask)
             else:
-                if params.use_video:
-                    # todo: fix token shift for video (Jan).
-                    tkn_per_frame = mtf.Dimension("language_token_per_frame",
-                                                  params.language_token_per_frame)
-                    shape = [params.batch_dim, params.sequence_dim, tkn_per_frame, params.vocab_dim]
-                    steps = params.time_patch_size
+                token_out, frame_out = autoregressive_model(params,
+                                                            frame_input,
+                                                            cat_mask_src,
+                                                            cat_mask_tag,
+                                                            token_x_input,
+                                                            token_y_input,
+                                                            frame_mask_src,
+                                                            frame_mask_tag,
+                                                            token_mask,
+                                                            initial_pos,
+                                                            sampling_temperature,
+                                                            end_iterations)
 
-                    def body_fn(position, token_x_input, token_y_input, frame_input,
-                                frame_mask_src, frame_mask_tag, token_mask, *states):
-
-                        _, _, _, _, _, frame_out, token_out = build(params,
-                                                                    frame_input,
-                                                                    mtf.ones(params.mesh, [], tf.float32),
-                                                                    mtf.ones(params.mesh, [], tf.float32),
-                                                                    token_x_input,
-                                                                    token_y_input,
-                                                                    frame_mask_src,
-                                                                    frame_mask_tag,
-                                                                    token_mask)
-
-                        frame_input = weighted_add(pad(frame_out, params.sequence_dim, (0, 1)), frame_input,
-                                                   mtf.one_hot(position, params.frame_input_sequence, dtype=tf.float32))
-
-                        if params.use_language:
-                            one_hot_sequence = mtf.one_hot(position, params.sequence_dim, dtype=tf.float32)
-                            token_out = mtf.argmax(mtf.reshape(token_out, new_shape=shape), params.vocab_dim)
-                            padding_token = to_fp32(mtf.equal(token_out, params.padding_token))
-
-                            token_x_input = weighted_add(mtf.reshape(token_out, new_shape=params.token_dim_shape),
-                                                         token_x_input,
-                                                         mtf.one_hot(position, params.sequence_dim, dtype=tf.int32))
-
-                            token_pad = mtf.less_equal(mtf.range(params.mesh, tkn_per_frame, dtype=tf.float32),
-                                                       to_fp32(mtf.argmax(padding_token, reduced_dim=tkn_per_frame)),
-                                                       output_shape=token_out.shape)
-
-                            token_mask = weighted_add(
-                                mtf.reshape(to_fp32(token_pad), new_shape=params.token_dim_shape),
-                                to_fp32(token_mask), one_hot_sequence)
-
-                            frame_pad = to_fp32(
-                                mtf.greater(mtf.reduce_sum(padding_token, reduced_dim=tkn_per_frame), 0))
-                            token_x_input = weighted_add(frame_pad, to_fp32(token_x_input), one_hot_sequence)
-
-                            token_x_input = mtf.cast(token_x_input, dtype=tf.int32)
-
-                        return position + 1, token_x_input, token_y_input, frame_input, frame_mask_src, \
-                               frame_mask_tag, token_mask
-
-                    if token_mask is not None:
-                        token_mask = to_fp32(token_mask)
-                    if frame_mask_src is not None:
-                        frame_mask_src = to_fp32(frame_mask_src)
-                    if frame_mask_tag is not None:
-                        frame_mask_tag = to_fp32(frame_mask_tag)
-
-                    while_loop_inputs = [mtf.zeros(params.mesh, [], tf.int32) + params.initial_autoregressive_position,
-                                         token_x_input, token_y_input, frame_input, frame_mask_src, frame_mask_tag,
-                                         token_mask]
-
-                else:  # -> params.use_language
-                    def body_fn(position, token_x, token_y, sampling_temperature, *states):
-                        _, _, _, _, _, _, token_out = build(params,
-                                                            mtf.ones(params.mesh, [], tf.float32),
-                                                            mtf.ones(params.mesh, [], tf.float32),
-                                                            mtf.ones(params.mesh, [], tf.float32),
-                                                            token_x,
-                                                            token_y,
-                                                            mtf.ones(params.mesh, [], tf.float32),
-                                                            mtf.ones(params.mesh, [], tf.float32),
-                                                            mtf.ones(params.mesh, [], tf.float32))
-
-                        one_hot_mask = mtf.one_hot(position, output_dim=params.sequence_dim, dtype=tf.int32)
-                        token_out = mtf.cast(token_out, dtype=tf.float32)
-
-                        token_out += (log(-log(mtf.random_uniform(params.mesh, token_out.shape, maxval=1,
-                                                                  minval=1e-9, dtype=tf.float32)))
-                                      * (-sampling_temperature))
-                        token_out = mtf.argmax(token_out, params.vocab_dim)
-
-                        token_out = mtf.shift(token_out, offset=1, dim=params.sequence_dim, wrap=False)
-
-                        return (position + 1, weighted_add(token_out, token_x, one_hot_mask),
-                                token_y, mtf.cast(sampling_temperature, dtype=tf.float32))
-
-                    if initial_pos is None:
-                        initial_pos = mtf.constant(params.mesh, value=params.initial_autoregressive_position,
-                                                   dtype=tf.int32)
-                    token_initial_pos_mask = mtf.less_equal(mtf.range(params.mesh, params.sequence_dim, dtype=tf.int32),
-                                                            initial_pos)
-                    token_initial_pos_mask = mtf.cast(token_initial_pos_mask, tf.int32)
-
-                    if params.debug_sample:
-                        token_x_input_a = slice(token_x_input, 0, 1, dim=params.batch_dim)
-                        token_x_input_b = token_x_input_a * token_initial_pos_mask
-                        token_x_input = concat([token_x_input_a, token_x_input_b], dim=token_x_input_a.shape[0])
-                    else:
-                        token_x_input = token_x_input * token_initial_pos_mask
-
-                    if sampling_temperature is None:
-                        sampling_temperature = constant_scalar(params, params.sampling_temperature, dtype=tf.float32)
-
-                    if end_iterations is None:
-                        end_iterations = mtf.constant(params.mesh, value=params.n_ctx,
-                                                      dtype=tf.int32)
-
-                    while_loop_inputs = [initial_pos, token_x_input, token_y_input, sampling_temperature]
-
-                def cond_fn(position, *states):
-                    is_done = mtf.greater_equal(position, end_iterations)
-                    is_done = mtf.reduce_sum(is_done)
-
-                    return mtf.logical_not(is_done)
-
-                loop_out = mtf.while_loop(cond_fn=cond_fn, body_fn=body_fn, inputs=while_loop_inputs)
-
-                if params.use_language:
-                    token_out = loop_out[1]
-                if params.use_video:
-                    frame_out = loop_out[3]
 
             if params.train:
                 if params.multi_loss_strategy == "linear":
@@ -454,223 +301,22 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
         return ret
 
-    num_cores = params.mesh_impl.device_assignment.num_replicas
-
-    ordered_ordinals = []
-    ordered_hosts = []
-    ordered_host_ids = []
-    host_id_to_its_pnums = collections.defaultdict(list)
-    d_assignment = params.mesh_impl.device_assignment
-
-    for pnum in range(num_cores):
-        physical_pnum = params.mesh_impl.l2p(pnum)
-
-        # For MTF, there's always 1 core per replica. So logical_core=0.
-        ordered_ordinals.append(d_assignment.tpu_ordinal(replica=physical_pnum, logical_core=0))
-        host_device = d_assignment.host_device(replica=physical_pnum)
-        host_id = int(host_device.lower().split("/task:")[1].split("/device:")[0])
-        ordered_hosts.append(host_device)
-        ordered_host_ids.append(host_id)
-        host_id_to_its_pnums[host_id].append(pnum)
-
     if query_input_fns is None:
-        num_hosts = len(set(ordered_hosts))
+        input_initializers, enqueue_ops = place_dataloader(params, input_fn)
 
-        pnum_maps = []
-        macro_batching_multi = params.macro_batching if params.train else 1
-        batch_size = params.input_pipeline_shape[0].to_integer_list[0] * macro_batching_multi
-        for mtf_shape in params.input_pipeline_shape:
-            # Make sure that the batch size is the same across all input tensors.
-            assert batch_size == mtf_shape.to_integer_list[0] * macro_batching_multi
-
-            s_shape = params.mesh_impl.slice_shape(mtf_shape)
-            shape_list = [dim_size // s_dim_size for dim_size, s_dim_size in zip(mtf_shape.to_integer_list, s_shape)]
-
-            pnum_map_shape = shape_list + [num_cores // np.prod(shape_list)]
-            assert np.prod(pnum_map_shape) == num_cores
-
-            # Initialize the pnum_map to None.
-            pnum_map = np.empty(pnum_map_shape, dtype=object)
-            pnum_map[:] = None
-
-            for pnum in range(num_cores):
-                s_begin = params.mesh_impl.slice_begin(mtf_shape, pnum)
-                coord = [dim_size // s_dim_size for dim_size, s_dim_size in zip(s_begin, s_shape)]
-                # put pnum in pnum_map[coord]
-                pnum_array_ref = pnum_map[tuple(coord)]
-                for idx, value in enumerate(pnum_array_ref):
-                    if value is None:
-                        pnum_array_ref[idx] = pnum
-                        break
-
-            pnum_maps.append(pnum_map)
-
-        # For each sub-batch, we need to know which host should read it.
-        if params.train:
-
-            # This records how many datasets (ds) are already stored on each host.
-            num_dss_per_host = [0] * num_hosts
-
-            # A list of host_ids that holds datasets (ds).
-            hosts_to_hold_ds = []
-
-            for sub_batch_pnum_map in pnum_maps[0]:
-
-                num_pnums_per_host = [0] * num_hosts
-                for pnum in sub_batch_pnum_map.flatten():
-                    num_pnums_per_host[ordered_host_ids[pnum]] += 1
-
-                host_metrics = [(host_id, num_pnums_per_host[host_id], num_dss_per_host[host_id]) for host_id in
-                                range(num_hosts)]
-                host_id, _, _ = max(host_metrics, key=lambda keys: (keys[1], -keys[2]))
-
-                num_dss_per_host[host_id] += 1
-                hosts_to_hold_ds.append(host_id)
-
-        else:
-            # There should be just one dataset-holding host. Make the last host do it.
-            hosts_to_hold_ds = [num_hosts - 1]
-
-        sub_batch_size = batch_size // len(hosts_to_hold_ds)
-        tf1.logging.info("MTF sub_batch_size: {}".format(sub_batch_size))
-        assert sub_batch_size * len(hosts_to_hold_ds) == batch_size
-
-        # Slots for all laidout tensors.
-        all_laidout_tensors = [[None] * len(params.input_pipeline_shape) for _ in range(num_cores)]
-
-        log_path = params.model_path + "/DataLog.log"
-        _run_log = []
-        run_log = None
-
-        if params.use_checkpointing:
-            if tf.io.gfile.exists(log_path):
-                _run_log = json.load(tf.io.gfile.GFile(log_path, 'r'))
-
-            curran_stats = {'steps': params.current_step, 'ctx': params.n_ctx,
-                            'slice_count': len(hosts_to_hold_ds),
-                            'interleave_size': params.interleaved_datasets,
-                            'batch_size': params.train_batch_size,
-                            'grad_accumulation': params.grad_accumulation,
-                            'token_patch_size': params.token_patch_size
-                            }
-
-            size_dump = jsonpickle.dumps(_run_log + [curran_stats], indent=4)
-            with tf.io.gfile.GFile(f"{params.model_path}/model_size.info", 'w') as f:
-                f.write(size_dump)
-
-            if len(_run_log) > 0 and not params.use_random_dataloader:
-                _run_log = [r for r in _run_log if r['steps'] != params.current_step]
-                if len(_run_log) > 0:
-                    run_log = [_run_log.pop(-1)]
-                    for r in _run_log[::-1]:
-                        if run_log[-1]['steps'] != r['steps'] and r['steps'] != params.current_step:
-                            run_log.append(r)
-                    run_log = run_log[::-1]
-
-                    for run_idx in range(len(run_log) - 1):
-                        run_log[run_idx]['steps'] = run_log[run_idx + 1]['steps'] - run_log[run_idx]['steps']
-
-                    run_log[-1]['steps'] = params.current_step - run_log[-1]['steps']
-
-                    if run_log[-1]['steps'] <= 0:
-                        run_log = None
-
-        ds_iterator = []
-        # For each sub-batch, create a SubBatchSlicer object.
-        for sub_batch_i, host_id in enumerate(hosts_to_hold_ds):
-            # Get the list of pnums for each input.
-            if params.train:
-
-                all_sub_batch_pnums = []
-                for pnum_map in pnum_maps:
-                    sub_batch_pnums = pnum_map[sub_batch_i, ...].flatten().tolist()
-                    all_sub_batch_pnums.append(sub_batch_pnums)
-
-            else:
-
-                all_sub_batch_pnums = [pnum_map.flatten().tolist() for pnum_map in pnum_maps]
-
-            with ops.device(f"/job:worker/task:{host_id}/device:CPU:0"):
-                dataset = input_fn(params, sub_batch_size, sub_batch_i, len(hosts_to_hold_ds), run_log)
-                if not params.use_random_dataloader and params.train and params.use_video:
-                    dataset = dataset.skip(params.current_step // params.macro_batching)
-                dataset = dataset.prefetch(params.buffer_size)
-                options = tf.data.Options()
-                options.experimental_deterministic = not params.train
-                options.experimental_optimization.autotune = True
-                options.experimental_optimization.autotune_buffers = True
-                options.experimental_optimization.filter_fusion = True
-                # options.experimental_optimization.hoist_random_uniform = True
-                options.experimental_optimization.map_and_batch_fusion = True
-                options.experimental_optimization.map_and_filter_fusion = False
-                options.experimental_optimization.map_fusion = True
-                options.experimental_optimization.map_parallelization = True
-                # options.experimental_optimization.map_vectorization.enabled = True
-                # options.experimental_optimization.map_vectorization.use_choose_fastest = True
-                options.experimental_optimization.noop_elimination = True
-                options.experimental_optimization.parallel_batch = True
-                options.experimental_optimization.shuffle_and_repeat_fusion = True
-                options.experimental_optimization.apply_default_optimizations = False
-                options.experimental_threading.max_intra_op_parallelism = 1
-                options.experimental_threading.private_threadpool_size = 48
-                options.experimental_distribute.auto_shard_policy = AutoShardPolicy.AUTO
-                dataset: Dataset = dataset.with_options(options)
-                _ds_iterator = tf1.data.make_initializable_iterator(dataset)
-                ds_iterator.append(_ds_iterator)
-                all_input_tensors = _ds_iterator.get_next()
-
-                if isinstance(all_input_tensors, tf.Tensor):
-                    all_input_tensors = [all_input_tensors]
-                assert len(all_input_tensors) == len(all_sub_batch_pnums)
-
-                for input_i in range(len(all_input_tensors)):
-                    input_tensor = all_input_tensors[input_i]
-                    sub_batch_pnums = all_sub_batch_pnums[input_i]
-                    mtf_input_shape = params.input_pipeline_shape[input_i]
-
-                    # Initialize the cache for each input_i
-                    _slice_dict = collections.defaultdict(list)
-
-                    for idx, pnum in enumerate(sub_batch_pnums):
-
-                        s_begin = params.mesh_impl.slice_begin(mtf_input_shape, pnum)
-                        if not not params.train:
-                            # Always slice from 0 in the first dimension (batch dimension), since
-                            # input_tensor a sub-batch tensor.
-                            s_begin[0] = 0
-                        if tuple(s_begin) in _slice_dict:
-                            input_slice = _slice_dict[tuple(s_begin)]
-                        else:
-                            s_shape = params.mesh_impl.slice_shape(mtf_input_shape)
-                            s_shape[0] = s_shape[0] * macro_batching_multi
-                            input_slice = tf.slice(input_tensor, s_begin, s_shape)
-
-                        all_laidout_tensors[pnum][input_i] = input_slice
-
-        # Make sure that there are no Nones in all_laidout_tensors.
-        for laidout_tensors in all_laidout_tensors:
-            assert None not in laidout_tensors
-
-        with ops.device(f"/job:worker/task:{hosts_to_hold_ds[0]}/device:CPU:0"):
-
-            def _tpu_ordinal_function_impl(pnum):
-                return ordered_ordinals[pnum]
-
-            def _placement_function_impl(pnum):
-                return ordered_hosts[pnum]
-
-            laidout_tensors0 = all_laidout_tensors[0]
-            infeed_queue = tpu_feed.InfeedQueue(
-                number_of_tuple_elements=len(laidout_tensors0),
-                tuple_types=[x.dtype for x in laidout_tensors0],
-                tuple_shapes=[x.shape for x in laidout_tensors0])
-            enqueue_ops = infeed_queue.generate_enqueue_ops(
-                all_laidout_tensors,
-                tpu_ordinal_function=_tpu_ordinal_function_impl,
-                placement_function=_placement_function_impl)
-
-        input_initializers = [ds.initializer for ds in ds_iterator]
     else:
+        num_cores = params.mesh_impl.device_assignment.num_replicas
+        d_assignment = params.mesh_impl.device_assignment
+        ordered_ordinals = []
+        ordered_hosts = []
+
+        for pnum in range(num_cores):
+            physical_pnum = params.mesh_impl.l2p(pnum)
+            host_device = d_assignment.host_device(replica=physical_pnum)
+            ordered_hosts.append(host_device)
+
+            # For MTF, there's always 1 core per replica. So logical_core=0.
+            ordered_ordinals.append(d_assignment.tpu_ordinal(replica=physical_pnum, logical_core=0))
 
         def _tpu_ordinal_function_impl(pnum):
             return ordered_ordinals[pnum]
