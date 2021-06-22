@@ -3,11 +3,10 @@ import typing
 import mesh_tensorflow as mtf
 import tensorflow as tf
 
-from .backend import orthogonal_var
 from .basic import activated_linear_in, activated_linear_out
 from .embedding import embed
 from ..dataclass import BlockArgs
-from ..mtf_wrapper import einsum, greater_equal
+from ..mtf_wrapper import einsum, greater_equal, multiply
 from ..utils_core import random_name
 from ..utils_mtf import (anonymize, anonymize_dim, compare_range, get_attention_dim, is_masked, linear_shapes)
 
@@ -85,10 +84,8 @@ class SoftmaxForward(mtf.Operation):
 def _masked_map(args: BlockArgs):
     dim = get_attention_dim(args).dim
     tmp = anonymize_dim(dim)
-    bias = orthogonal_var(args, [args.params.head_dim, dim, tmp])
-    if is_masked(args):
-        bias *= compare_range(args.params, dim, tmp, greater_equal)
-    return bias
+    bias = embed(args, [args.params.head_dim, dim, tmp])
+    return bias, compare_range(args.params, dim, tmp, greater_equal) if is_masked(args) else 1
 
 
 def attention(args: BlockArgs):
@@ -114,11 +111,17 @@ def attention(args: BlockArgs):
         if "shared_key_value" in args:
             val = key
     if 'biased_softmax' in args:
-        logit += _masked_map(args)
+        logit += multiply(*_masked_map(args))
     if logit != 0:
         logit = SoftmaxForward(logit, dim, is_masked(args)).outputs[0]
     if 'biased_attention_map' in args:
-        logit += _masked_map(args)
+        logit += multiply(*_masked_map(args))
+    logit = [logit] * (logit != 0)
+    if 'scale_attention_map':
+        logit.extend(_masked_map(args))
     if val == 0:
         val = anonymize(args.tensor if "input_as_value" else activated_linear_out(base), dim)
-    return einsum([logit, val], shape)
+    if not logit:
+        raise UserWarning(f"WARNING: There is no spatial mixing happening with the following attention parameters: "
+                          f"{args.name_extras}.")
+    return einsum(logit + [val], shape)
