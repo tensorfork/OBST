@@ -120,7 +120,7 @@ def attention(args: BlockArgs):
     if 'scale_attention_map' in args or ("biased_attention_map" in args and not logit):
         logit.extend(_masked_map(args))
     if val == 0:
-        val = anonymize(args.tensor if "input_as_value" else activated_linear_out(base), dim)
+        val = anonymize(args.tensor if "input_as_value" in args else activated_linear_out(base), dim)
     if not logit:
         raise UserWarning(f"WARNING: There is no spatial mixing happening with the following attention parameters: "
                           f"{args.name_extras}.")
