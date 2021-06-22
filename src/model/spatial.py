@@ -3,14 +3,13 @@ import typing
 import mesh_tensorflow as mtf
 import tensorflow as tf
 
-from .backend import normal_var, orthogonal_var
+from .backend import orthogonal_var
 from .basic import activated_linear_in, activated_linear_out
 from .embedding import embed
 from ..dataclass import BlockArgs
 from ..mtf_wrapper import einsum, greater_equal
 from ..utils_core import random_name
-from ..utils_mtf import (anonymize, anonymize_dim, compare_range, get_attention_dim, is_masked, get_intermediate,
-                         linear_shapes)
+from ..utils_mtf import (anonymize, anonymize_dim, compare_range, get_attention_dim, is_masked, linear_shapes)
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -83,60 +82,43 @@ class SoftmaxForward(mtf.Operation):
         lowering.set_tensor_lowering(self.outputs[0], y)
 
 
-def _softmax_attention(args: BlockArgs, val: mtf.Tensor, *lgt_in: mtf.Tensor) -> mtf.Tensor:
+def _masked_map(args: BlockArgs):
     dim = get_attention_dim(args).dim
-    shape = args.tensor.shape
-    lgt_in = list(lgt_in)
-    lgt_in[0] *= dim.size ** -0.5
-    logit_shape = shape - (mtf.Shape(linear_shapes(args).old) - [args.params.head_dim]) + anonymize_dim(dim)
-    return einsum(SoftmaxForward(einsum(lgt_in, output_shape=logit_shape), dim, is_masked(args)).outputs + [val], shape)
+    tmp = anonymize_dim(dim)
+    bias = orthogonal_var(args, [args.params.head_dim, dim, tmp])
+    if is_masked(args):
+        bias *= compare_range(args.params, dim, tmp, greater_equal)
+    return bias
 
 
 def attention(args: BlockArgs):
     args.params.attention_idx += 1
-    dim = get_attention_dim(args).dim
-    base = args(activated_linear_in(args))
+    if "dot_product" in args or "input_as_value" not in args:
+        base = args(activated_linear_in(args))
 
+    dim = get_attention_dim(args).dim
+    shape = args.tensor.shape
+
+    logit = 0
+    val = 0
     key = 0
-    if 'embedded' in args or 'context' in args:
-        key = activated_linear_out(base)
-    if 'embedded' in args or 'positional' in args:
-        key += embed(args, [dim] + args.params.feature_dims)
-    return _softmax_attention(args, anonymize(activated_linear_out(base), dim), activated_linear_out(base),
-                              anonymize(key, dim))
-
-
-def spatial_mixing(args: BlockArgs) -> mtf.Tensor:
-    dim = get_attention_dim(args).dim
-    tmp = anonymize_dim(dim)
-
-    if 'feed_forward' in args:
-        args = args(activated_linear_in(args))
-
-    mid = anonymize(args.tensor, dim)
-    base = [args.params.head_dim] * ('group' in args)
-    old = base + [tmp]
-    new = base + [dim]
-
-    inputs = [mid, orthogonal_var(args, old + new)]
-    if is_masked(args):
-        inputs.append(compare_range(args.params, dim, tmp, greater_equal))
-
-    mid = einsum(inputs, args.tensor.shape)
-    if 'multiply_gate' in args:
-        if 'tanh' in args:
-            mid = mtf.tanh(mid)
-        elif 'sigmoid' in args:
-            mid = mtf.sigmoid(mid)
-        elif 'bias' in args:
-            mid += normal_var(args, new, mean=1)
-        mid *= args.tensor
-    if 'feed_forward' not in args:
-        return mid
-    return activated_linear_out(args(mid))
-
-
-def spatial_feed_forward(args: BlockArgs) -> mtf.Tensor:
-    base = args(activated_linear_in(args))
-    var = orthogonal_var(args, get_intermediate(base) + [anonymize_dim(get_attention_dim(args).dim)])
-    return _softmax_attention(args, activated_linear_out(base), var, base.tensor)
+    if 'dot_product' in args:
+        if 'embedded' in args or 'context' in args:
+            key = activated_linear_out(base)
+        if 'embedded' in args or 'positional' in args:
+            key += embed(args, [dim] + args.params.feature_dims)
+        qry = activated_linear_out(base)
+        qry *= dim.size ** -0.5
+        logit_shape = shape - (mtf.Shape(linear_shapes(args).old) - [args.params.head_dim]) + anonymize_dim(dim)
+        logit = einsum([qry, anonymize(key, dim)], output_shape=logit_shape)
+        if "shared_key_value" in args:
+            val = key
+    if 'biased_softmax' in args:
+        logit += _masked_map(args)
+    if logit != 0:
+        logit = SoftmaxForward(logit, dim, is_masked(args)).outputs[0]
+    if 'biased_attention_map' in args:
+        logit += _masked_map(args)
+    if val == 0:
+        val = anonymize(args.tensor if "input_as_value" else activated_linear_out(base), dim)
+    return einsum([logit, val], shape)

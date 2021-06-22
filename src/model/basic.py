@@ -8,7 +8,7 @@ from .backend import get_var, linear, orthogonal_var
 from .normalization import norm
 from ..dataclass import BlockArgs
 from ..mtf_wrapper import dropout as utils_dropout, sigmoid, exp, reduce_max, reduce_sum, einsum, reciprocal
-from ..utils_mtf import linear_shapes
+from ..utils_mtf import linear_shapes, anonymize_shape
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -63,3 +63,9 @@ def activated_linear_out(args: BlockArgs):
 
 def feed_forward(args: BlockArgs) -> mtf.Tensor:
     return activated_linear_out(args(activated_linear_in(args)))
+
+
+def group_linear(args: BlockArgs):
+    return mtf.reshape(linear(args('group'), args.params.feature_dims,
+                              anonymize_shape(args.params.feature_dims, args.params.key_dim)),
+                       args.tensor.shape)
