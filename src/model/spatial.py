@@ -114,10 +114,10 @@ def attention(args: BlockArgs):
         logit += multiply(*_masked_map(args))
     if logit != 0:
         logit = SoftmaxForward(logit, dim, is_masked(args)).outputs[0]
-    if 'biased_attention_map' in args:
+    if 'biased_attention_map' in args and logit != 0 and "scale_attention_map" not in args:
         logit += multiply(*_masked_map(args))
     logit = [logit] * (logit != 0)
-    if 'scale_attention_map':
+    if 'scale_attention_map' in args or ("biased_attention_map" in args and not logit):
         logit.extend(_masked_map(args))
     if val == 0:
         val = anonymize(args.tensor if "input_as_value" else activated_linear_out(base), dim)
