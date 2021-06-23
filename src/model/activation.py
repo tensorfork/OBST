@@ -166,6 +166,7 @@ def activate(args: BlockArgs) -> mtf.Tensor:
     """
     Call activation function on mtf.Tensor.
     """
+    print(args.name_extras)
     for fn_name in args:
         if fn_name not in ACTIVATIONS:
             continue
