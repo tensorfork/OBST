@@ -54,11 +54,11 @@ def activated_linear(args: BlockArgs, prefix: str) -> mtf.Tensor:
 
 
 def activated_linear_in(args: BlockArgs):
-    return activated_linear(args, 'in_')
+    return activated_linear(args, 'in:')
 
 
 def activated_linear_out(args: BlockArgs):
-    return activated_linear(args, 'out_')
+    return activated_linear(args, 'out:')
 
 
 def feed_forward(args: BlockArgs) -> mtf.Tensor:

@@ -18,7 +18,7 @@ from tensorflow_estimator.python.estimator import estimator as estimator_lib
 from .dataclass import ModelParameter
 from .interface import gen_sample_fn, get_command_line_input_and_output_fn
 from .inputs import dataset, gpt_neo_input
-from .train import computation_func
+from src.run.run import computation_func
 
 tf = tf2.compat.v1
 tpu = tf.tpu
