@@ -1,7 +1,6 @@
 import time
 import typing
 
-import jsonpickle
 import mesh_tensorflow as mtf
 import numpy as np
 import tensorflow as tf
@@ -12,8 +11,6 @@ from tensorflow.python.tpu.ops import tpu_ops
 from tensorflow.python.training import checkpoint_management
 
 from src.dataclass import ModelParameter
-from src.model import build
-from src.optimizers import get_optimizer
 from src.run.dataloader_placement import place_dataloader, infeed_from_session
 from src.run.inference import get_infrence_model
 from src.run.train import get_train_model
@@ -33,14 +30,17 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
     tf.config.optimizer.set_experimental_options(params.tensorflow_optimization_settings)
 
     def _model_fn(*args):
-        manual_global_step = tf1.get_variable("manual_global_step", [], tf.int64, initializer=tf.zeros_initializer(),
-                                              trainable=False,
-                                              aggregation=variables.VariableAggregation.ONLY_FIRST_REPLICA)
         # Construct mtf graph + mesh from params
         graph = mtf.Graph()
 
         # Build mtf mesh object
         params.mesh = mtf.Mesh(graph, "mesh", mtf.utils.BalancedVariablePlacer(params.cpu_devices))
+
+        manual_global_step = mtf.get_variable(mesh=params.mesh,
+                                              name="manual_global_step",
+                                              shape=[], dtype=tf.int64,
+                                              initializer=tf.zeros_initializer(),
+                                              trainable=False)
 
         def _base_model_fn(*args):
 
@@ -145,7 +145,8 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 with tf.control_dependencies(comput_ops):
                     global_step = tf1.train.get_or_create_global_step()
 
-                    step = tf.math.mod(manual_global_step + 1, tf.constant(params.grad_accumulation, dtype=tf.int64))
+                    step = tf.math.mod(lowering.export_to_tf_tensor(manual_global_step),
+                                       tf.constant(params.grad_accumulation, dtype=tf.int64))
                     step = tf.equal(step, tf.constant(0, dtype=tf.int64))
                     step = tf.cast(step, tf.int64)
 
@@ -168,8 +169,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                         comput_ops.append(add_histogram(tf_loss=tf_loss, value=debug_gradients_dict,
                                                         global_step=global_step))
 
-                    comput_ops.extend([tf1.assign_add(global_step, step),
-                                       tf1.assign_add(manual_global_step, tf.constant(1, dtype=tf.int64, shape=[]))])
+                    comput_ops.extend([tf1.assign_add(global_step, step)])
 
                 hooks.append(mtf.MtfRestoreHook(lowering))
                 with mtf.utils.outside_all_rewrites():

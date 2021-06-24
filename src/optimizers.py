@@ -13,7 +13,7 @@ from src.model.revnet import RevGradOp
 from .dataclass import ModelParameter
 from .mtf_wrapper import (add_n, cast, constant_float, constant_scalar, einsum, equal, greater, greater_equal, minimum,
                           mod, reduce_max, reduce_mean, reduce_sum, rsqrt, sqrt, square)
-from .utils_mtf import SHAPE, feature_dims_used, to_fp32, weighted_add, get_variable, non_replicated_variable
+from .utils_mtf import SHAPE, feature_dims_used, to_fp32, weighted_add, get_variable
 
 tf = tf2.compat.v1
 zeros = tf.zeros_initializer()
@@ -31,7 +31,7 @@ def variable(params: ModelParameter, base: mtf.Variable, name: str, shape: SHAPE
     return get_variable(params, f"{base.name}/{params.optimizer}/{name}", shape, zeros, False, params.optimizer_dtype)
 
 
-def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, manual_step: tf.Tensor,
+def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, manual_step: mtf.Tensor,
                   ) -> typing.Tuple[typing.Tuple[mtf.Tensor, typing.List[mtf.Assign], typing.List[mtf.Tensor]],
                                     tf.Tensor, typing.Dict]:
     """
@@ -94,13 +94,19 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
         update_ops.append(mtf.assign(last_reduce, weighted_add(last_reduce, global_step_mtf, reduce)))
 
     learning_rate = import_mtf(tf_learning_rate, "learning_rate")
-    step = cast(equal(mod(tf.cast(manual_step + 1, dtype),
+    step = cast(equal(mod(mtf.cast(manual_step + 1, dtype),
                           import_mtf(params.grad_accumulation * 1., "grad_accum")),
                       import_mtf(0., "zero")), dtype)
     mstep = 1 - step
     beta1 = 1 - step * import_mtf(1 - params.opt_beta1, "beta1") if params.opt_beta1 else None
     beta2 = 1 - step * import_mtf(1 - params.opt_beta2, "beta2")
     epsilon = params.opt_epsilon
+
+    print(mtf.constant(mesh=params.mesh, value=1, dtype=tf.int64, shape=[]))
+    print(manual_step)
+
+    update_ops.append(mtf.assign_add(manual_step,
+                                     mtf.constant(mesh=params.mesh, value=1, dtype=tf.int64, shape=[])))
 
     debug_gradients_dict = {}
     first_grad = {}
@@ -309,5 +315,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                         else:
                             update_ops.append(mtf.assign_sub(var, weight_update))
 
-    return params.mesh.graph.trainable_variables[0].graph.combine_assignments(update_ops), \
-           tf_learning_rate, debug_gradients_dict
+    #return params.mesh.graph.trainable_variables[0].graph.combine_assignments(update_ops), \
+    #       tf_learning_rate, debug_gradients_dict
+
+    return update_ops, tf_learning_rate, debug_gradients_dict
