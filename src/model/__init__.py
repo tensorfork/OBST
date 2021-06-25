@@ -118,7 +118,7 @@ def build(params: ModelParameter,
             intermediate = params.intermediate[0]
             intermediate = mtf.Dimension(intermediate.name, int(intermediate.size * params.vocab_weight_factorization))
             txt_embd = embed(base_args(params.token_embedding), params.vocab_dims + [intermediate])
-            txt = einsum([txt_embd, *head_embed(params, txt_src)], reduced_dims=params.vocab_dims)
+            txt = einsum([txt_embd, head_embed(params, txt_src)], reduced_dims=params.vocab_dims)
 
             txt = dropout(txt, params.train, rate=params.input_dropout)
 
