@@ -208,7 +208,7 @@ def build(params: ModelParameter,
             token_loss += einsum([token_out, *head_embed(params, txt_tgt), constant_scalar(params, -1), msk],
                                  output_shape=[])
             token_loss += einsum([max_logit, msk], output_shape=[])
-            loss_list.append(token_loss)#
+            loss_list.append(token_loss)
 
             if txt_msk is not None:
                 token_loss = einsum([constant_scalar(params, txt_msk.size), reciprocal(reduce_sum(txt_msk)),
