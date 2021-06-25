@@ -26,7 +26,10 @@ class OrthogonalInit(Initializer):
         features_used = feature_dims_used(params, shape)
         if not fan_in_dims:
             if features_used:
-                fan_in = np.prod([d.size for d in params.feature_dims])
+                if shape.index(params.key_dim) == len(sizes) - 1:
+                    fan_in = np.prod(sizes[:-2])
+                else:
+                    fan_in = np.prod([d.size for d in params.feature_dims])
             elif len(sizes) == 2:
                 fan_in = sizes[0]
             else:
