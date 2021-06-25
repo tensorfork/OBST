@@ -211,18 +211,6 @@ class ModelParameter(typing.Dict[str, typing.Any]):
 
         split_batch = self.batch_splits > 1
         split_heads = self.head_splits > 1
-        if not hasattr(self, 'split_vocab'):
-            self.split_vocab = split_heads and isinstance(self.head_splits, int) and self.vocab_size > 256
-            if self.split_vocab:
-                full_partition_size = self.head_splits * 128
-                self.vocab_size += full_partition_size - self.vocab_size % full_partition_size
-                self.vocab_size //= self.n_head
-                self.vocab_dim = mtf.Dimension("vocab", self.vocab_size)
-                self.vocab_dims = [self.head_dim, self.vocab_dim]
-            elif self.vocab_size % 256 > 0:
-                self.vocab_size += 256 - self.vocab_size % 256
-                self.vocab_dim = mtf.Dimension("vocab", self.vocab_size)
-                self.vocab_dims = [self.vocab_dim]
 
         self.mesh_shape = ','.join([f"b:{self.batch_splits:.0f}"] * split_batch +
                                    [f"h:{self.head_splits:.0f}"] * split_heads)
@@ -261,6 +249,19 @@ class ModelParameter(typing.Dict[str, typing.Any]):
 
         self.batch_dim = mtf.Dimension("batch", self.train_batch_size)
         self.frame_input_sequence = mtf.Dimension("_sequence", self.time_patch_size + 1)
+
+        if not hasattr(self, 'split_vocab'):
+            self.split_vocab = split_heads and isinstance(self.head_splits, int) and self.vocab_size > 256
+            if self.split_vocab:
+                full_partition_size = self.head_splits * 128
+                self.vocab_size += full_partition_size - self.vocab_size % full_partition_size
+                self.vocab_size //= self.n_head
+                self.vocab_dim = mtf.Dimension("vocab", self.vocab_size)
+                self.vocab_dims = [self.head_dim, self.vocab_dim]
+            elif self.vocab_size % 256 > 0:
+                self.vocab_size += 256 - self.vocab_size % 256
+                self.vocab_dim = mtf.Dimension("vocab", self.vocab_size)
+                self.vocab_dims = [self.vocab_dim]
 
         frame_input_shape = [self.batch_dim, self.frame_input_sequence]
 
