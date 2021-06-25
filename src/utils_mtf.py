@@ -42,20 +42,6 @@ def head_embed(params: ModelParameter, int_tokens: mtf.Tensor) -> typing.Tuple[m
                     dtype=params.variable_dtype.activation_dtype))
 
 
-def unanonymize(inp: mtf.Tensor, dim: typing.Union[mtf.Dimension, str]) -> mtf.Tensor:
-    """
-    Inverse of anonymize. Un-replicates tensor across axis by removing the underscore from the name of a dimension of
-    the tensor. This allows mtf to split the tensor across a given dimension again.
-    :param inp: tensor to replicate
-    :param dim: dimension of tensor
-    :return: un-replicated tensor
-    """
-    dim = anonymize_dim(dim)
-    if not check_for_dim(inp, dim):
-        return inp
-    return mtf.rename_dimension(inp, dim, dim_name(unanonymize_dim(dim)))
-
-
 def new_dim(dim: typing.Union[mtf.Dimension, str], new_size: typing.Optional[int] = None,
             new_name: typing.Optional[str] = None):
     """
@@ -85,6 +71,33 @@ def unanonymize_dim(dim: typing.Union[mtf.Dimension, str], new_size: typing.Opti
     if name.startswith('_'):
         name = name[1:]
     return new_dim(dim, new_size, name)
+
+
+def unanonymize(inp: mtf.Tensor,
+                dim: typing.Union[typing.List[typing.Union[mtf.Dimension, str]], typing.Union[mtf.Dimension, str]]
+                ) -> mtf.Tensor:
+    """
+    Remove underscore of the name of a dimension of a tensor. This dereplicates a given dimension from all devices.
+    :param inp: tensor to replicate
+    :param dim: dimension(s) to replicate
+    :return: replicated tensor
+    """
+    if not isinstance(dim, list):
+        dim = [dim]
+    shape = inp.shape.dims.copy()
+    for cdim in dim:
+        cdim = anonymize_dim(dim_name(cdim))
+        if not check_for_dim(inp, cdim):
+            continue
+        shape = [unanonymize_dim(d) if cdim == d.name else d for d in shape]
+    if shape != inp.shape.dims:
+        if isinstance(dim, mtf.Dimension):
+            name = dim.name
+        else:
+            name = '-'.join(dim_name(d) for d in dim)
+        with tf1.variable_scope(f"unanonymize_{name}"):
+            return mtf.reshape(inp, shape)
+    return inp
 
 
 def anonymize_dim(dim: DIM, new_size: typing.Optional[int] = None):
