@@ -13,8 +13,8 @@ from .normalization import norm
 from .revnet import RevGradOp
 from ..dataclass import BlockArgs, BlockConfig, ModelParameter
 from ..mtf_wrapper import (add_n, cast, constant_scalar, dropout, einsum, one_hot, ones, reciprocal, reduce_logsumexp,
-                           reduce_sum, sigmoid, sign, zeros_like, reduce_max, log, exp)
-from ..utils_mtf import concat, slice, weighted_add, anonymize_shape, unanonymize, head_embed, head_argmax
+                           reduce_mean, reduce_sum, sigmoid, sign, zeros_like)
+from ..utils_mtf import concat, slice, weighted_add, anonymize_shape, anonymize_dim, unanonymize
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -117,8 +117,9 @@ def build(params: ModelParameter,
             base_args = BlockArgs(params, txt_tgt, [''])
             intermediate = params.intermediate[0]
             intermediate = mtf.Dimension(intermediate.name, int(intermediate.size * params.vocab_weight_factorization))
-            txt_embd = embed(base_args(params.token_embedding), params.vocab_dims + [intermediate])
-            txt = einsum([txt_embd, head_embed(params, txt_src)], reduced_dims=params.vocab_dims)
+            txt_embd = embed(base_args(params.token_embedding), [params.vocab_dim, intermediate])
+            txt = einsum([txt_embd, one_hot(txt_src, params.vocab_dim, dtype=params.variable_dtype.activation_dtype)],
+                         reduced_dims=[params.vocab_dim])
 
             txt = dropout(txt, params.train, rate=params.input_dropout)
 
@@ -172,10 +173,10 @@ def build(params: ModelParameter,
             for config_idx, config in enumerate(params.output_block_config):
                 token_out = block_part_fn(params, config, token_out, f'lang_out{config_idx}')
             old = anonymize_shape(params.feature_dims, params.head_dim)
-            new = [txt_tgt.shape[-1]] + anonymize_shape(params.vocab_dims, params.head_dim)
+            new = [txt_tgt.shape[-1], anonymize_dim(params.vocab_dim)]
             token_out = einsum([token_out, embed(base_args(params.output_embedding), old + new)],
                                output_shape=token_out.shape - old + new)
-            token_out = unanonymize(token_out, params.head_dim)
+            token_out = unanonymize(token_out, params.vocab_dim)
 
         if params.use_video:
             frame_out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)
@@ -200,27 +201,13 @@ def build(params: ModelParameter,
         accuracy = None
 
         if params.use_language:
-            reduced_shape = token_out.shape - params.vocab_dims
-            max_logit = reduce_max(mtf.stop_gradient(token_out), output_shape=reduced_shape)
-            msk = mtf.stop_gradient(txt_msk * cat_msk_tgt * (1 / txt_tgt.size))
-            token_loss = einsum([log(reduce_sum(exp(token_out - max_logit), output_shape=reduced_shape)), msk],
-                                output_shape=[])
-            token_loss += einsum([token_out, *head_embed(params, txt_tgt), constant_scalar(params, -1), msk],
-                                 output_shape=[])
-            token_loss += einsum([max_logit, msk], output_shape=[])
+            token_loss = mtf.layers.softmax_cross_entropy_with_logits(token_out, txt_tgt, params.vocab_dim)
+            token_loss = reduce_mean(token_loss)
             loss_list.append(token_loss)
-
-            if txt_msk is not None:
-                token_loss = einsum([constant_scalar(params, txt_msk.size), reciprocal(reduce_sum(txt_msk)),
-                                     constant_scalar(params, cat_msk_tgt.size), reciprocal(reduce_sum(cat_msk_tgt)),
-                                     mtf.stop_gradient(token_loss)], output_shape=[])
-            token_loss = mtf.stop_gradient(token_loss)
-
             if params.calc_accuracy:
-                accuracy = einsum([cast(mtf.equal(head_argmax(mtf.stop_gradient(token_out), params.vocab_dims),
-                                                  txt_tgt),
-                                        params.variable_dtype.activation_dtype), msk], output_shape=[])
-                accuracy = mtf.stop_gradient(accuracy)
+                accuracy = reduce_sum(mtf.cast(mtf.equal(mtf.argmax(token_out, params.vocab_dim), txt_tgt),
+                                               params.variable_dtype.activation_dtype), []) / txt_tgt.size
+
         if params.use_video:
 
             if params.use_discrete_video_loss:
