@@ -6,7 +6,7 @@ import tensorflow as tf
 from tensorflow.python.ops.init_ops import Initializer
 
 from .dataclass import BlockArgs, ModelParameter
-from .mtf_wrapper import cast, mtf_range, random_name
+from .mtf_wrapper import cast, mtf_range, random_name, one_hot, floordiv, mod
 from .utils_core import default
 
 tf1 = tf.compat.v1
@@ -20,6 +20,26 @@ OPT_DIMS = typing.Optional[DIM_LIST]
 ALL_SHAPES = typing.Union[SHAPE, mtf.Tensor, mtf.Variable]
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 LINEAR_SHAPES = typing.NamedTuple("LinearShapes", (('old', DIM_LIST), ('new', DIM_LIST)))
+
+
+def head_argmax(tensor: mtf.Tensor, dims: typing.List[mtf.Dimension]) -> mtf.Tensor:
+    dims = sorted(dims, key=lambda x: x.size)
+    dims.reverse()
+    dim = dims.pop(0)
+    val, ind = mtf.top_1(tensor, dim)
+    size = dim.size
+    for dim in dims:
+        val, ind0 = mtf.top_1(val, dim)
+        ind = mtf.einsum([ind, one_hot(ind0, dim, dtype=ind.dtype)], reduced_dims=[dim]) * size + ind0
+        size = dim.size
+    return ind
+
+
+def head_embed(params: ModelParameter, int_tokens: mtf.Tensor) -> typing.Tuple[mtf.Tensor, mtf.Tensor]:
+    return (one_hot(floordiv(int_tokens, params.vocab_size), params.head_dim,
+                    dtype=params.variable_dtype.activation_dtype),
+            one_hot(mod(int_tokens, params.vocab_size), params.vocab_dim,
+                    dtype=params.variable_dtype.activation_dtype))
 
 
 def unanonymize(inp: mtf.Tensor, dim: typing.Union[mtf.Dimension, str]) -> mtf.Tensor:

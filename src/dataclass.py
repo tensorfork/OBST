@@ -216,8 +216,14 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             if self.split_vocab:
                 full_partition_size = self.head_splits * 128
                 self.vocab_size += full_partition_size - self.vocab_size % full_partition_size
+                self.vocab_size //= self.n_head
+                self.vocab_dim = mtf.Dimension("vocab", self.vocab_size)
+                self.vocab_dims = [self.head_dim, self.vocab_dim]
             elif self.vocab_size % 256 > 0:
                 self.vocab_size += 256 - self.vocab_size % 256
+                self.vocab_dim = mtf.Dimension("vocab", self.vocab_size)
+                self.vocab_dims = [self.vocab_dim]
+
         self.mesh_shape = ','.join([f"b:{self.batch_splits:.0f}"] * split_batch +
                                    [f"h:{self.head_splits:.0f}"] * split_heads)
         self.layout = ','.join([f"batch:b"] * split_batch +
@@ -226,8 +232,10 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.optimizer_dtype = mtf.VariableDType(self.storage_dtype, self.optimizer_slice_dtype, self.calculation_dtype)
         self.block_config = [BlockConfig(conf, memory_reduction_strategy=self.memory_reduction_strategy) for conf in
                              self.block_config]
-        self.input_block_config = [BlockConfig(conf, memory_reduction_strategy="checkpoint") for conf in self.input_block_config]
-        self.output_block_config = [BlockConfig(conf, memory_reduction_strategy="checkpoint") for conf in self.output_block_config]
+        self.input_block_config = [BlockConfig(conf, memory_reduction_strategy="checkpoint") for conf in
+                                   self.input_block_config]
+        self.output_block_config = [BlockConfig(conf, memory_reduction_strategy="checkpoint")
+                                    for conf in self.output_block_config]
         self.time_patch_size = self.n_ctx // self.time_patch
         self.frame_height_patch = self.frame_height // self.patch_size
         self.frame_width_patch = self.frame_width // self.patch_size
@@ -251,7 +259,6 @@ class ModelParameter(typing.Dict[str, typing.Any]):
                                                self.intermediate_feed_forward_multiplier))]
         self.expert_dim = mtf.Dimension("experts", self.experts)
 
-        self.vocab_dim = mtf.Dimension(self.head_dim.name, self.vocab_size)
         self.batch_dim = mtf.Dimension("batch", self.train_batch_size)
         self.frame_input_sequence = mtf.Dimension("_sequence", self.time_patch_size + 1)
 
