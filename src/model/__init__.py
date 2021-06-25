@@ -171,10 +171,9 @@ def build(params: ModelParameter,
             token_out = slice(out, 0, params.language_token_patch, spatial_ctx)
             for config_idx, config in enumerate(params.output_block_config):
                 token_out = block_part_fn(params, config, token_out, f'lang_out{config_idx}')
-            old = anonymize_shape(params.feature_dims, params.head_dim)
             new = [txt_tgt.shape[-1]] + anonymize_shape(params.vocab_dims, params.head_dim)
-            token_out = einsum([token_out, embed(base_args(params.output_embedding), old + new)],
-                               output_shape=token_out.shape - old + new)
+            token_out = einsum([token_out, embed(base_args(params.output_embedding), params.feature_dims + new)],
+                               output_shape=token_out.shape - params.feature_dims + new)
             token_out = unanonymize(token_out, params.head_dim)
 
         if params.use_video:
