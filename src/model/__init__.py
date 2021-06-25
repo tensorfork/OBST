@@ -63,10 +63,10 @@ def build(params: ModelParameter,
         if vid is not None and not params.use_discrete_video_loss and not params.use_bit_fold_input_pipeline:
             vid = mtf.cast(vid, params.variable_dtype.activation_dtype)
 
-        video_loss: typing.Union[int, mtf.Tensor] = 0
-        token_loss: typing.Union[int, mtf.Tensor] = 0
-        frame_out: typing.Union[int, mtf.Tensor] = 0
-        token_out: typing.Union[int, mtf.Tensor] = 0
+        video_loss: typing.Union[None, mtf.Tensor] = None
+        token_loss: typing.Union[None, mtf.Tensor] = None
+        frame_out: typing.Union[None, mtf.Tensor] = None
+        token_out: typing.Union[None, mtf.Tensor] = None
 
         spatial_ctx: mtf.Dimension = txt_tgt.shape[-2] if params.use_language else vid.shape[2]
 

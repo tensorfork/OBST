@@ -315,7 +315,5 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                         else:
                             update_ops.append(mtf.assign_sub(var, weight_update))
 
-    #return params.mesh.graph.trainable_variables[0].graph.combine_assignments(update_ops), \
-    #       tf_learning_rate, debug_gradients_dict
-
-    return update_ops, tf_learning_rate, debug_gradients_dict
+    return params.mesh.graph.trainable_variables[0].graph.combine_assignments(update_ops), \
+           tf_learning_rate, debug_gradients_dict

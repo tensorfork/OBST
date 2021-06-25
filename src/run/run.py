@@ -125,6 +125,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                                   sampling_temperature,
                                                                   end_iterations)
 
+            print(id(graph))
             analyze_model(params, time_to_build=(time.time() - start_time), graph=graph)
             color_print(params, "Lowering graph to TensorFlow...")
             start_time = time.time()
