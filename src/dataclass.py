@@ -145,7 +145,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
                               }]
 
         self.input_block_config = []
-        self.output_block_config = [{'layer': ["norm-shift-scale"]}]
+        self.output_block_config = []
 
         self.mesh: typing.Optional[mtf.Mesh] = None
         self.d_assignment: typing.Optional[DeviceAssignment] = None
