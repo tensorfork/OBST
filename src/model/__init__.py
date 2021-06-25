@@ -14,7 +14,7 @@ from .revnet import RevGradOp
 from ..dataclass import BlockArgs, BlockConfig, ModelParameter
 from ..mtf_wrapper import (add_n, cast, constant_scalar, dropout, einsum, one_hot, ones, reciprocal, reduce_logsumexp,
                            reduce_mean, reduce_sum, sigmoid, sign, zeros_like)
-from ..utils_mtf import concat, slice, weighted_add, anonymize, anonymize_shape
+from ..utils_mtf import concat, slice, weighted_add, anonymize_shape, anonymize_dim, unanonymize
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -173,10 +173,10 @@ def build(params: ModelParameter,
             for config_idx, config in enumerate(params.output_block_config):
                 token_out = block_part_fn(params, config, token_out, f'lang_out{config_idx}')
             old = anonymize_shape(params.feature_dims, params.head_dim)
-            new = [txt_tgt.shape[-1], params.vocab_dim]
-            token_out = anonymize(token_out, params.head_dim)
+            new = [txt_tgt.shape[-1], anonymize_dim(params.vocab_dim)]
             token_out = einsum([token_out, embed(base_args(params.output_embedding), old + new)],
                                output_shape=token_out.shape - old + new)
+            token_out = unanonymize(token_out, params.vocab_dim)
 
         if params.use_video:
             frame_out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)
