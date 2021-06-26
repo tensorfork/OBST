@@ -65,7 +65,7 @@ def anonymize(tensor: mtf.Tensor):
     return scoped("anonymize", mtf.anonymize, tensor)
 
 
-def random_uniform(params: ModelParameter, shape: SHAPE, dtype: typing.Optional[tf.dtypes] = None, maxval: float = 0,
+def random_uniform(params: ModelParameter, shape: SHAPE, dtype: typing.Optional[tf.DType] = None, maxval: float = 0,
                    minval: float = 0):
     return scoped("random_uniform", mtf.random_uniform, params.mesh, shape, dtype=dtype, maxval=maxval, minval=minval)
 
@@ -87,7 +87,7 @@ def gelu(tensor: mtf.Tensor):
 
 
 def constant(params: ModelParameter, value: typing.Union[int, float], shape: OPT_SHAPE = None,
-             dtype: typing.Union[None, mtf.VariableDType, tf.dtypes] = None) -> mtf.Tensor:
+             dtype: typing.Union[None, mtf.VariableDType, tf.DType] = None) -> mtf.Tensor:
     return scoped("constant", mtf.constant, params.mesh, value, shape,
                   params.variable_dtype.activation_dtype if dtype is None else dtype)
 
@@ -100,7 +100,7 @@ def constant_int(params: ModelParameter, value: typing.Union[int, float], shape:
     return scoped("constant_int", mtf.constant, params.mesh, value, shape, tf.int32)
 
 
-def constant_scalar(params: ModelParameter, value: typing.Union[int, float], dtype: tf.TypeSpec = None) -> mtf.Tensor:
+def constant_scalar(params: ModelParameter, value: typing.Union[int, float], dtype: tf.DType = None) -> mtf.Tensor:
     dtype = params.variable_dtype.activation_dtype if dtype is None else dtype
     return scoped("constant_scalar", mtf.constant, params.mesh, value, [], dtype)
 
@@ -137,11 +137,11 @@ def floordiv(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None) -> 
     return scoped("floordiv", mtf.floordiv, x1, x2, output_shape)
 
 
-def mtf_range(mesh: mtf.Mesh, dim: DIM, dtype: tf.dtypes) -> mtf.Tensor:
+def mtf_range(mesh: mtf.Mesh, dim: DIM, dtype: tf.DType) -> mtf.Tensor:
     return scoped("range", mtf.range, mesh, dim, dtype)
 
 
-def cast(tensor: mtf.Tensor, dtype: tf.dtypes) -> mtf.Tensor:
+def cast(tensor: mtf.Tensor, dtype: tf.DType) -> mtf.Tensor:
     return scoped("cast", mtf.cast, tensor, dtype)
 
 
@@ -211,11 +211,11 @@ def multiply(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: typing.Optional[SHAPE
     return scoped("multiply", mtf.multiply, x1, x2, output_shape)
 
 
-def ones(mesh: mtf.Mesh, shape: SHAPE, dtype: tf.dtypes) -> mtf.Tensor:
+def ones(mesh: mtf.Mesh, shape: SHAPE, dtype: tf.DType) -> mtf.Tensor:
     return scoped("ones", mtf.ones, mesh, shape, dtype)
 
 
-def zeros(mesh: mtf.Mesh, shape: SHAPE, dtype: tf.dtypes) -> mtf.Tensor:
+def zeros(mesh: mtf.Mesh, shape: SHAPE, dtype: tf.DType) -> mtf.Tensor:
     return scoped("zeros", mtf.zeros, mesh, shape, dtype)
 
 
