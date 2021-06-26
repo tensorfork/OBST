@@ -48,8 +48,48 @@ def reduce_logsumexp(tensor: mtf.Tensor, reduced_dim: OPT_DIM = None) -> mtf.Ten
     return scoped("reduce_logsumexp", mtf.reduce_logsumexp, tensor, reduced_dim)
 
 
-def constant(params: ModelParameter, value: typing.Union[int, float], shape: OPT_SHAPE = None) -> mtf.Tensor:
-    return scoped("constant", mtf.constant, params.mesh, value, shape, params.variable_dtype.activation_dtype)
+def import_laid_out_tensor(params: ModelParameter, shape: SHAPE, laid_out_tensor: tf.Tensor):
+    return scoped("import_laid_out_tensor", mtf.import_laid_out_tensor, params.mesh, shape, laid_out_tensor)
+
+
+def logical_not(tensor: mtf.Tensor):
+    return scoped("logical_not", mtf.logical_not, tensor)
+
+
+def while_loop(cond_fn: typing.Callable, body_fn: typing.Callable, inputs: TENSORS,
+               num_loop_vars: typing.Optional[int] = None, has_accumulators: bool = False):
+    return scoped("while_loop", mtf.while_loop, cond_fn, body_fn, inputs, num_loop_vars, has_accumulators)
+
+
+def anonymize(tensor: mtf.Tensor):
+    return scoped("anonymize", mtf.anonymize, tensor)
+
+
+def random_uniform(params: ModelParameter, shape: SHAPE, dtype: typing.Optional[tf.dtypes] = None, maxval: float = 0,
+                   minval: float = 0):
+    return scoped("random_uniform", mtf.random_uniform, params.mesh, shape, dtype=dtype, maxval=maxval, minval=minval)
+
+
+def relu(tensor: mtf.Tensor):
+    return scoped("relu", mtf.relu, tensor)
+
+
+def sigmoid(tensor: mtf.Tensor):
+    return scoped("relu", mtf.sigmoid, tensor)
+
+
+def tanh(tensor: mtf.Tensor):
+    return scoped("relu", mtf.tanh, tensor)
+
+
+def gelu(tensor: mtf.Tensor):
+    return scoped("relu", mtf.gelu, tensor)
+
+
+def constant(params: ModelParameter, value: typing.Union[int, float], shape: OPT_SHAPE = None,
+             dtype: typing.Union[None, mtf.VariableDType, tf.dtypes] = None) -> mtf.Tensor:
+    return scoped("constant", mtf.constant, params.mesh, value, shape,
+                  params.variable_dtype.activation_dtype if dtype is None else dtype)
 
 
 def constant_float(params: ModelParameter, value: typing.Union[int, float], shape: OPT_SHAPE = None) -> mtf.Tensor:
@@ -115,6 +155,14 @@ def reciprocal(tensor: mtf.Tensor) -> mtf.Tensor:
 
 def log(tensor: mtf.Tensor) -> mtf.Tensor:
     return scoped("log", mtf.log, tensor)
+
+
+def reshape(tensor: mtf.Tensor, new_shape: SHAPE):
+    return scoped("reshape", mtf.reshape, tensor, new_shape)
+
+
+def argmax(tensor: mtf.Tensor, reduced_dim: mtf.Dimension):
+    return scoped("argmax", mtf.argmax, tensor, reduced_dim)
 
 
 def sigmoid(tensor: mtf.Tensor) -> mtf.Tensor:

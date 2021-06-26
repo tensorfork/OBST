@@ -1,15 +1,12 @@
-import time
-
 import jsonpickle
-
 import mesh_tensorflow as mtf
 import tensorflow as tf
-
-from tensorflow.python.ops import summary_ops_v2 as summary, variables
+from tensorflow.python.ops import summary_ops_v2 as summary
 from tensorflow.python.tpu import tpu
 
-from src.dataclass import ModelParameter
-from src.utils_core import color_print
+from ..dataclass import ModelParameter
+from ..mtf_wrapper import import_laid_out_tensor
+from ..utils_core import color_print
 
 tf1 = tf.compat.v1
 Dataset = tf1.data.Dataset
@@ -58,7 +55,7 @@ def add_histogram(tf_loss, value, global_step):
 
 
 def _import_tensor(params: ModelParameter, tensor, shape, name):
-    return mtf.import_laid_out_tensor(params.mesh, params.mesh_impl.LaidOutTensor([tensor]), shape, name)
+    return import_laid_out_tensor(params, params.mesh_impl.LaidOutTensor([tensor]), shape, name)
 
 
 def analyze_model(params: ModelParameter, time_to_build: float, graph: mtf.Graph):
