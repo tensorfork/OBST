@@ -48,8 +48,9 @@ def reduce_logsumexp(tensor: mtf.Tensor, reduced_dim: OPT_DIM = None) -> mtf.Ten
     return scoped("reduce_logsumexp", mtf.reduce_logsumexp, tensor, reduced_dim)
 
 
-def import_laid_out_tensor(params: ModelParameter, shape: SHAPE, laid_out_tensor: tf.Tensor):
-    return scoped("import_laid_out_tensor", mtf.import_laid_out_tensor, params.mesh, shape, laid_out_tensor)
+def import_laid_out_tensor(params: ModelParameter, shape: SHAPE, laid_out_tensor: tf.Tensor,
+                           name: typing.Optional[str] = None):
+    return scoped("import_laid_out_tensor", mtf.import_laid_out_tensor, params.mesh, shape, laid_out_tensor, name)
 
 
 def logical_not(tensor: mtf.Tensor):
