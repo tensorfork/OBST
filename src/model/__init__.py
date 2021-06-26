@@ -61,7 +61,7 @@ def build(params: ModelParameter,
         vid_msk_tgt = _default_ones(params, vid_msk_tgt)
         txt_msk = _default_ones(params, txt_msk)
         if vid is not None and not params.use_discrete_video_loss and not params.use_bit_fold_input_pipeline:
-            vid = mtf.cast(vid, params.variable_dtype.activation_dtype)
+            vid = cast(vid, params.variable_dtype.activation_dtype)
 
         video_loss: typing.Union[int, mtf.Tensor] = 0
         token_loss: typing.Union[int, mtf.Tensor] = 0

@@ -1,7 +1,6 @@
 import time
 import typing
 
-import jsonpickle
 import mesh_tensorflow as mtf
 import numpy as np
 import tensorflow as tf
@@ -11,17 +10,17 @@ from tensorflow.python.tpu import tpu
 from tensorflow.python.tpu.ops import tpu_ops
 from tensorflow.python.training import checkpoint_management
 
-from src.dataclass import ModelParameter
-from src.model import build
-from src.optimizers import get_optimizer
-from src.run.dataloader_placement import place_dataloader, infeed_from_session
-from src.run.inference import get_infrence_model
-from src.run.train import get_train_model
-from src.run.utils_run import CheckpointLoaderHook, add_summary, add_histogram, _import_tensor, analyze_model
-from src.utils_core import color_print
+from .dataloader_placement import place_dataloader, infeed_from_session
+from .inference import get_infrence_model
+from .train import get_train_model
+from .utils_run import CheckpointLoaderHook, add_summary, add_histogram, _import_tensor, analyze_model
+from ..dataclass import ModelParameter
+from ..mtf_wrapper import reduce_sum
+from ..utils_core import color_print
 
 tf1 = tf.compat.v1
 Dataset = tf1.data.Dataset
+
 
 def computation_func(params: ModelParameter, input_fn: typing.Callable,
                      session_config, cluster_resolver, callback_fns, query_input_fns=None):
@@ -93,13 +92,11 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 if not query_input_fns is None:
                     initial_pos_dim = mtf.Dimension("_initial_pos_dim", 1)
                     initial_pos = _import_tensor(params, args[2], mtf.Shape([initial_pos_dim]), "initial_pos")
-                    initial_pos = mtf.reduce_sum(initial_pos, output_shape=[])
+                    initial_pos = reduce_sum(initial_pos, output_shape=[])
                     sampling_temperature = _import_tensor(params, args[3], mtf.Shape([initial_pos_dim]), "temperature")
-                    sampling_temperature = mtf.reduce_sum(sampling_temperature, output_shape=[])
+                    sampling_temperature = reduce_sum(sampling_temperature, output_shape=[])
                     end_iterations = _import_tensor(params, args[4], mtf.Shape([initial_pos_dim]), "end_iterations")
-                    end_iterations = mtf.reduce_sum(end_iterations, output_shape=[])
-
-
+                    end_iterations = reduce_sum(end_iterations, output_shape=[])
 
             if params.train:
                 frame_out, token_out, learning_rate, loss, video_loss, \

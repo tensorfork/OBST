@@ -2,6 +2,7 @@ import mesh_tensorflow as mtf
 import tensorflow as tf
 
 from ..dataclass import BlockArgs
+from ..mtf_wrapper import relu, gelu, sigmoid, tanh
 from ..utils_core import random_name
 
 tf1 = tf.compat.v1
@@ -151,14 +152,14 @@ def _output0(op):
     return _wrapped
 
 
-ACTIVATIONS = {'relu':       mtf.relu,
-               'sigmoid':    mtf.sigmoid,
-               'tanh':       mtf.tanh,
-               'gelu':       mtf.gelu,
+ACTIVATIONS = {'relu': relu,
+               'sigmoid': sigmoid,
+               'tanh': tanh,
+               'gelu': gelu,
                'lecun_tanh': _output0(LeCunTanhForward),
-               'silu':       _output0(SiluForward),
-               'mish':       _output0(MishForward),
-               'softsign':   _output0(SoftsignForward)
+               'silu': _output0(SiluForward),
+               'mish': _output0(MishForward),
+               'softsign': _output0(SoftsignForward)
                }
 
 
@@ -169,7 +170,7 @@ def activate(args: BlockArgs) -> mtf.Tensor:
     for fn_name in args:
         if fn_name not in ACTIVATIONS:
             continue
-        with tf1.variable_scope(fn_name):
+        with tf1.variable_scope(random_name(fn_name)):
             return ACTIVATIONS[fn_name](args.tensor)
     print(f'No activation function found for "{args.name_extras}". Falling back to identity. '
           f'Known functions: {list(ACTIVATIONS.keys())}')

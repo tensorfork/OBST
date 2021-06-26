@@ -1,17 +1,11 @@
-import time
+from ..dataclass import ModelParameter
+from ..model import build
+from ..optimizers import get_optimizer
 
-import jsonpickle
-import mesh_tensorflow as mtf
-import tensorflow as tf
-
-from src.dataclass import ModelParameter
-from src.model import build
-from src.optimizers import get_optimizer
-from src.utils_core import color_print
 
 def get_train_model(params: ModelParameter):
     def train_model(frame_input, cat_mask_src, cat_mask_tag, token_x_input, token_y_input,
-                   frame_mask_src, frame_mask_tag, token_mask, manual_global_step):
+                    frame_mask_src, frame_mask_tag, token_mask, manual_global_step):
 
         loss, loss_list, video_loss, accuracy, token_loss, frame_out, token_out = build(params,
                                                                                         frame_input,
