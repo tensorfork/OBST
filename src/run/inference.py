@@ -5,7 +5,7 @@ from ..dataclass import ModelParameter
 from ..model import build
 from ..mtf_wrapper import (constant_scalar, log, argmax, reshape, one_hot, equal, less_equal, mtf_range, greater,
                            reduce_sum, cast, shift, ones, zeros, constant, random_uniform, greater_equal, logical_not,
-                           while_loop, anonymize)
+                           anonymize)
 from ..utils_mtf import concat, pad, slice, to_fp32, weighted_add
 
 tf1 = tf.compat.v1
@@ -123,7 +123,7 @@ def autoregressive_model(params: ModelParameter,
 
         return logical_not(is_done)
 
-    loop_out = while_loop(cond_fn=cond_fn, body_fn=body_fn, inputs=while_loop_inputs)
+    loop_out = mtf.while_loop(cond_fn=cond_fn, body_fn=body_fn, inputs=while_loop_inputs)
 
     token_out = None
     frame_out = None
