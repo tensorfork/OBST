@@ -3,10 +3,10 @@
 """
 
 import argparse
-import jsonpickle
 import re
 import time
 
+import jsonpickle
 import mesh_tensorflow as mtf
 import numpy as np
 import tensorflow as tf2
@@ -15,10 +15,10 @@ from tensorflow.python.tpu.device_assignment import device_assignment
 from tensorflow.python.tpu.topology import Topology
 from tensorflow_estimator.python.estimator import estimator as estimator_lib
 
-from .dataclass import ModelParameter
-from .interface import gen_sample_fn, get_command_line_input_and_output_fn
-from .inputs import dataset, gpt_neo_input
 from src.run.run import computation_func
+from .dataclass import ModelParameter
+from .inputs import dataset, gpt_neo_input
+from .interface import gen_sample_fn, get_command_line_input_and_output_fn, get_similarity_input_and_output_fn
 
 tf = tf2.compat.v1
 tpu = tf.tpu
@@ -41,7 +41,7 @@ def main(args: argparse.Namespace) -> None:
     _params = jsonpickle.loads(_params)
     params = ModelParameter(_params)
     params.train = args.run_mode == 'train'
-    params.debug_sample = args.run_mode == 'debug'
+    params.debug_sample = args.run_mode == 'debug_old'
     params.debug_gradients = args.debug_grad is not None
 
     # Read params of model
@@ -149,7 +149,7 @@ def main(args: argparse.Namespace) -> None:
                                  session_config,
                                  tpu_cluster_resolver,
                                  [lambda x: print(f"Current step: {x}")] * params.debug_train_step)
-        elif args.run_mode == 'sample' or args.run_mode == 'debug':
+        elif args.run_mode == 'sample' or args.run_mode == 'debug_old':
             computation_func(params,
                              input_fn,
                              session_config,
@@ -159,12 +159,15 @@ def main(args: argparse.Namespace) -> None:
         elif args.run_mode == 'query':
             input_fns, output_fn = get_command_line_input_and_output_fn(params)
 
-            computation_func(params,
-                             input_fn,
-                             session_config,
-                             tpu_cluster_resolver,
-                             [output_fn],
-                             input_fns)
+        elif args.run_mode == 'debug':
+            input_fns, output_fn = get_similarity_input_and_output_fn(params)
+
+        computation_func(params,
+                         input_fn,
+                         session_config,
+                         tpu_cluster_resolver,
+                         [output_fn],
+                         input_fns)
 
     tf.logging.info('finished.')
 
