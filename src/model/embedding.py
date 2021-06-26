@@ -7,7 +7,7 @@ import tensorflow as tf
 
 from .backend import normal_var, orthogonal_var
 from ..dataclass import BlockArgs, ModelParameter
-from ..mtf_wrapper import einsum, scoped
+from ..mtf_wrapper import einsum, scoped, reshape
 from ..utils_core import random_name
 from ..utils_mtf import DIM_LIST, SHAPE, linear_shapes, shape_size
 
@@ -110,7 +110,7 @@ def _embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
             _new_part(final)
             for i in range(1, splits):
                 _new_part(base)
-        out = mtf.reshape(einsum(variables, output_shape=tmp_dims + feature_dims), shape)
+        out = reshape(einsum(variables, output_shape=tmp_dims + feature_dims), shape)
 
     elif 'relative' in args:
         out = RelativeEmbeddingForward(args, shape).outputs[0]

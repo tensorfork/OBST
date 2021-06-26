@@ -13,7 +13,8 @@ from .normalization import norm
 from .revnet import RevGradOp
 from ..dataclass import BlockArgs, BlockConfig, ModelParameter
 from ..mtf_wrapper import (add_n, cast, constant_scalar, dropout, einsum, one_hot, ones, reciprocal, reduce_logsumexp,
-                           reduce_mean, reduce_sum, sigmoid, sign, zeros_like)
+                           reduce_mean, reduce_sum, sigmoid, sign, zeros_like, mod, floordiv, reshape, equal, argmax,
+                           softmax_cross_entropy_with_logits, recompute_grad)
 from ..utils_mtf import concat, slice, weighted_add, anonymize, anonymize_shape
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
@@ -75,29 +76,29 @@ def build(params: ModelParameter,
             vid = dropout(vid, params.train, rate=params.input_dropout)
 
             if params.use_bit_fold_input_pipeline:
-                vid = mtf.cast(vid, dtype=tf.int64)
+                vid = cast(vid, dtype=tf.int64)
 
                 concat_list = []
                 for unfold_idx in range(params.fold_count):
-                    var = mtf.mod(mtf.floordiv(vid, (2 ** params.bit_fold_value) ** unfold_idx),
+                    var = mod(floordiv(vid, (2 ** params.bit_fold_value) ** unfold_idx),
                                   (2 ** params.bit_fold_value))
-                    var = mtf.cast(var, dtype=tf.uint8)
+                    var = cast(var, dtype=tf.uint8)
 
                     concat_list.append(var)
 
-                vid = mtf.concat(concat_list, 'color_channels')
+                vid = concat(concat_list, 'color_channels')
 
             if not params.use_discrete_video_loss:
-                vid = mtf.cast(vid, params.variable_dtype.activation_dtype) / 255
+                vid = cast(vid, params.variable_dtype.activation_dtype) / 255
             context_dimension = vid.shape[1]
             input_features = vid.shape[-1:]
             tgt = slice(vid, 1, context_dimension.size, context_dimension)
             src = slice(vid, 0, context_dimension.size - 1, context_dimension)
 
             if params.use_discrete_video_loss:
-                src = mtf.cast(src, params.variable_dtype.activation_dtype) / (params.color_quantization_value - 1)
+                src = cast(src, params.variable_dtype.activation_dtype) / (params.color_quantization_value - 1)
 
-                tgt = mtf.reshape(tgt, new_shape=mtf.Shape([params.batch_dim,
+                tgt = reshape(tgt, new_shape=mtf.Shape([params.batch_dim,
                                                             params.sequence_per_head_dim,
                                                             params.head_dim]
                                                            + tgt.shape[2:]))
@@ -148,7 +149,7 @@ def build(params: ModelParameter,
                 out = src
 
                 def _layer_builder(block_input: mtf.Tensor, block_config: BlockConfig, index: int):
-                    return mtf.recompute_grad(lambda x: block_part_fn(params, block_config, x, str(index)),
+                    return recompute_grad(lambda x: block_part_fn(params, block_config, x, str(index)),
                                               [block_input])
             elif params.memory_reduction_strategy == 'momentum':
                 out = (src, zeros_like(src), src, zeros_like(src))
@@ -187,8 +188,8 @@ def build(params: ModelParameter,
             if params.use_discrete_video_loss:
 
                 features_dim = mtf.Dimension("features", frame_out.shape[-1].size * frame_out.shape[-2].size)
-                frame_out = mtf.reshape(frame_out, frame_out.shape[:-2] + [features_dim])
-                frame_out = mtf.reshape(frame_out,
+                frame_out = reshape(frame_out, frame_out.shape[:-2] + [features_dim])
+                frame_out = reshape(frame_out,
                                         [params.batch_dim, params.sequence_per_head_dim, params.head_dim]
                                         + frame_out.shape[2:])
 
@@ -201,11 +202,11 @@ def build(params: ModelParameter,
         accuracy = None
 
         if params.use_language:
-            token_loss = mtf.layers.softmax_cross_entropy_with_logits(token_out, txt_tgt, params.vocab_dim)
+            token_loss = softmax_cross_entropy_with_logits(token_out, txt_tgt, params.vocab_dim)
             token_loss = reduce_mean(token_loss)
             loss_list.append(token_loss)
             if params.calc_accuracy:
-                accuracy = reduce_sum(mtf.cast(mtf.equal(mtf.argmax(token_out, params.vocab_dim), txt_tgt),
+                accuracy = reduce_sum(cast(equal(argmax(token_out, params.vocab_dim), txt_tgt),
                                                params.variable_dtype.activation_dtype), []) / txt_tgt.size
 
         if params.use_video:
@@ -213,8 +214,8 @@ def build(params: ModelParameter,
             if params.use_discrete_video_loss:
 
                 mak_per_head_shape = mtf.Shape([params.batch_dim, params.sequence_per_head_dim, params.head_dim])
-                _vid_msk_tgt = mtf.reshape(vid_msk_tgt, new_shape=mak_per_head_shape)
-                _cat_msk_tgt = mtf.reshape(cat_msk_tgt, new_shape=mak_per_head_shape)
+                _vid_msk_tgt = reshape(vid_msk_tgt, new_shape=mak_per_head_shape)
+                _cat_msk_tgt = reshape(cat_msk_tgt, new_shape=mak_per_head_shape)
 
                 video_size = constant_scalar(params, 1 / tgt.size)
                 video_target = one_hot(tgt, params.discrete_color_dim, dtype=params.variable_dtype.activation_dtype)

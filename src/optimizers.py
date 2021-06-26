@@ -12,7 +12,8 @@ from tensorflow.python.ops.init_ops import Initializer
 from src.model.revnet import RevGradOp
 from .dataclass import ModelParameter
 from .mtf_wrapper import (add_n, cast, constant_float, constant_scalar, einsum, equal, greater, greater_equal, minimum,
-                          mod, reduce_max, reduce_mean, reduce_sum, rsqrt, sqrt, square)
+                          mod, reduce_max, reduce_mean, reduce_sum, rsqrt, sqrt, square, assign, assign_sub,
+                          one_hot as mtf_one_hot, logical_and, add, multiply, identity, import_fully_replicated)
 from .utils_mtf import SHAPE, feature_dims_used, to_fp32, weighted_add, get_variable, non_replicated_variable
 
 tf = tf2.compat.v1
@@ -46,11 +47,11 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
     dtype = params.variable_dtype.activation_dtype
     tf_learning_rate = tf.constant(value=params.learning_rate, shape=[], dtype=tf.float32)
     global_steps_float = tf.cast(global_step, tf.float32)
-    global_step_mtf = mtf.import_fully_replicated(params.mesh, global_step, [], "mtf_learning_rate")
+    global_step_mtf = import_fully_replicated(params, global_step, [], "mtf_learning_rate")
     update_ops = []
 
     def import_mtf(imported, name):
-        return mtf.import_fully_replicated(params.mesh, tf.cast(imported, dtype), [], name)
+        return import_fully_replicated(params, tf.cast(imported, dtype), [], name)
 
     if params.warmup_steps > 0:
         warmup_steps_float = import_float(params.warmup_steps)
@@ -66,7 +67,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
 
     if params.reduce_lr_on_plateau_timespan:
         base = "reduce_lr_on_plateau/"
-        loss_sum = mtf.add_n(loss_list)
+        loss_sum = add_n(loss_list)
         window_dim = mtf.Dimension("loss_window", params.reduce_lr_on_plateau_timespan)
 
         divisor_ptr = get_var(params, f"{base}lr_divisor", [], tf.ones_initializer())
@@ -74,24 +75,24 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
         loss_ema_ptr = get_var(params, f"{base}loss_ema", [])
         last_reduce = get_var(params, f"{base}last_reduce", [])
 
-        one_hot = mtf.one_hot(mtf.mod(global_step_mtf, params.reduce_lr_on_plateau_timespan), window_dim)
+        one_hot = mtf_one_hot(mod(global_step_mtf, params.reduce_lr_on_plateau_timespan), window_dim)
         sub = (loss_sum - loss_window_ptr) * one_hot
         loss_window = loss_window_ptr - sub
         window_mean = reduce_mean(loss_window, output_shape=[])
         loss_ema = loss_ema_ptr * (2 / params.reduce_lr_on_plateau_timespan)
         loss_ema += loss_sum * (1 - 2 / params.reduce_lr_on_plateau_timespan)
-        reduce = mtf.cast(mtf.logical_and(mtf.greater(global_step_mtf,
+        reduce = cast(logical_and(greater(global_step_mtf,
                                                       last_reduce + params.reduce_lr_on_plateau_timespan),
-                                          mtf.greater(window_mean, loss_ema)),
+                                          greater(window_mean, loss_ema)),
                           params.variable_dtype.activation_dtype)
         reduce = reduce * (params.reduce_lr_on_plateau_reduction - 1) + 1
         divisor = divisor_ptr * reduce
         tf_learning_rate /= divisor
 
-        update_ops.append(mtf.assign(divisor_ptr, divisor))
-        update_ops.append(mtf.assign_sub(loss_window_ptr, sub))
-        update_ops.append(mtf.assign(loss_ema_ptr, loss_ema))
-        update_ops.append(mtf.assign(last_reduce, weighted_add(last_reduce, global_step_mtf, reduce)))
+        update_ops.append(assign(divisor_ptr, divisor))
+        update_ops.append(assign_sub(loss_window_ptr, sub))
+        update_ops.append(assign(loss_ema_ptr, loss_ema))
+        update_ops.append(assign(last_reduce, weighted_add(last_reduce, global_step_mtf, reduce)))
 
     learning_rate = import_mtf(tf_learning_rate, "learning_rate")
     step = cast(equal(mod(tf.cast(manual_step + 1, dtype),
@@ -122,8 +123,8 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                      to_fp32(greater_equal(v1v2, v2v2)) * to_fp32(equal(gamma, 0))
             gamma += (-1.0 * ((v1v2 - v2v2) / (v1v1 + v2v2 - 2 * v1v2))) * to_fp32(equal(gamma, 0))
 
-            loss = mtf.add(mtf.multiply(loss_list[0], gamma),
-                           mtf.multiply(loss_list[1], (1 - gamma)))
+            loss = add(multiply(loss_list[0], gamma),
+                           multiply(loss_list[1], (1 - gamma)))
 
         operations = loss.graph.operations
         xs = [x.outputs[0] for x in params.mesh.graph.trainable_variables]
@@ -180,7 +181,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                         if params.debug_gradients:
                             flat_shape = mtf.Shape([mtf.Dimension('flat_dim', var.size)])
                             flat_grad = variable(params, var, f"loss_{loss_idx}", flat_shape)
-                            update_ops.append(mtf.assign(flat_grad, mtf.reshape(grad, new_shape=flat_shape)))
+                            update_ops.append(assign(flat_grad, reshape(grad, new_shape=flat_shape)))
                             debug_gradients_dict[f"loss_{loss_idx}/{var.name}"] = flat_grad
 
                         if len(loss_list) > 1:
@@ -228,8 +229,8 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
 
                         if params.grad_accumulation > 1:
                             grad_buffer = variable(params, var, "grad_accumulation", var.shape)
-                            next_grad = grad + mtf.identity(grad_buffer)
-                            update_ops.append(mtf.assign(grad_buffer, next_grad * mstep))
+                            next_grad = grad + identity(grad_buffer)
+                            update_ops.append(assign(grad_buffer, next_grad * mstep))
                             grad = next_grad * step / params.grad_accumulation
 
                         features_used = feature_dims_used(params, var)
@@ -250,11 +251,11 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                         if var.shape.ndims <= 1 or params.optimizer == 'adam':
                             exp_avg_p2_ptr = variable(params, var, 'exp_avg_p2', var.shape)
                             exp_avg_p2 = weighted_add(exp_avg_p2_ptr, square(grad), beta2)
-                            update_ops.append(mtf.assign(exp_avg_p2_ptr, exp_avg_p2))
+                            update_ops.append(assign(exp_avg_p2_ptr, exp_avg_p2))
                             if params.opt_beta1:
                                 exp_avg_p1_ptr = variable(params, var, 'exp_avg_p1', var.shape)
                                 grad = weighted_add(exp_avg_p1_ptr, grad, beta1)
-                                update_ops.append(mtf.assign(exp_avg_p1_ptr, grad))
+                                update_ops.append(assign(exp_avg_p1_ptr, grad))
                             weight_update = grad * rsqrt(exp_avg_p2 + epsilon)
 
 
@@ -267,9 +268,9 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
 
                             exp_avg_p2 = weighted_add(exp_avg_p2, reduce_sum(square(grad)), beta2)
                             weight_update = beta1 * exp_avg_p1 + grad * rsqrt(exp_avg_p2 + epsilon)
-                            update_ops.extend([mtf.assign(exp_avg_p1_ptr, beta1 * exp_avg_p1_ptr +
+                            update_ops.extend([assign(exp_avg_p1_ptr, beta1 * exp_avg_p1_ptr +
                                                           grad * rsqrt(exp_avg_p2 + epsilon)),
-                                               mtf.assign(exp_avg_p2_ptr, exp_avg_p2)])
+                                               assign(exp_avg_p2_ptr, exp_avg_p2)])
 
                         elif params.optimizer == 'sm3':
                             update = variable(params, var, "dim0", [var.shape.dims[0]])
@@ -282,7 +283,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                             update += square(grad)
 
                             weight_update = grad * rsqrt(update + epsilon)
-                            update_ops.extend([mtf.assign(buf_ptr, reduce_max(update, output_shape=[dim]))
+                            update_ops.extend([assign(buf_ptr, reduce_max(update, output_shape=[dim]))
                                                for buf_ptr, dim in zip(buffer, update.shape.dims)])
 
                         weight_update *= learning_rate
@@ -305,9 +306,9 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                             size = np.prod(shape)
                             # ((1 - 1 / max_fan) / size ** 2 + 1 / max_fan - 2 / size + 1 / min_fan / size) ** 0.5
                             std *= ((fan_in_size - 2) / size / params.n_blocks) ** 0.5  # 0.01% error
-                            update_ops.append(mtf.assign(var, val * std))
+                            update_ops.append(assign(var, val * std))
                         else:
-                            update_ops.append(mtf.assign_sub(var, weight_update))
+                            update_ops.append(assign_sub(var, weight_update))
 
     return params.mesh.graph.trainable_variables[0].graph.combine_assignments(update_ops), \
            tf_learning_rate, debug_gradients_dict

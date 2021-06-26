@@ -48,13 +48,35 @@ def reduce_logsumexp(tensor: mtf.Tensor, reduced_dim: OPT_DIM = None) -> mtf.Ten
     return scoped("reduce_logsumexp", mtf.reduce_logsumexp, tensor, reduced_dim)
 
 
-def import_laid_out_tensor(params: ModelParameter, shape: SHAPE, laid_out_tensor: tf.Tensor,
+def recompute_grad(fn: typing.Callable, explicit_inputs: typing.List[mtf.Tensor]) -> mtf.Tensor:
+    return scoped("recompute_grad", mtf.recompute_grad, fn, explicit_inputs)
+
+
+def softmax_cross_entropy_with_logits(logits: mtf.Tensor, targets: mtf.Tensor, vocab_dim: mtf.Dimension) -> mtf.Tensor:
+    return scoped("softmax_cross_entropy_with_logits", mtf.layers.softmax_cross_entropy_with_logits, logits, targets,
+                  vocab_dim)
+
+
+def import_laid_out_tensor(params: ModelParameter, laid_out_tensor: object, shape: SHAPE,
                            name: typing.Optional[str] = None):
-    return scoped("import_laid_out_tensor", mtf.import_laid_out_tensor, params.mesh, shape, laid_out_tensor, name)
+    return scoped("import_laid_out_tensor", mtf.import_laid_out_tensor, params.mesh, laid_out_tensor, shape, name)
+
+
+def import_fully_replicated(params: ModelParameter, laid_out_tensor: tf.Tensor, shape: SHAPE,
+                            name: typing.Optional[str] = None):
+    return scoped("import_fully_replicated", mtf.import_fully_replicated, params.mesh, laid_out_tensor, shape, name)
 
 
 def logical_not(tensor: mtf.Tensor):
     return scoped("logical_not", mtf.logical_not, tensor)
+
+
+def logical_and(tensor: mtf.Tensor):
+    return scoped("logical_and", mtf.logical_and, tensor)
+
+
+def identity(tensor: mtf.Tensor):
+    return scoped("identity", mtf.identity, tensor)
 
 
 def while_loop(cond_fn: typing.Callable, body_fn: typing.Callable, inputs: TENSORS,
@@ -85,6 +107,22 @@ def tanh(tensor: mtf.Tensor):
 
 def gelu(tensor: mtf.Tensor):
     return scoped("relu", mtf.gelu, tensor)
+
+
+def assign(var: mtf.Variable, new_val: mtf.Tensor):
+    return scoped("assign", mtf.assign, var, new_val)
+
+
+def assign_sub(var: mtf.Variable, new_val: mtf.Tensor):
+    return scoped("assign_sub", mtf.assign_sub, var, new_val)
+
+
+def concat(tensors: typing.List[mtf.Tensor], concat_dim_name: str) -> mtf.Tensor:
+    return scoped("concat", mtf.concat, tensors, concat_dim_name)
+
+
+def pad(tensor: mtf.Tensor, padding: typing.Tuple[int, int], dim_name: str) -> mtf.Tensor:
+    return scoped("concat", mtf.pad, tensor, padding, dim_name)
 
 
 def constant(params: ModelParameter, value: typing.Union[int, float], shape: OPT_SHAPE = None,

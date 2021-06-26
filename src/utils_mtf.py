@@ -6,7 +6,7 @@ import tensorflow as tf
 from tensorflow.python.ops.init_ops import Initializer
 
 from .dataclass import BlockArgs, ModelParameter
-from .mtf_wrapper import cast, mtf_range, random_name
+from .mtf_wrapper import cast, mtf_range, random_name, reshape, concat as mtf_concat, pad as mtf_pad
 from .utils_core import default
 
 tf1 = tf.compat.v1
@@ -76,7 +76,7 @@ def unanonymize(inp: mtf.Tensor,
         else:
             name = '-'.join(dim_name(d) for d in dim)
         with tf1.variable_scope(f"unanonymize_{name}"):
-            return mtf.reshape(inp, shape)
+            return reshape(inp, shape)
     return inp
 
 
@@ -122,7 +122,7 @@ def concat(tensor_list: typing.List[mtf.Tensor], dim: typing.Union[mtf.Dimension
     :return: concated tensorlist
     """
     dim = dim_name(dim)
-    return unanonymize(mtf.concat([anonymize(t, dim) for t in tensor_list], anonymize_dim(dim)), dim)
+    return unanonymize(mtf_concat([anonymize(t, dim) for t in tensor_list], anonymize_dim(dim)), dim)
 
 
 def pad(tensor: mtf.Tensor, dim: typing.Union[mtf.Dimension, str], padding: typing.Tuple[int, int]
@@ -138,7 +138,7 @@ def pad(tensor: mtf.Tensor, dim: typing.Union[mtf.Dimension, str], padding: typi
     :return: concated tensorlist
     """
     dim = dim_name(dim)
-    return mtf.pad(anonymize(tensor, dim), padding, anonymize_dim(dim))
+    return mtf_pad(anonymize(tensor, dim), padding, anonymize_dim(dim))
 
 
 def to_fp32(tensor: mtf.Tensor) -> mtf.Tensor:
@@ -147,7 +147,7 @@ def to_fp32(tensor: mtf.Tensor) -> mtf.Tensor:
     :param tensor: tensor to be casted
     :return: casted tensor
     """
-    return mtf.cast(tensor, tf.float32)
+    return cast(tensor, tf.float32)
 
 
 def dim_name(dim: typing.Union[mtf.Dimension, str]) -> str:
@@ -202,7 +202,7 @@ def anonymize(inp: mtf.Tensor,
         else:
             name = '-'.join(dim_name(d) for d in dim)
         with tf1.variable_scope(f"anonymize_{name}"):
-            return mtf.reshape(inp, shape)
+            return reshape(inp, shape)
     return inp
 
 
@@ -299,7 +299,7 @@ def replace_dim(inp: typing.Union[DIM_LIST, mtf.Shape, mtf.Tensor],
         return out
     if isinstance(inp, mtf.Shape):
         return mtf.Shape(out)
-    return mtf.reshape(inp, out)
+    return reshape(inp, out)
 
 
 def weighted_add(left: mtf.Tensor, right: mtf.Tensor, alpha: mtf.Tensor) -> mtf.Tensor:
@@ -321,7 +321,7 @@ def slice(tensor: mtf.Tensor, start: int, end: int, dim: typing.Union[mtf.Dimens
     dim = dim_name(dim)
     if not start and get_dim(tensor, dim).size == end:
         return tensor
-    return unanonymize(mtf.slice(anonymize(tensor, dim), start, end - start, anonymize_dim(dim)), dim)
+    return unanonymize(slice(anonymize(tensor, dim), start, end - start, anonymize_dim(dim)), dim)
 
 
 def feature_dims_used(params: ModelParameter, shape: typing.Union[SHAPE, mtf.Tensor, mtf.Variable],

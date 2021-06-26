@@ -9,7 +9,7 @@ from .convolution import convolution
 from .normalization import norm
 from .spatial import attention
 from ..dataclass import BlockArgs, BlockConfig, ModelParameter
-from ..mtf_wrapper import scoped
+from ..mtf_wrapper import scoped, add, multiply
 from ..utils_core import random_name
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
@@ -36,10 +36,10 @@ def split_path(args: BlockArgs) -> mtf.Tensor:
                           for path in '-'.join(args.name_extras).split(';')]
     if 'add' in base:
         out = 0
-        fn = mtf.add
+        fn = add
     elif 'multiply' in base:
         out = 1
-        fn = mtf.multiply
+        fn = multiply
     else:
         raise ValueError
 
