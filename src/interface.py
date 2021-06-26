@@ -184,9 +184,7 @@ def get_command_line_input_and_output_fn(params: ModelParameter):
 
     def input_fns():
 
-        valid_query = False
-
-        while not valid_query:
+        while True:
             color_print(params, 'Enter Quary:')
             query = input()
 
@@ -195,11 +193,10 @@ def get_command_line_input_and_output_fn(params: ModelParameter):
             else:
                 query = bpe_tokenizer.encode(query)
 
-            if len(query) < params.n_ctx:
-                valid_query = True
-            else:
-                color_print(params, f'Quary is to long, the maximum number tokens is '
+            if len(query) >= params.n_ctx:
+                color_print(params, f'Query is to long, the maximum number tokens is '
                                     f'{params.n_ctx}, but you have {len(query)} tokens.')
+                continue
 
             iter_pos = len(query) + 1
             _iter_pos[0] = iter_pos
@@ -208,6 +205,7 @@ def get_command_line_input_and_output_fn(params: ModelParameter):
 
             query = query + [0] * (params.n_ctx - len(query))
             query = np.reshape(np.array(query, np.int32), newshape=(1, params.n_ctx, 1))
+            break
 
 
         return query, np.array([iter_pos], np.int32), \
