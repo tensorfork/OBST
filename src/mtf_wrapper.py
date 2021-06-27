@@ -97,16 +97,12 @@ def relu(tensor: mtf.Tensor):
     return scoped("relu", mtf.relu, tensor)
 
 
-def sigmoid(tensor: mtf.Tensor):
-    return scoped("relu", mtf.sigmoid, tensor)
-
-
 def tanh(tensor: mtf.Tensor):
-    return scoped("relu", mtf.tanh, tensor)
+    return scoped("tanh", mtf.tanh, tensor)
 
 
 def gelu(tensor: mtf.Tensor):
-    return scoped("relu", mtf.gelu, tensor)
+    return scoped("gelu", mtf.gelu, tensor)
 
 
 def assign(var: mtf.Variable, new_val: mtf.Tensor):
@@ -240,6 +236,10 @@ def add_n(*xs: typing.Union[typing.List[TENSORS], TENSORS]) -> mtf.Tensor:
     if len(xs) == 1 and not isinstance(xs[0], mtf.Tensor):
         xs = xs[0]
     return scoped("add_n", mtf.add_n, xs)
+
+
+def mtf_slice(tensor: mtf.Tensor, begin: int, size: int, dim_name: str):
+    return scoped("slice", mtf.slice, tensor, begin, size, dim_name)
 
 
 def add(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: typing.Optional[SHAPE] = None):

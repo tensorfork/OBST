@@ -6,7 +6,7 @@ from ..model import build
 from ..mtf_wrapper import (constant_scalar, log, argmax, reshape, one_hot, equal, less_equal, mtf_range, greater,
                            reduce_sum, cast, shift, ones, zeros, constant, random_uniform, greater_equal, logical_not,
                            anonymize)
-from ..utils_mtf import concat, pad, slice, to_fp32, weighted_add
+from ..utils_mtf import concat, pad, utils_slice, to_fp32, weighted_add
 
 tf1 = tf.compat.v1
 Dataset = tf1.data.Dataset
@@ -103,7 +103,7 @@ def autoregressive_model(params: ModelParameter,
         token_initial_pos_mask = cast(token_initial_pos_mask, tf.int32)
 
         if params.debug_sample:
-            token_x_input_a = slice(token_x_input, 0, 1, dim=params.batch_dim)
+            token_x_input_a = utils_slice(token_x_input, 0, 1, dim=params.batch_dim)
             token_x_input_b = token_x_input_a * token_initial_pos_mask
             token_x_input = concat([token_x_input_a, token_x_input_b], dim=token_x_input_a.shape[0])
         else:

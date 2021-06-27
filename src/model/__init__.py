@@ -15,7 +15,7 @@ from ..dataclass import BlockArgs, BlockConfig, ModelParameter
 from ..mtf_wrapper import (add_n, cast, constant_scalar, dropout, einsum, one_hot, ones, reciprocal, reduce_logsumexp,
                            reduce_mean, reduce_sum, sigmoid, sign, zeros_like, mod, floordiv, reshape, equal, argmax,
                            softmax_cross_entropy_with_logits, recompute_grad)
-from ..utils_mtf import concat, slice, weighted_add, anonymize, anonymize_shape
+from ..utils_mtf import concat, utils_slice, weighted_add, anonymize, anonymize_shape
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -81,7 +81,7 @@ def build(params: ModelParameter,
                 concat_list = []
                 for unfold_idx in range(params.fold_count):
                     var = mod(floordiv(vid, (2 ** params.bit_fold_value) ** unfold_idx),
-                                  (2 ** params.bit_fold_value))
+                              (2 ** params.bit_fold_value))
                     var = cast(var, dtype=tf.uint8)
 
                     concat_list.append(var)
@@ -92,16 +92,16 @@ def build(params: ModelParameter,
                 vid = cast(vid, params.variable_dtype.activation_dtype) / 255
             context_dimension = vid.shape[1]
             input_features = vid.shape[-1:]
-            tgt = slice(vid, 1, context_dimension.size, context_dimension)
-            src = slice(vid, 0, context_dimension.size - 1, context_dimension)
+            tgt = utils_slice(vid, 1, context_dimension.size, context_dimension)
+            src = utils_slice(vid, 0, context_dimension.size - 1, context_dimension)
 
             if params.use_discrete_video_loss:
                 src = cast(src, params.variable_dtype.activation_dtype) / (params.color_quantization_value - 1)
 
                 tgt = reshape(tgt, new_shape=mtf.Shape([params.batch_dim,
-                                                            params.sequence_per_head_dim,
-                                                            params.head_dim]
-                                                           + tgt.shape[2:]))
+                                                        params.sequence_per_head_dim,
+                                                        params.head_dim]
+                                                       + tgt.shape[2:]))
 
             if params.empty_frame_embedding is not None:
                 embed_args = base_args(params.empty_frame_embedding)
@@ -150,7 +150,7 @@ def build(params: ModelParameter,
 
                 def _layer_builder(block_input: mtf.Tensor, block_config: BlockConfig, index: int):
                     return recompute_grad(lambda x: block_part_fn(params, block_config, x, str(index)),
-                                              [block_input])
+                                          [block_input])
             elif params.memory_reduction_strategy == 'momentum':
                 out = (src, zeros_like(src), src, zeros_like(src))
 
@@ -170,7 +170,7 @@ def build(params: ModelParameter,
                 out = out[0] + out[2]
 
         if params.use_language:
-            token_out = slice(out, 0, params.language_token_patch, spatial_ctx)
+            token_out = utils_slice(out, 0, params.language_token_patch, spatial_ctx)
             for config_idx, config in enumerate(params.output_block_config):
                 token_out = block_part_fn(params, config, token_out, f'lang_out{config_idx}')
             old = anonymize_shape(params.feature_dims, params.head_dim)
@@ -180,7 +180,8 @@ def build(params: ModelParameter,
                                output_shape=token_out.shape - old + new)
 
         if params.use_video:
-            frame_out = slice(out, params.language_token_patch * params.use_language, out.shape[2].size, spatial_ctx)
+            frame_out = utils_slice(out, params.language_token_patch * params.use_language, out.shape[2].size,
+                                    spatial_ctx)
 
             for config_idx, config in enumerate(params.output_block_config):
                 frame_out = block_part_fn(params, config, frame_out, f'vid_out{config_idx}')
@@ -190,8 +191,8 @@ def build(params: ModelParameter,
                 features_dim = mtf.Dimension("features", frame_out.shape[-1].size * frame_out.shape[-2].size)
                 frame_out = reshape(frame_out, frame_out.shape[:-2] + [features_dim])
                 frame_out = reshape(frame_out,
-                                        [params.batch_dim, params.sequence_per_head_dim, params.head_dim]
-                                        + frame_out.shape[2:])
+                                    [params.batch_dim, params.sequence_per_head_dim, params.head_dim]
+                                    + frame_out.shape[2:])
 
                 frame_out = linear(base_args(frame_out), [features_dim], [vid.shape[-1], params.discrete_color_dim])
 
@@ -207,7 +208,7 @@ def build(params: ModelParameter,
             loss_list.append(token_loss)
             if params.calc_accuracy:
                 accuracy = reduce_sum(cast(equal(argmax(token_out, params.vocab_dim), txt_tgt),
-                                               params.variable_dtype.activation_dtype), []) / txt_tgt.size
+                                           params.variable_dtype.activation_dtype), []) / txt_tgt.size
 
         if params.use_video:
 
