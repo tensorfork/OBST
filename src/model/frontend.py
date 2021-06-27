@@ -10,25 +10,26 @@ from .normalization import norm
 from .spatial import attention
 from ..dataclass import BlockArgs, BlockConfig, ModelParameter
 from ..mtf_wrapper import scoped, add, multiply
-from ..utils_core import random_name
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
 tf1 = tf.compat.v1
 
 
+def _get_block_part(block_part_config: BlockConfig, params: ModelParameter, block_input: mtf.Tensor) -> mtf.Tensor:
+    out = block_input
+    for layer in block_part_config.layer:
+        name, *extras = layer.split('-')
+        out = scoped(name + '_', LAYER_FUNCTIONS[name], BlockArgs(params, out, extras))
+
+    if block_part_config.skip and block_part_config.memory_reduction_strategy in ("none", "checkpoint"):
+        out += block_input
+    return out
+
+
 def block_part_fn(params: ModelParameter, block_part_config: BlockConfig, block_input: mtf.Tensor,
                   name_prefix: str = 'block') -> mtf.Tensor:
-    out = block_input
-    with tf1.variable_scope(random_name(f"{name_prefix}_")):
-        for layer in block_part_config.layer:
-            name, *extras = layer.split('-')
-            out = scoped(name + '_', LAYER_FUNCTIONS[name], BlockArgs(params, out, extras))
-
-        if block_part_config.skip and block_part_config.memory_reduction_strategy in ("none", "checkpoint"):
-            out += block_input
-
-    return out
+    return scoped(f"{name_prefix}_", _get_block_part, block_part_config, params, block_input)
 
 
 def split_path(args: BlockArgs) -> mtf.Tensor:

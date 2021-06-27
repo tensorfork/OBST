@@ -2,7 +2,7 @@ import mesh_tensorflow as mtf
 import tensorflow as tf
 
 from ..dataclass import BlockArgs
-from ..mtf_wrapper import relu, gelu, sigmoid, tanh
+from ..mtf_wrapper import relu, gelu, sigmoid, tanh, scoped
 from ..utils_core import random_name
 
 tf1 = tf.compat.v1
@@ -170,8 +170,7 @@ def activate(args: BlockArgs) -> mtf.Tensor:
     for fn_name in args:
         if fn_name not in ACTIVATIONS:
             continue
-        with tf1.variable_scope(random_name(fn_name)):
-            return ACTIVATIONS[fn_name](args.tensor)
+        return scoped(fn_name, ACTIVATIONS[fn_name], args.tensor)
     print(f'No activation function found for "{args.name_extras}". Falling back to identity. '
           f'Known functions: {list(ACTIVATIONS.keys())}')
     return args.tensor
