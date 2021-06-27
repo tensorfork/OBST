@@ -19,7 +19,8 @@ OPT_DIM = typing.Optional[mtf.Dimension]
 
 
 def scoped(name: str, fn: typing.Callable, *args, **kwargs):
-    with tf1.variable_scope(random_name(name)):
+    name = random_name(name)
+    with tf1.variable_scope(f'{name}v'), tf1.name_scope(f'{name}n'):
         return fn(*args, **kwargs)
 
 
