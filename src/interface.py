@@ -298,24 +298,23 @@ def get_similarity_input_and_output_fn(params: ModelParameter):
 
     interface = InterfaceWrapper(params)
 
-    class RUN(Thread):
 
-        def run(self):
-            time.sleep(10)
+    def run():
+        time.sleep(10)
 
-            for idx in range(params.num_of_sample):
-                query = [random.randint(0, params.vocab_size - 1) for _ in range(min(32, params.n_ctx - 8))]
+        for idx in range(params.num_of_sample):
+            query = [random.randint(0, params.vocab_size - 1) for _ in range(min(32, params.n_ctx - 8))]
 
-                out_1 = interface.complete(query=query, samp_temp=0.0, responds_len=params.n_ctx)
-                out_2 = interface.complete(query=query, samp_temp=0.0, responds_len=params.n_ctx)
+            out_1 = interface.complete(query=query, samp_temp=0.0, responds_len=params.n_ctx)
+            out_2 = interface.complete(query=query, samp_temp=0.0, responds_len=params.n_ctx)
 
-                score = np.int(np.mean(np.equal(out_1, out_2)) * 100)
-                print(f"test:{idx} similarity score: {score}%\n")
+            score = np.int(np.mean(np.equal(out_1, out_2)) * 100)
+            print(f"test:{idx} similarity score: {score}%\n")
 
-            interface.exit_fn()
+        interface.exit_fn()
 
 
-    run = RUN()
+    run = Thread(target=run, daemon=True)
     run.start()
 
     return interface.input_query, interface.output_responds
