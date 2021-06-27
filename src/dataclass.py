@@ -302,6 +302,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
 
         self.attention_idx = 0
         self.cached_parameters = {}
+        self.debug_outfeed = {}
 
     def __getitem__(self, key: str) -> typing.Any:
         print(f"Getting {key} via deprecated interface")

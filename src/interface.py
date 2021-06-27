@@ -235,7 +235,8 @@ class InterfaceWrapper:
         self._query = None
         self._exit = False
 
-    def complete(self, query: typing.List[int], samp_temp: float, responds_len: int) -> [np.ndarray, None]:
+    def complete(self, query: typing.List[int], samp_temp: float, responds_len: int, debug: bool = False)\
+            -> [np.ndarray, None]:
 
         _iter_pos = len(query) + 1
 
@@ -266,6 +267,8 @@ class InterfaceWrapper:
                 else:
                     time.sleep(0.1)
 
+        if debug:
+            return responds[0][:, _iter_pos:], responds
         return responds[0][:, _iter_pos:]
 
     def input_query(self):
@@ -305,8 +308,8 @@ def get_similarity_input_and_output_fn(params: ModelParameter):
         for idx in range(params.num_of_sample):
             query = [random.randint(0, params.vocab_size - 1) for _ in range(min(32, params.n_ctx - 8))]
 
-            out_1 = interface.complete(query=query, samp_temp=0.0, responds_len=params.n_ctx)
-            out_2 = interface.complete(query=query, samp_temp=0.0, responds_len=params.n_ctx)
+            out_1, *args_1 = interface.complete(query=query, samp_temp=0.0, responds_len=params.n_ctx, debug=True)
+            out_2, *args_1 = interface.complete(query=query, samp_temp=0.0, responds_len=params.n_ctx, debug=True)
 
             score = np.int(np.mean(np.equal(out_1, out_2)) * 100)
             print(f"test:{idx} similarity score: {score}%\n")

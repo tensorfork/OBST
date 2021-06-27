@@ -204,6 +204,10 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     predictions['token_out'] = lowering.export_to_tf_tensor(token_out)
                     predictions['token_tgt'] = args[1 + int(params.use_video) * 5]
 
+
+                for key in params.debug_outfeed:
+                    predictions[key] = lowering.export_to_tf_tensor(params.debug_outfeed[key])
+
                 predictions = [val if val.dtype == tf.float32 else tf.cast(val, tf.float32) for val in
                                predictions.values()]
                 output_shapes.extend([pred.shape for pred in predictions])
