@@ -152,7 +152,7 @@ def _build(params: ModelParameter,
     elif not params.use_video:
         src: mtf.Tensor = txt
 
-    out = scoped("body", _body, params, src)
+    out = scoped("body", _body, params, src, base_args)
 
     if params.use_language:
         token_out = utils_slice(out, 0, params.language_token_patch, spatial_ctx)
