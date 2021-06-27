@@ -309,6 +309,11 @@ def get_similarity_input_and_output_fn(params: ModelParameter):
                 out_1 = interface.complete(query=query, samp_temp=0.0, responds_len=params.n_ctx)
                 out_2 = interface.complete(query=query, samp_temp=0.0, responds_len=params.n_ctx)
 
+                if np.mean(np.isnan(out_1)) != 0 or np.mean(np.isnan(out_2)) != 0:
+                    print('')
+                    color_print(params, "Test is invalid, output contains NaNs.")
+                    break
+
                 score = np.int(np.mean(np.equal(out_1, out_2)) * 100)
                 print(f"test:{idx} similarity score: {score}%\n")
 
