@@ -99,15 +99,13 @@ def autoregressive_model(params: ModelParameter,
 
         if initial_pos is None:
             initial_pos = constant(params, value=params.initial_autoregressive_position, dtype=tf.int32)
-        token_initial_pos_mask = less_equal(mtf_range(params.mesh, params.sequence_dim, dtype=tf.int32), initial_pos)
-        token_initial_pos_mask = cast(token_initial_pos_mask, tf.int32)
 
         if params.debug_sample:
+            token_initial_pos_mask = less_equal(mtf_range(params.mesh, params.sequence_dim, dtype=tf.int32), initial_pos)
+            token_initial_pos_mask = cast(token_initial_pos_mask, tf.int32)
             token_x_input_a = utils_slice(token_x_input, 0, 1, dim=params.batch_dim)
             token_x_input_b = token_x_input_a * token_initial_pos_mask
             token_x_input = concat([token_x_input_a, token_x_input_b], dim=token_x_input_a.shape[0])
-        else:
-            token_x_input = token_x_input * token_initial_pos_mask
 
         if sampling_temperature is None:
             sampling_temperature = constant_scalar(params, params.sampling_temperature, dtype=tf.float32)
