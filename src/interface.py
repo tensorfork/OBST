@@ -1,7 +1,7 @@
-import typing
-import random
 import copy
+import random
 import time
+import typing
 from threading import Thread, Lock
 
 import numpy as np
@@ -80,11 +80,11 @@ def process_token_output(token_out: np.ndarray, padding_token: int = -1, do_argm
 
         if bpe_tokenizer is None:
             token_out_str.append(
-                    "".join(
-                            chr(tok) if tok > 31 and tok != 127 and tok != 10 else " "
-                            for tok in token
-                            )
-                    )
+                "".join(
+                    chr(tok) if tok > 31 and tok != 127 and tok != 10 else " "
+                    for tok in token
+                )
+            )
 
         else:
             token_out_str.append(bpe_tokenizer.decode([int(tok) for tok in token]))
@@ -177,6 +177,7 @@ def gen_sample_fn(params: ModelParameter):
 
     return _video_fn if params.model_mode == 'jannet' else _text_fn
 
+
 def get_command_line_input_and_output_fn(params: ModelParameter):
     bpe_tokenizer = GPT2TokenizerFast.from_pretrained('gpt2') if params.vocab_size != 256 and \
                                                                  params.vocab_size > 256 else None
@@ -211,9 +212,8 @@ def get_command_line_input_and_output_fn(params: ModelParameter):
             query = np.reshape(np.array(query, np.int32), newshape=(1, params.n_ctx, 1))
             break
 
-
         return query, np.array([iter_pos], np.int32), \
-               np.array([samp_temp], np.float32),  np.array([end_iter], np.int32)
+               np.array([samp_temp], np.float32), np.array([end_iter], np.int32)
 
     def output_fn(out):
         color_print(params, 'Responds:')
@@ -235,7 +235,7 @@ class InterfaceWrapper:
         self._query = None
         self._exit = False
 
-    def complete(self, query: typing.List[int], samp_temp: float, responds_len: int, debug: bool = False)\
+    def complete(self, query: typing.List[int], samp_temp: float, responds_len: int, debug: bool = False) \
             -> [np.ndarray, None]:
 
         _iter_pos = len(query) + 1
@@ -298,9 +298,7 @@ class InterfaceWrapper:
 
 
 def get_similarity_input_and_output_fn(params: ModelParameter):
-
     interface = InterfaceWrapper(params)
-
 
     def run():
         time.sleep(10)
@@ -315,7 +313,6 @@ def get_similarity_input_and_output_fn(params: ModelParameter):
             print(f"test:{idx} similarity score: {score}%\n")
 
         interface.exit_fn()
-
 
     run = Thread(target=run, daemon=True)
     run.start()
