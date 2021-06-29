@@ -13,9 +13,9 @@ from src.model.revnet import RevGradOp
 from .dataclass import ModelParameter
 from .mtf_wrapper import (add_n, cast, constant_float, constant_scalar, einsum, equal, greater, greater_equal, minimum,
                           mod, reduce_max, reduce_mean, reduce_sum, rsqrt, sqrt, square, assign, assign_sub,
-                          one_hot as mtf_one_hot, logical_and, add, multiply, import_fully_replicated,
-                          reshape, scoped, assign_add, maximum, identity, zeros_like)
-from .utils_mtf import SHAPE, feature_dims_used, to_fp32, weighted_add, get_variable, get_fan_in
+                          one_hot as mtf_one_hot, logical_and, add, multiply, identity, import_fully_replicated,
+                          reshape, scoped)
+from .utils_mtf import SHAPE, feature_dims_used, to_fp32, weighted_add, get_variable
 
 tf = tf2.compat.v1
 zeros = tf.zeros_initializer()
@@ -33,61 +33,12 @@ def variable(params: ModelParameter, base: mtf.Variable, name: str, shape: SHAPE
     return get_variable(params, f"{base.name}/{params.optimizer}/{name}", shape, zeros, False, params.optimizer_dtype)
 
 
-class OptimizerCtx:
-    def __init__(self, op: mtf.Operation, grad_outputs: typing.List[mtf.Tensor], downstream: typing.Set[mtf.Operation],
-                 tensor_to_gradient: dict, tensor_to_var: dict, params: ModelParameter, loss_idx: int, update_ops: list,
-                 debug_gradients_dict: dict, loss_list: list, first_grad: dict,
-                 loss_1__loss_1: typing.Optional[mtf.Tensor], loss_1__loss_2: typing.Optional[mtf.Tensor],
-                 loss_2__loss_2: typing.Optional[mtf.Tensor], mstep: mtf.Tensor, step: mtf.Tensor,
-                 dtype: mtf.VariableDType, beta1: mtf.Tensor, beta2: mtf.Tensor, epsilon: mtf.Tensor,
-                 learning_rate: mtf.Tensor):
-        self.op = op
-        self.grad_outputs = grad_outputs
-        self.downstream = downstream
-        self.tensor_to_gradient = tensor_to_gradient
-        self.tensor_to_var = tensor_to_var
-        self.params = params
-        self.loss_idx = loss_idx
-        self.update_ops = update_ops
-        self.debug_gradients_dict = debug_gradients_dict
-        self.loss_list = loss_list
-        self.first_grad = first_grad
-        self.loss_1__loss_1 = loss_1__loss_1
-        self.loss_1__loss_2 = loss_1__loss_2
-        self.loss_2__loss_2 = loss_2__loss_2
-        self.mstep = mstep
-        self.step = step
-        self.dtype = dtype
-        self.beta1 = beta1
-        self.beta2 = beta2
-        self.epsilon = epsilon
-        self.learning_rate = learning_rate
-        self.args = [op, grad_outputs, downstream, tensor_to_gradient, tensor_to_var, params, loss_idx, update_ops,
-                     debug_gradients_dict, loss_list, first_grad, loss_1__loss_1, loss_1__loss_2, loss_2__loss_2, mstep,
-                     step, dtype, beta1, beta2, epsilon, learning_rate]
-
-        self.var: typing.Optional[mtf.Variable] = None
-        self.grad_buffer: typing.Optional[mtf.Variable] = None
-        self.grad: typing.Optional[mtf.Tensor] = None
-
-    def __call__(self, var: mtf.Variable, grad: mtf.Tensor):
-        self.var, self.grad = var, grad
-        return self
-
-
-def gradients(ctx: OptimizerCtx):
-    op = ctx.op
-    grad_outputs = ctx.grad_outputs
-    downstream = ctx.downstream
-    tensor_to_gradient = ctx.tensor_to_gradient
-    tensor_to_var = ctx.tensor_to_var
-    params = ctx.params
-    first_grad = ctx.first_grad
-    loss_list = ctx.loss_list
-    loss_idx = ctx.loss_idx
-    update_ops = ctx.update_ops
-    debug_gradients_dict = ctx.debug_gradients_dict
-
+def update(op: mtf.Operation, grad_outputs: typing.List[mtf.Tensor], downstream: typing.Set[mtf.Operation],
+           tensor_to_gradient: dict, tensor_to_var: dict, params: ModelParameter, loss_idx: int, update_ops: list,
+           debug_gradients_dict: dict, loss_list: list, first_grad: dict, loss_1__loss_1: typing.Optional[mtf.Tensor],
+           loss_1__loss_2: typing.Optional[mtf.Tensor], loss_2__loss_2: typing.Optional[mtf.Tensor], mstep: mtf.Tensor,
+           step: mtf.Tensor, dtype: mtf.VariableDType, beta1: mtf.Tensor, beta2: mtf.Tensor, epsilon: mtf.Tensor,
+           learning_rate: mtf.Tensor):
     if isinstance(op, RevGradOp):
         itr = op.gradient(grad_outputs, params=op.inputs)
     else:
@@ -147,155 +98,102 @@ def gradients(ctx: OptimizerCtx):
 
                             else:
 
-                                ctx.loss_1__loss_1 += einsum([first_grad[op.name], first_grad[op.name]],
-                                                             [params.head_dim])
-                                ctx.loss_1__loss_2 += einsum([first_grad[op.name], grad], [params.head_dim])
-                                ctx.loss_2__loss_2 += einsum([grad, grad], [params.head_dim])
+                                loss_1__loss_1 += einsum([first_grad[op.name], first_grad[op.name]],
+                                                         [params.head_dim])
+                                loss_1__loss_2 += einsum([first_grad[op.name], grad], [params.head_dim])
+                                loss_2__loss_2 += einsum([grad, grad], [params.head_dim])
 
                                 del first_grad[op.name]
                                 continue
 
                     elif loss_idx == 2:  # not in body and optimize body params.
                         continue
-        ctx(var, grad)
-        yield None
+
+        if params.grad_accumulation > 1:
+            grad_buffer = variable(params, var, "grad_accumulation", var.shape)
+            next_grad = grad + identity(grad_buffer)
+            update_ops.append(assign(grad_buffer, next_grad * mstep))
+            grad = next_grad * step / params.grad_accumulation
+
+        features_used = feature_dims_used(params, var)
+        if features_used and var.shape.dims.index(params.key_dim) == var.shape.ndims - 1:
+            fan_in = var.shape.dims[:-2]
+        elif features_used:
+            fan_in = var.shape.dims[:2]
+        else:
+            fan_in = var.shape.dims[:1]
+        if params.gradient_clip > 0 and params.adaptive_gradient_clipping:
+            grd_norm = sqrt(einsum([grad, grad], reduced_dims=fan_in) + 1e-5)
+            wgt_norm = sqrt(einsum([var.value, var.value], reduced_dims=fan_in) + 1e-3)
+            grad = weighted_add(grd_norm / wgt_norm * params.gradient_clip * grad, grad,
+                                cast(greater(wgt_norm / grd_norm, params.gradient_clip), dtype))
+        elif params.gradient_clip > 0:
+            grad = einsum([minimum(rsqrt(einsum([grad, grad], []) + 1e-6), 1 / params.gradient_clip),
+                           grad, constant_scalar(params, params.gradient_clip)], grad.shape)
+        if var.shape.ndims <= 1 or params.optimizer == 'adam':
+            exp_avg_p2_ptr = variable(params, var, 'exp_avg_p2', var.shape)
+            exp_avg_p2 = weighted_add(exp_avg_p2_ptr, square(grad), beta2)
+            update_ops.append(assign(exp_avg_p2_ptr, exp_avg_p2))
+            if params.opt_beta1:
+                exp_avg_p1_ptr = variable(params, var, 'exp_avg_p1', var.shape)
+                grad = weighted_add(exp_avg_p1_ptr, grad, beta1)
+                update_ops.append(assign(exp_avg_p1_ptr, grad))
+            weight_update = grad * rsqrt(exp_avg_p2 + epsilon)
 
 
-def gradient_accumulation(ctx: OptimizerCtx):
-    ctx.update_ops.append(assign_add(ctx.grad_buffer, ctx.grad + identity(ctx.grad_buffer)))
+        elif params.optimizer == 'sgd':
+            weight_update = grad
+
+        elif params.optimizer == 'novograd':
+            exp_avg_p1 = exp_avg_p1_ptr = variable(params, var, "exp_avg_p1", var.shape)
+            exp_avg_p2 = exp_avg_p2_ptr = variable(params, var, "exp_avg_p2", [])
+
+            exp_avg_p2 = weighted_add(exp_avg_p2, reduce_sum(square(grad)), beta2)
+            weight_update = beta1 * exp_avg_p1 + grad * rsqrt(exp_avg_p2 + epsilon)
+            update_ops.extend([assign(exp_avg_p1_ptr, beta1 * exp_avg_p1_ptr +
+                                      grad * rsqrt(exp_avg_p2 + epsilon)),
+                               assign(exp_avg_p2_ptr, exp_avg_p2)])
+
+        elif params.optimizer == 'sm3':
+            update = variable(params, var, "dim0", [var.shape.dims[0]])
+            buffer = [update]
+
+            for i in range(1, var.shape.ndims):
+                buffer.append(variable(params, var, f"dim{i}", [var.shape.dims[i]]))
+                update = minimum(update, buffer[-1])
+
+            update += square(grad)
+
+            weight_update = grad * rsqrt(update + epsilon)
+            update_ops.extend([assign(buf_ptr, reduce_max(update, output_shape=[dim]))
+                               for buf_ptr, dim in zip(buffer, update.shape.dims)])
+
+        weight_update *= learning_rate
+        large_tensor = features_used and len(var.shape.dims) > len(params.feature_dims)
+        large_tensor |= not features_used and len(var.shape.dims) >= 2
+        large_tensor &= var.shape.size > 1
+        if 'rezero' in var.name:
+            weight_update *= params.rezero_lr_multiplier
+        if large_tensor and params.weight_decay > 0:
+            weight_update += params.weight_decay * var.value * learning_rate
+        if large_tensor and params.weight_centralisation:
+            weight_update += reduce_mean(var.value)
+        if params.grad_accumulation > 1:
+            weight_update *= step
+        if large_tensor and params.weight_standardisation:
+            val: mtf.Tensor = var.value - weight_update
+            std = rsqrt(1e-6 + reduce_sum(square(val / (val.size ** 0.5)), output_shape=[]))
+            shape = [d.size for d in var.shape.dims]
+            fan_in_size = np.prod([d.size for d in fan_in])
+            size = np.prod(shape)
+            # ((1 - 1 / max_fan) / size ** 2 + 1 / max_fan - 2 / size + 1 / min_fan / size) ** 0.5
+            std *= ((fan_in_size - 2) / size / params.n_blocks) ** 0.5  # 0.01% error
+            update_ops.append(assign(var, val * std))
+        else:
+            update_ops.append(assign_sub(var, weight_update))
 
 
-def adam(ctx: OptimizerCtx) -> mtf.Tensor:
-    exp_avg_p2_ptr = variable(ctx.params, ctx.var, 'exp_avg_p2', ctx.var.shape)
-    exp_avg_p2 = weighted_add(exp_avg_p2_ptr, square(ctx.grad), ctx.beta2)
-    ctx.update_ops.append(assign(exp_avg_p2_ptr, exp_avg_p2))
-    if ctx.params.opt_beta1:
-        exp_avg_p1_ptr = variable(ctx.params, ctx.var, 'exp_avg_p1', ctx.var.shape)
-        grad = weighted_add(exp_avg_p1_ptr, ctx.grad, ctx.beta1)
-        ctx.update_ops.append(assign(exp_avg_p1_ptr, grad))
-    return ctx.grad * rsqrt(exp_avg_p2 + ctx.epsilon)
-
-
-def novograd(ctx: OptimizerCtx) -> mtf.Tensor:
-    exp_avg_p1 = exp_avg_p1_ptr = variable(ctx.params, ctx.var, "exp_avg_p1", ctx.var.shape)
-    exp_avg_p2 = exp_avg_p2_ptr = variable(ctx.params, ctx.var, "exp_avg_p2", [])
-
-    exp_avg_p2 = weighted_add(exp_avg_p2, reduce_sum(square(ctx.grad)), ctx.beta2)
-    ctx.update_ops.extend([assign(exp_avg_p1_ptr, ctx.beta1 * exp_avg_p1_ptr +
-                                  ctx.grad * rsqrt(exp_avg_p2 + ctx.epsilon)),
-                           assign(exp_avg_p2_ptr, exp_avg_p2)])
-    return ctx.beta1 * exp_avg_p1 + ctx.grad * rsqrt(exp_avg_p2 + ctx.epsilon)
-
-
-def sm3(ctx: OptimizerCtx) -> mtf.Tensor:
-    weight_update = variable(ctx.params, ctx.var, "dim0", [ctx.var.shape.dims[0]])
-    buffer = [weight_update]
-
-    for i in range(1, ctx.var.shape.ndims):
-        buffer.append(variable(ctx.params, ctx.var, f"dim{i}", [ctx.var.shape.dims[i]]))
-        weight_update = minimum(weight_update, buffer[-1])
-
-    weight_update += square(ctx.grad)
-
-    ctx.update_ops.extend([assign(buf_ptr, reduce_max(weight_update, output_shape=[dim]))
-                           for buf_ptr, dim in zip(buffer, weight_update.shape.dims)])
-    return ctx.grad * rsqrt(weight_update + ctx.epsilon)
-
-
-def return_grad(ctx: OptimizerCtx) -> mtf.Tensor:
-    return ctx.grad
-
-
-def adaptive_gradient_clipping(ctx: OptimizerCtx, gradient_clip: str) -> mtf.Tensor:
-    gradient_clip = float(gradient_clip)
-    grd_norm = sqrt(einsum([ctx.grad, ctx.grad], reduced_dims=get_fan_in(ctx.params, ctx.var)) + 1e-5)
-    wgt_norm = sqrt(einsum([ctx.var.value, ctx.var.value], reduced_dims=get_fan_in(ctx.params, ctx.var)) + 1e-3)
-    return weighted_add(grd_norm / wgt_norm * gradient_clip * ctx.grad, ctx.grad,
-                        cast(greater(wgt_norm / grd_norm, gradient_clip), ctx.dtype.activation_dtype))
-
-
-def norm_gradient_clipping(ctx: OptimizerCtx, gradient_clip: str) -> mtf.Tensor:
-    gradient_clip = float(gradient_clip)
-    return einsum([minimum(rsqrt(einsum([ctx.grad, ctx.grad], []) + 1e-6), 1 / gradient_clip),
-                   ctx.grad, constant_scalar(ctx.params, gradient_clip)], ctx.grad.shape)
-
-
-def value_gradient_clipping(ctx: OptimizerCtx, gradient_clip: str) -> mtf.Tensor:
-    gradient_clip = float(gradient_clip)
-    return maximum(minimum(ctx.grad, gradient_clip), -gradient_clip)
-
-
-def gradient_centralisation(ctx: OptimizerCtx) -> mtf.Tensor:
-    return ctx.grad - reduce_mean(ctx.grad)
-
-
-def weight_centralisation(ctx: OptimizerCtx) -> mtf.Tensor:
-    return ctx.grad + reduce_mean(ctx.var.value)
-
-
-def multiply_learning_rate(ctx: OptimizerCtx) -> mtf.Tensor:
-    return ctx.grad * ctx.learning_rate
-
-
-OPTIMIZERS = {"adam": adam,
-              "sm3": sm3,
-              "novograd": novograd,
-              "sgd": return_grad,
-              "adaptive_clip": adaptive_gradient_clipping,
-              "norm_clip": norm_gradient_clipping,
-              "value_clip": value_gradient_clipping,
-              "gradient_centralisation": gradient_centralisation,
-              "weight_centralisation": weight_centralisation,
-              "learning_rate": multiply_learning_rate
-              }
-
-
-def update(ctx: OptimizerCtx):
-    params = ctx.params
-    update_ops = ctx.update_ops
-    learning_rate = ctx.learning_rate
-
-    var = ctx.var
-    if ctx.grad_buffer is not None:
-        ctx.grad = identity(ctx.grad_buffer.value)
-        ctx.update_ops.append(assign(ctx.grad_buffer, zeros_like(ctx.grad)))
-
-    for opt in params.optimizer.split('-'):
-        opt, *args = opt.split(':')
-        ctx.grad = scoped(opt, OPTIMIZERS[opt], ctx, *args)
-
-    if 'rezero' in var.name:
-        ctx.grad *= params.rezero_lr_multiplier
-
-    large_tensor = feature_dims_used(params, var) and len(var.shape.dims) > len(params.feature_dims)
-    large_tensor |= not feature_dims_used(params, var) and len(var.shape.dims) >= 2
-    large_tensor &= var.shape.size > 1
-    large_tensor &= params.vocab_dim not in var.shape
-
-    if large_tensor and params.weight_decay > 0:
-        ctx.grad += params.weight_decay * var.value * learning_rate
-
-    if not large_tensor or not params.weight_standardisation:
-        update_ops.append(assign_sub(var, ctx.grad))
-        return
-
-    val: mtf.Tensor = var.value - ctx.grad
-    fan_in_size = np.prod([d.size for d in get_fan_in(params, var)])
-    size = np.prod([d.size for d in var.shape.dims])
-    max_fan = max(fan_in_size, size // fan_in_size)
-    var = ((1 - 1 / max_fan) / size ** 2 + 1 / max_fan - 2 / size + 1 / max_fan)
-    if params.scale_by_depth:
-        var *= params.n_blocks
-    std = rsqrt(1e-6 + reduce_sum(square(val * val.size ** -0.5), output_shape=[]))
-    std *= var ** 0.5
-    update_ops.append(assign(var, val * std))
-
-
-def import_mtf(params: ModelParameter, imported: typing.Union[tf.Tensor, float], name: str):
-    return import_fully_replicated(params, tf.cast(imported, params.variable_dtype.activation_dtype), [], name)
-
-
-def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, manual_step: tf.Tensor, fn: str
+def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, manual_step: tf.Tensor,
                   ) -> typing.Tuple[typing.Tuple[mtf.Tensor, typing.List[mtf.Assign], typing.List[mtf.Tensor]],
                                     tf.Tensor, typing.Dict]:
     """
@@ -303,11 +201,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
     :param loss_list: Final scalar loss of the model
     :param params: ModelParameter instance
     :param manual_step: manually incremented global_step variable to account for grad accumulation
-    :param fn: whether to "accumulate" gradients or "update" parameters.
     :return: scalar learning rate, update operations, gradients
-
-    there is no check for "update". you can just call it "oijhiojio" and it'll still work. just make sure it's not
-    called "accumulate".
     """
 
     global_step = tf.train.get_or_create_global_step()
@@ -316,6 +210,9 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
     global_steps_float = tf.cast(global_step, tf.float32)
     global_step_mtf = import_fully_replicated(params, global_step, [], "mtf_learning_rate")
     update_ops = []
+
+    def import_mtf(imported, name):
+        return import_fully_replicated(params, tf.cast(imported, dtype), [], name)
 
     if params.warmup_steps > 0:
         warmup_steps_float = import_float(params.warmup_steps)
@@ -357,13 +254,13 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
         update_ops.append(assign(loss_ema_ptr, loss_ema))
         update_ops.append(assign(last_reduce, weighted_add(last_reduce, global_step_mtf, reduce)))
 
-    learning_rate = import_mtf(params, tf_learning_rate, "learning_rate")
+    learning_rate = import_mtf(tf_learning_rate, "learning_rate")
     step = cast(equal(mod(tf.cast(manual_step + 1, dtype),
-                          import_mtf(params, params.grad_accumulation * 1., "grad_accum")),
-                      import_mtf(params, 0., "zero")), dtype)
+                          import_mtf(params.grad_accumulation * 1., "grad_accum")),
+                      import_mtf(0., "zero")), dtype)
     mstep = 1 - step
-    beta1 = 1 - step * import_mtf(params, 1 - params.opt_beta1, "beta1") if params.opt_beta1 else None
-    beta2 = 1 - step * import_mtf(params, 1 - params.opt_beta2, "beta2")
+    beta1 = 1 - step * import_mtf(1 - params.opt_beta1, "beta1") if params.opt_beta1 else None
+    beta2 = 1 - step * import_mtf(1 - params.opt_beta2, "beta2")
     epsilon = params.opt_epsilon
 
     debug_gradients_dict = {}
@@ -418,14 +315,8 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
 
                 if not op.has_gradient or not any(grad_outputs) or not (set(op.inputs) & downstream):
                     continue
-                ctx = OptimizerCtx(op, grad_outputs, downstream, tensor_to_gradient, tensor_to_var, params,
-                                   loss_idx, update_ops, debug_gradients_dict, loss_list, first_grad, loss_1__loss_1,
-                                   loss_1__loss_2, loss_2__loss_2, mstep, step, dtype, beta1, beta2, epsilon,
-                                   learning_rate)
-                for _ in gradients(ctx):
-                    full_name = f'{tf.get_variable_scope().name}/f"{ctx.var.name}/{params.optimizer}/grad_accumulation'
-                    if fn == "accumulate" or full_name in params.mesh.graph.name_to_variable:
-                        ctx.grad_buffer = variable(params, ctx.var, "grad_accumulation", ctx.var.shape)
-                    scoped(fn, gradient_accumulation if "accumulate" else update, ctx)
+                scoped("update", update, op, grad_outputs, downstream, tensor_to_gradient, tensor_to_var, params,
+                       loss_idx, update_ops, debug_gradients_dict, loss_list, first_grad, loss_1__loss_1,
+                       loss_1__loss_2, loss_2__loss_2, mstep, step, dtype, beta1, beta2, epsilon, learning_rate)
     return params.mesh.graph.trainable_variables[0].graph.combine_assignments(update_ops), \
            tf_learning_rate, debug_gradients_dict
