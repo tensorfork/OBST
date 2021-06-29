@@ -19,7 +19,8 @@ OPT_DIM = typing.Optional[mtf.Dimension]
 
 
 def scoped(name: str, fn: typing.Callable, *args, **kwargs):
-    with tf1.variable_scope(random_name(name)):
+    name = random_name(name)
+    with tf1.variable_scope(f'{name}v'), tf1.name_scope(f'{name}n'):
         return fn(*args, **kwargs)
 
 
@@ -48,8 +49,87 @@ def reduce_logsumexp(tensor: mtf.Tensor, reduced_dim: OPT_DIM = None) -> mtf.Ten
     return scoped("reduce_logsumexp", mtf.reduce_logsumexp, tensor, reduced_dim)
 
 
-def constant(params: ModelParameter, value: typing.Union[int, float], shape: OPT_SHAPE = None) -> mtf.Tensor:
-    return scoped("constant", mtf.constant, params.mesh, value, shape, params.variable_dtype.activation_dtype)
+def recompute_grad(fn: typing.Callable, explicit_inputs: typing.List[mtf.Tensor]) -> mtf.Tensor:
+    return scoped("recompute_grad", mtf.recompute_grad, fn, explicit_inputs)
+
+
+def softmax_cross_entropy_with_logits(logits: mtf.Tensor, targets: mtf.Tensor, vocab_dim: mtf.Dimension) -> mtf.Tensor:
+    return scoped("softmax_cross_entropy_with_logits", mtf.layers.softmax_cross_entropy_with_logits, logits, targets,
+                  vocab_dim)
+
+
+def import_laid_out_tensor(params: ModelParameter, laid_out_tensor: object, shape: SHAPE,
+                           name: typing.Optional[str] = None):
+    return scoped("import_laid_out_tensor", mtf.import_laid_out_tensor, params.mesh, laid_out_tensor, shape, name)
+
+
+def import_fully_replicated(params: ModelParameter, laid_out_tensor: tf.Tensor, shape: SHAPE,
+                            name: typing.Optional[str] = None):
+    return scoped("import_fully_replicated", mtf.import_fully_replicated, params.mesh, laid_out_tensor, shape, name)
+
+
+def logical_not(tensor: mtf.Tensor):
+    return scoped("logical_not", mtf.logical_not, tensor)
+
+
+def logical_and(tensor: mtf.Tensor):
+    return scoped("logical_and", mtf.logical_and, tensor)
+
+
+def identity(tensor: mtf.Tensor):
+    return scoped("identity", mtf.identity, tensor)
+
+
+def while_loop(cond_fn: typing.Callable, body_fn: typing.Callable, inputs: TENSORS,
+               num_loop_vars: typing.Optional[int] = None, has_accumulators: bool = False):
+    return scoped("while_loop", mtf.while_loop, cond_fn, body_fn, inputs, num_loop_vars, has_accumulators)
+
+
+def anonymize(tensor: mtf.Tensor):
+    return scoped("anonymize", mtf.anonymize, tensor)
+
+
+def random_uniform(params: ModelParameter, shape: SHAPE, dtype: typing.Optional[tf.DType] = None, maxval: float = 0,
+                   minval: float = 0):
+    return scoped("random_uniform", mtf.random_uniform, params.mesh, shape, dtype=dtype, maxval=maxval, minval=minval)
+
+
+def relu(tensor: mtf.Tensor):
+    return scoped("relu", mtf.relu, tensor)
+
+
+def tanh(tensor: mtf.Tensor):
+    return scoped("tanh", mtf.tanh, tensor)
+
+
+def gelu(tensor: mtf.Tensor):
+    return scoped("gelu", mtf.gelu, tensor)
+
+
+def assign(var: mtf.Variable, new_val: mtf.Tensor):
+    return scoped("assign", mtf.assign, var, new_val)
+
+
+def assign_sub(var: mtf.Variable, new_val: mtf.Tensor):
+    return scoped("assign_sub", mtf.assign_sub, var, new_val)
+
+
+def assign_add(var: mtf.Variable, new_val: mtf.Tensor):
+    return scoped("assign_add", mtf.assign_add, var, new_val)
+
+
+def concat(tensors: typing.List[mtf.Tensor], concat_dim_name: str) -> mtf.Tensor:
+    return scoped("concat", mtf.concat, tensors, concat_dim_name)
+
+
+def pad(tensor: mtf.Tensor, padding: typing.Tuple[int, int], dim_name: str) -> mtf.Tensor:
+    return scoped("concat", mtf.pad, tensor, padding, dim_name)
+
+
+def constant(params: ModelParameter, value: typing.Union[int, float], shape: OPT_SHAPE = None,
+             dtype: typing.Union[None, mtf.VariableDType, tf.DType] = None) -> mtf.Tensor:
+    return scoped("constant", mtf.constant, params.mesh, value, shape,
+                  params.variable_dtype.activation_dtype if dtype is None else dtype)
 
 
 def constant_float(params: ModelParameter, value: typing.Union[int, float], shape: OPT_SHAPE = None) -> mtf.Tensor:
@@ -60,7 +140,7 @@ def constant_int(params: ModelParameter, value: typing.Union[int, float], shape:
     return scoped("constant_int", mtf.constant, params.mesh, value, shape, tf.int32)
 
 
-def constant_scalar(params: ModelParameter, value: typing.Union[int, float], dtype: tf.TypeSpec = None) -> mtf.Tensor:
+def constant_scalar(params: ModelParameter, value: typing.Union[int, float], dtype: tf.DType = None) -> mtf.Tensor:
     dtype = params.variable_dtype.activation_dtype if dtype is None else dtype
     return scoped("constant_scalar", mtf.constant, params.mesh, value, [], dtype)
 
@@ -97,11 +177,11 @@ def floordiv(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None) -> 
     return scoped("floordiv", mtf.floordiv, x1, x2, output_shape)
 
 
-def mtf_range(mesh: mtf.Mesh, dim: DIM, dtype: tf.dtypes) -> mtf.Tensor:
+def mtf_range(mesh: mtf.Mesh, dim: DIM, dtype: tf.DType) -> mtf.Tensor:
     return scoped("range", mtf.range, mesh, dim, dtype)
 
 
-def cast(tensor: mtf.Tensor, dtype: tf.dtypes) -> mtf.Tensor:
+def cast(tensor: mtf.Tensor, dtype: tf.DType) -> mtf.Tensor:
     return scoped("cast", mtf.cast, tensor, dtype)
 
 
@@ -117,16 +197,24 @@ def log(tensor: mtf.Tensor) -> mtf.Tensor:
     return scoped("log", mtf.log, tensor)
 
 
+def reshape(tensor: mtf.Tensor, new_shape: SHAPE):
+    return scoped("reshape", mtf.reshape, tensor, new_shape)
+
+
+def argmax(tensor: mtf.Tensor, reduced_dim: mtf.Dimension):
+    return scoped("argmax", mtf.argmax, tensor, reduced_dim)
+
+
 def sigmoid(tensor: mtf.Tensor) -> mtf.Tensor:
     return scoped("sigmoid", mtf.sigmoid, tensor)
 
 
 def sqrt(tensor: mtf.Tensor) -> mtf.Tensor:
-    return scoped("sqrt", lambda x: mtf.pow(x, 0.5), tensor)
+    return scoped("sqrt", mtf.sqrt, tensor)
 
 
 def rsqrt(tensor: mtf.Tensor) -> mtf.Tensor:
-    return scoped("rsqrt", lambda x: mtf.pow(x, -0.5), tensor)
+    return scoped("rsqrt", mtf.rsqrt, tensor)
 
 
 def square(tensor: mtf.Tensor) -> mtf.Tensor:
@@ -155,6 +243,10 @@ def add_n(*xs: typing.Union[typing.List[TENSORS], TENSORS]) -> mtf.Tensor:
     return scoped("add_n", mtf.add_n, xs)
 
 
+def mtf_slice(tensor: mtf.Tensor, begin: int, size: int, dim_name: str):
+    return scoped("slice", mtf.slice, tensor, begin, size, dim_name)
+
+
 def add(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: typing.Optional[SHAPE] = None):
     return scoped("add", mtf.add, x1, x2, output_shape)
 
@@ -163,16 +255,20 @@ def multiply(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: typing.Optional[SHAPE
     return scoped("multiply", mtf.multiply, x1, x2, output_shape)
 
 
-def ones(mesh: mtf.Mesh, shape: SHAPE, dtype: tf.dtypes) -> mtf.Tensor:
+def ones(mesh: mtf.Mesh, shape: SHAPE, dtype: tf.DType) -> mtf.Tensor:
     return scoped("ones", mtf.ones, mesh, shape, dtype)
 
 
-def zeros(mesh: mtf.Mesh, shape: SHAPE, dtype: tf.dtypes) -> mtf.Tensor:
+def zeros(mesh: mtf.Mesh, shape: SHAPE, dtype: tf.DType) -> mtf.Tensor:
     return scoped("zeros", mtf.zeros, mesh, shape, dtype)
 
 
 def zeros_like(tensor: mtf.Tensor) -> mtf.Tensor:
     return scoped("zeros_like", mtf.zeros_like, tensor)
+
+
+def ones_like(tensor: mtf.Tensor) -> mtf.Tensor:
+    return scoped("ones_like", mtf.ones_like, tensor)
 
 
 def dropout(tensor: mtf.Tensor, is_training: bool, keep_prob: typing.Optional[float] = None,
