@@ -43,7 +43,6 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.opt_beta1 = 0.9
         self.opt_beta2 = 0.999
         self.opt_epsilon = 1e-6
-        self.adaptive_gradient_clipping = True
         self.vocab_size = 256
         self.color_channels = 3
         self.three_axes = True
@@ -117,7 +116,6 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.shuffle_input_filenames = True
         self.calc_accuracy = False
         self.num_of_sample = 10
-        self.gradient_clip = -1
         self.group_linear_factor = 2
         self.embedding_stddev = 0.04
         self.color_quantization_value = 256
@@ -127,7 +125,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.bit_fold_value = 4
         self.debug_train_step = False
         self.model_mode = 'jannet'
-        self.optimizer = 'adam'
+        self.optimizer = 'adam-learning_rate'
         self.multi_loss_strategy = "linear"
         self.memory_reduction_strategy = "revnet"
         self.debug_gradients = False

@@ -10,7 +10,7 @@ from tensorflow.python.ops.init_ops import Initializer
 from ..dataclass import BlockArgs, ModelParameter
 from ..mtf_wrapper import einsum, scoped
 from ..utils_core import random_name
-from ..utils_mtf import OPT_DIMS, SHAPE, deduplicate, feature_dims_used, non_replicated_variable, dims_from_shape
+from ..utils_mtf import OPT_DIMS, SHAPE, deduplicate, non_replicated_variable, get_fan_in
 
 tf1 = tf.compat.v1
 
@@ -23,19 +23,7 @@ class OrthogonalInit(Initializer):
         self.sizes = [d.size for d in shape]
         self.seed = random.randint(0, 2 ** 32)
         sizes = [d.size for d in mtf.Shape(shape) - fan_in_dims]
-        features_used = feature_dims_used(params, shape)
-        if not fan_in_dims:
-            if features_used:
-                if dims_from_shape(shape).index(params.key_dim) == len(sizes) - 1:
-                    fan_in = np.prod(sizes[:-2])
-                else:
-                    fan_in = np.prod([d.size for d in params.feature_dims])
-            elif len(sizes) == 2:
-                fan_in = sizes[0]
-            else:
-                raise ValueError(f"Shape: {shape}\nParams: {params}\nFeaturesUsed: {features_used}")
-        else:
-            fan_in = int(np.prod([d.size for d in fan_in_dims]))
+        fan_in = int(np.prod([d.size for d in (get_fan_in(params, shape) if fan_in_dims is None else fan_in_dims)]))
         fan_out = np.prod(sizes) // fan_in
         self.transpose = transpose = fan_out > fan_in
         self.shape = (fan_out, fan_in) if transpose else (fan_in, fan_out)

@@ -306,6 +306,16 @@ def weighted_add(left: mtf.Tensor, right: mtf.Tensor, alpha: mtf.Tensor) -> mtf.
     return left * alpha + right * (1 - alpha)
 
 
+def get_fan_in(params: ModelParameter, shape: ALL_SHAPES) -> DIM_LIST:
+    shape = dims_from_shape(shape)
+    features_used = feature_dims_used(params, shape)
+    if features_used and shape.index(params.key_dim) == len(shape):
+        return shape[:-2]
+    if features_used:
+        return shape[:2]
+    return shape[:1]
+
+
 def utils_slice(tensor: mtf.Tensor, start: int, end: int, dim: typing.Union[mtf.Dimension, str]) -> mtf.Tensor:
     """
     Slice across a given (potentially non-anonymous) dimension in mtf.Tensor. This first anonymizes the dimension to
@@ -326,8 +336,7 @@ def utils_slice(tensor: mtf.Tensor, start: int, end: int, dim: typing.Union[mtf.
 
 def feature_dims_used(params: ModelParameter, shape: typing.Union[SHAPE, mtf.Tensor, mtf.Variable],
                       dims: OPT_DIMS = None) -> bool:
-    if isinstance(shape, (mtf.Tensor, mtf.Variable)):
-        shape = shape.shape
+    shape = dims_from_shape(shape)
     if dims is None:
         dims = params.feature_dims + [anonymize_dim(dim) for dim in params.feature_dims]
         return bool(sum(f in dims_from_shape(shape) for f in dims) // 2)
