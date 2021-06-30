@@ -286,7 +286,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                      to_fp32(greater_equal(v1v2, v2v2)) * to_fp32(equal(gamma, 0))
             gamma += (-1.0 * ((v1v2 - v2v2) / (v1v1 + v2v2 - 2 * v1v2))) * to_fp32(equal(gamma, 0))
 
-            loss = add(multiply(loss_list[0], gamma),https://github.com/tensorfork/OBST/commit/6d6197090d8ecf124185190329c31403a18426bb#diff-83f8606b49fcc2e3a5b1b25ba72aa2380a4c0921da88be73766033a6c3eb79baR176
+            loss = add(multiply(loss_list[0], gamma),
                        multiply(loss_list[1], (1 - gamma)))
 
         operations = loss.graph.operations
