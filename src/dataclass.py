@@ -269,15 +269,16 @@ class ModelParameter(typing.Dict[str, typing.Any]):
                     "height", self.frame_height_patch * self.frame_width_patch
                 )
             ]
-
-        frame_input_shape += [mtf.Dimension("color_channels", self.channel_color_size)]
+        self.color_channel_dim = mtf.Dimension("color_channels", self.channel_color_size)
+        frame_input_shape += [self.color_channel_dim]
         self.frame_input_shape = mtf.Shape(frame_input_shape)
         self.input_pipeline_shape = {}
 
         self.sequence_dim = mtf.Dimension("sequence", self.time_patch_size)
+        self.token_patch_dim = mtf.Dimension("language_token_patch", self.token_patch_size)
         self.token_dim_shape = mtf.Shape([self.batch_dim,
                                           self.sequence_dim,
-                                          mtf.Dimension("language_token_patch", self.token_patch_size)])
+                                          self.token_patch_dim])
         self.frame_mask_shape = mtf.Shape([self.batch_dim, self.sequence_dim])
 
         if self.use_video:
