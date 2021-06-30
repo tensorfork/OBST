@@ -172,6 +172,7 @@ def update(op: mtf.Operation, grad_outputs: typing.List[mtf.Tensor], downstream:
         large_tensor = features_used and len(var.shape.dims) > len(params.feature_dims)
         large_tensor |= not features_used and len(var.shape.dims) >= 2
         large_tensor &= var.shape.size > 1
+        large_tensor &= params.allow_optimizer_weight_decay
         if 'rezero' in var.name:
             weight_update *= params.rezero_lr_multiplier
         if large_tensor and params.weight_decay > 0:
