@@ -173,7 +173,7 @@ def update(op: mtf.Operation, grad_outputs: typing.List[mtf.Tensor], downstream:
         large_tensor = features_used and len(var.shape.dims) > len(params.feature_dims)
         large_tensor |= not features_used and len(var.shape.dims) >= 2  # not norm or rezero + scalable catch-all
         large_tensor &= var.shape.size > 1  # not rezero
-        large_tensor &= "embed" not in var.name  # input/output embedding, position embedding, attention map bias
+        large_tensor &= "embed" not in var.name  # not input/output embedding, position embedding, attention map bias
 
         if 'rezero' in var.name:
             weight_update *= params.rezero_lr_multiplier
@@ -286,7 +286,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                      to_fp32(greater_equal(v1v2, v2v2)) * to_fp32(equal(gamma, 0))
             gamma += (-1.0 * ((v1v2 - v2v2) / (v1v1 + v2v2 - 2 * v1v2))) * to_fp32(equal(gamma, 0))
 
-            loss = add(multiply(loss_list[0], gamma),
+            loss = add(multiply(loss_list[0], gamma),https://github.com/tensorfork/OBST/commit/6d6197090d8ecf124185190329c31403a18426bb#diff-83f8606b49fcc2e3a5b1b25ba72aa2380a4c0921da88be73766033a6c3eb79baR176
                        multiply(loss_list[1], (1 - gamma)))
 
         operations = loss.graph.operations
