@@ -128,7 +128,6 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.debug_train_step = False
         self.model_mode = 'jannet'
         self.optimizer = 'adam'
-        self.allow_optimizer_weight_decay = False  # TODO solve underlying issue
         self.multi_loss_strategy = "linear"
         self.memory_reduction_strategy = "revnet"
         self.debug_gradients = False
