@@ -53,7 +53,8 @@ def update(op: mtf.Operation, grad_outputs: typing.List[mtf.Tensor], downstream:
         exp_avg_p2 = weighted_add(exp_avg_p2_ptr, square(grad), beta2)
         grad = weighted_add(exp_avg_p1_ptr, grad, beta1)
 
-        weight_update = einsum([grad, rsqrt(exp_avg_p2 + params.opt_epsilon), learning_rate], output_shape=grad.shape)
+        weight_update = einsum([grad, rsqrt(add(exp_avg_p2, params.opt_epsilon)), learning_rate],
+                               output_shape=grad.shape)
 
         update_ops.append(assign(exp_avg_p2_ptr, exp_avg_p2))
         update_ops.append(assign(exp_avg_p1_ptr, grad))
