@@ -6,7 +6,7 @@ import tensorflow as tf
 from .basic import activated_linear_in, activated_linear_out
 from .embedding import embed
 from ..dataclass import BlockArgs
-from ..mtf_wrapper import einsum, greater_equal, multiply
+from ..mtf_wrapper import einsum, greater_equal, multiply, scoped
 from ..utils_core import random_name
 from ..utils_mtf import (anonymize, anonymize_dim, compare_range, get_attention_dim, is_masked, linear_shapes)
 
@@ -65,7 +65,7 @@ class SoftmaxForward(mtf.Operation):
         self.masked = masked
 
     def gradient(self, grad_ys):
-        return SoftmaxBackward(self.inputs[0], grad_ys[0], self.dim, self.masked).outputs
+        return scoped("softmax_backward", SoftmaxBackward, self.inputs[0], grad_ys[0], self.dim, self.masked).outputs
 
     def lower(self, lowering):
         mesh_impl = lowering.mesh_impl(self)
@@ -113,7 +113,7 @@ def attention(args: BlockArgs):
     if 'biased_softmax' in args:
         logit += multiply(*_masked_map(args))
     if logit != 0:
-        logit = SoftmaxForward(logit, dim, is_masked(args)).outputs[0]
+        logit = scoped("softmax_forward", SoftmaxForward, logit, dim, is_masked(args)).outputs[0]
     if 'biased_attention_map' in args and logit != 0 and "scale_attention_map" not in args:
         logit += multiply(*_masked_map(args))
     logit = [logit] * (logit != 0)
