@@ -14,7 +14,7 @@ from .revnet import RevGradOp
 from ..dataclass import BlockArgs, BlockConfig, ModelParameter
 from ..mtf_wrapper import (add_n, cast, constant_scalar, dropout, einsum, one_hot, ones, reciprocal, reduce_logsumexp,
                            reduce_mean, reduce_sum, sigmoid, sign, zeros_like, mod, floordiv, reshape, equal, argmax,
-                           softmax_cross_entropy_with_logits, recompute_grad, scoped)
+                           softmax_cross_entropy_with_logits, recompute_grad, scoped, add, negative, divide)
 from ..utils_mtf import concat, utils_slice, weighted_add, anonymize, anonymize_shape
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
@@ -55,14 +55,14 @@ def _input(params: ModelParameter,
             vid = concat(concat_list, 'color_channels')
 
         if not params.use_discrete_video_loss:
-            vid = cast(vid, params.variable_dtype.activation_dtype) / 255
+            vid = divide(cast(vid, params.variable_dtype.activation_dtype), 255)
         context_dimension = vid.shape[1]
         input_features = vid.shape[-1:]
         tgt = utils_slice(vid, 1, context_dimension.size, context_dimension)
         src = utils_slice(vid, 0, context_dimension.size - 1, context_dimension)
 
         if params.use_discrete_video_loss:
-            src = cast(src, params.variable_dtype.activation_dtype) / (params.color_quantization_value - 1)
+            src = divide(cast(src, params.variable_dtype.activation_dtype), (params.color_quantization_value - 1))
 
             tgt = reshape(tgt, new_shape=mtf.Shape([params.batch_dim,
                                                     params.sequence_per_head_dim,
@@ -107,7 +107,7 @@ def _body(params: ModelParameter, src: mtf.Tensor) -> mtf.Tensor:
 
     if params.use_initial_position_embedding:
         for dim in (src.shape - params.feature_dims).dims[1:]:
-            src += embed(base_args(params.position_embedding), [dim] + params.feature_dims)
+            src = add(src, embed(base_args(params.position_embedding), [dim] + params.feature_dims))
 
     if params.memory_reduction_strategy == "revnet":
         out = (src, zeros_like(src), src, zeros_like(src))
@@ -137,7 +137,7 @@ def _body(params: ModelParameter, src: mtf.Tensor) -> mtf.Tensor:
             out = _layer_builder(out, block_part, i)
 
     if params.memory_reduction_strategy in ('revnet', 'momentum'):
-        out = out[0] + out[2]
+        out = add(out[0], out[2])
     return out
 
 
@@ -187,11 +187,10 @@ def _loss(params: ModelParameter, frame_out: typing.Optional[mtf.Tensor], token_
     token_loss = accuracy = video_loss = None
     if params.use_language:
         token_loss = softmax_cross_entropy_with_logits(token_out, txt_tgt, params.vocab_dim)
-        token_loss = reduce_mean(token_loss)
         loss_list.append(token_loss)
         if params.calc_accuracy:
-            accuracy = reduce_sum(cast(equal(argmax(token_out, params.vocab_dim), txt_tgt),
-                                       params.variable_dtype.activation_dtype), []) / txt_tgt.size
+            accuracy = divide(reduce_sum(cast(equal(argmax(token_out, params.vocab_dim), txt_tgt),
+                                              params.variable_dtype.activation_dtype), []), txt_tgt.size)
 
     if params.use_video:
 
@@ -205,13 +204,14 @@ def _loss(params: ModelParameter, frame_out: typing.Optional[mtf.Tensor], token_
             video_target = one_hot(vid_tgt, params.discrete_color_dim, dtype=params.variable_dtype.activation_dtype)
             video_loss = einsum([reduce_logsumexp(frame_out, reduced_dim=params.discrete_color_dim), video_size,
                                  _vid_msk_tgt, _cat_msk_tgt], output_shape=[params.head_dim])
-            video_loss += einsum([frame_out, video_target, video_size, constant_scalar(params, -1),
-                                  _vid_msk_tgt, _cat_msk_tgt], output_shape=[params.head_dim])
+            video_loss = add(video_loss,
+                             einsum([frame_out, video_target, video_size, constant_scalar(params, -1),
+                                     _vid_msk_tgt, _cat_msk_tgt], output_shape=[params.head_dim]))
             video_loss = reduce_sum(video_loss, output_shape=[])
 
         else:
             size = constant_scalar(params, 1 / frame_out.size)
-            out = frame_out - vid_tgt
+            out = add(frame_out, negative(vid_tgt))
             video_loss: mtf.Tensor = einsum([out, vid_msk_tgt, cat_msk_tgt, size, sign(out)], output_shape=[])
 
         loss_list.append(video_loss)

@@ -53,9 +53,18 @@ def recompute_grad(fn: typing.Callable, explicit_inputs: typing.List[mtf.Tensor]
     return scoped("recompute_grad", mtf.recompute_grad, fn, explicit_inputs)
 
 
+def stop_gradient(tensor: mtf.Tensor):
+    return scoped("stop_gradient", mtf.stop_gradient, tensor)
+
+
+def _softmax_cross_entropy_with_logits(logits: mtf.Tensor, targets: mtf.Tensor, vocab_dim: mtf.Dimension):
+    max_logit = reduce_max(stop_gradient(logits), reduced_dim=vocab_dim)
+    neg = negative(add(log(reduce_sum(exp(add(logits, negative(max_logit))), reduced_dim=vocab_dim)), max_logit))
+    return negative(reduce_sum(multiply(add(logits, neg), targets), reduced_dim=vocab_dim))
+
+
 def softmax_cross_entropy_with_logits(logits: mtf.Tensor, targets: mtf.Tensor, vocab_dim: mtf.Dimension) -> mtf.Tensor:
-    return scoped("softmax_cross_entropy_with_logits", mtf.layers.softmax_cross_entropy_with_logits, logits, targets,
-                  vocab_dim)
+    return scoped("softmax_cross_entropy_with_logits", _softmax_cross_entropy_with_logits, logits, targets, vocab_dim)
 
 
 def import_laid_out_tensor(params: ModelParameter, laid_out_tensor: object, shape: SHAPE,
@@ -169,6 +178,10 @@ def sin(x: mtf.Tensor):
     return scoped("sin", mtf.sin, x)
 
 
+def negative(x: mtf.Tensor):
+    return scoped("negative", mtf.negative, x)
+
+
 def floordiv(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None) -> mtf.Tensor:
     return scoped("floordiv", mtf.floordiv, x1, x2, output_shape)
 
@@ -249,6 +262,10 @@ def add(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: typing.Optional[SHAPE] = N
 
 def multiply(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: typing.Optional[SHAPE] = None):
     return scoped("multiply", mtf.multiply, x1, x2, output_shape)
+
+
+def divide(x1: mtf.Tensor, x2: float, output_shape: typing.Optional[SHAPE] = None):
+    return scoped("divide", mtf.divide, x1, x2, output_shape)
 
 
 def ones(mesh: mtf.Mesh, shape: SHAPE, dtype: tf.DType) -> mtf.Tensor:
