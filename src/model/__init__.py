@@ -186,7 +186,7 @@ def _loss(params: ModelParameter, frame_out: typing.Optional[mtf.Tensor], token_
                                                typing.Optional[mtf.Tensor], typing.Optional[mtf.Tensor]]:
     token_loss = accuracy = video_loss = None
     if params.use_language:
-        token_loss = softmax_cross_entropy_with_logits(token_out, txt_tgt, params.vocab_dim)
+        token_loss = softmax_cross_entropy_with_logits(params, token_out, txt_tgt)
         loss_list.append(token_loss)
         if params.calc_accuracy:
             accuracy = divide(reduce_sum(cast(equal(argmax(token_out, params.vocab_dim), txt_tgt),

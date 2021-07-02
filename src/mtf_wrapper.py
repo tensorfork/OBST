@@ -57,14 +57,14 @@ def stop_gradient(tensor: mtf.Tensor):
     return scoped("stop_gradient", mtf.stop_gradient, tensor)
 
 
-def _softmax_cross_entropy_with_logits(logits: mtf.Tensor, targets: mtf.Tensor, vocab_dim: mtf.Dimension):
-    max_logit = reduce_max(stop_gradient(logits), reduced_dim=vocab_dim)
-    neg = negative(add(log(reduce_sum(exp(add(logits, negative(max_logit))), reduced_dim=vocab_dim)), max_logit))
-    return einsum([add(logits, neg), targets, -1 / targets.size], output_shape=[])
+def _softmax_cross_entropy_with_logits(params: ModelParameter, logits: mtf.Tensor, targets: mtf.Tensor):
+    max_logit = reduce_max(stop_gradient(logits), reduced_dim=params.vocab_dim)
+    neg = negative(add(log(reduce_sum(exp(add(logits, negative(max_logit))), reduced_dim=params.vocab_dim)), max_logit))
+    return einsum([add(logits, neg), targets, constant_scalar(params, -1 / targets.size)], output_shape=[])
 
 
-def softmax_cross_entropy_with_logits(logits: mtf.Tensor, targets: mtf.Tensor, vocab_dim: mtf.Dimension) -> mtf.Tensor:
-    return scoped("softmax_cross_entropy_with_logits", _softmax_cross_entropy_with_logits, logits, targets, vocab_dim)
+def softmax_cross_entropy_with_logits(params: ModelParameter, logits: mtf.Tensor, targets: mtf.Tensor) -> mtf.Tensor:
+    return scoped("softmax_cross_entropy_with_logits", _softmax_cross_entropy_with_logits, params, logits, targets)
 
 
 def import_laid_out_tensor(params: ModelParameter, laid_out_tensor: object, shape: SHAPE,
