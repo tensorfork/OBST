@@ -304,7 +304,9 @@ def replace_dim(inp: typing.Union[DIM_LIST, mtf.Shape, mtf.Tensor],
 
 
 def weighted_add(left: mtf.Tensor, right: mtf.Tensor, alpha: mtf.Tensor) -> mtf.Tensor:
-    return add(multiply(left, alpha), multiply(right, 1 - alpha))
+    left = multiply(left, alpha) if isinstance(left, mtf.Tensor) else (left * alpha)
+    right = multiply(right, 1 - alpha) if isinstance(right, mtf.Tensor) else (right * (1 - alpha))
+    return add(left, right) if isinstance(left, mtf.Tensor) else (left + right)
 
 
 def utils_slice(tensor: mtf.Tensor, start: int, end: int, dim: typing.Union[mtf.Dimension, str]) -> mtf.Tensor:
