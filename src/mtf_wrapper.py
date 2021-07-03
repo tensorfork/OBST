@@ -64,7 +64,7 @@ def _softmax_cross_entropy_with_logits(params: ModelParameter, logits: mtf.Tenso
                    constant_scalar(params, -1 / targets.size)], output_shape=[])
     if not params.z_loss:
         return loss
-    return add(loss, multiply(mtf.square(log_z), params.z_loss))
+    return add(loss, einsum([log_z, log_z, constant_scalar(params, params.z_loss / targets.size)], output_shape=[]))
 
 
 def softmax_cross_entropy_with_logits(params: ModelParameter, logits: mtf.Tensor, targets: mtf.Tensor) -> mtf.Tensor:
@@ -265,7 +265,7 @@ def add(x1: mtf.Tensor, x2: mtf.Tensor):
 
 
 def multiply(x1: mtf.Tensor, x2: mtf.Tensor):
-    return scoped("multiply", lambda x, y: x * y, x1, x2,)
+    return scoped("multiply", lambda x, y: x * y, x1, x2, )
 
 
 def divide(x1: mtf.Tensor, x2: float):
