@@ -64,7 +64,7 @@ def _softmax_cross_entropy_with_logits(params: ModelParameter, logits: mtf.Tenso
                    constant_scalar(params, -1 / targets.size)], output_shape=[])
     if not params.z_loss:
         return loss
-    return add(loss, params.z_loss * mtf.square(log_z))
+    return add(loss, multiply(mtf.square(log_z), params.z_loss))
 
 
 def softmax_cross_entropy_with_logits(params: ModelParameter, logits: mtf.Tensor, targets: mtf.Tensor) -> mtf.Tensor:
@@ -174,20 +174,20 @@ def equal(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None) -> mtf
     return scoped("equal", mtf.equal, x1, x2, output_shape)
 
 
-def mod(x1: mtf.Tensor, x2: typing.Union[mtf.Tensor, int], output_shape: OPT_SHAPE = None) -> mtf.Tensor:
-    return scoped("mod", mtf.mod, x1, x2, output_shape)
+def mod(x1: mtf.Tensor, x2: typing.Union[mtf.Tensor, int]) -> mtf.Tensor:
+    return scoped("mod", lambda x, y: x % y, x1, x2)
 
 
 def sin(x: mtf.Tensor):
     return scoped("sin", mtf.sin, x)
 
 
-def negative(x: mtf.Tensor):
-    return scoped("negative", mtf.negative, x)
+def negative(tensor: mtf.Tensor):
+    return scoped("negative", lambda x: -x, tensor)
 
 
-def floordiv(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None) -> mtf.Tensor:
-    return scoped("floordiv", mtf.floordiv, x1, x2, output_shape)
+def floordiv(x1: mtf.Tensor, x2: mtf.Tensor) -> mtf.Tensor:
+    return scoped("floordiv", lambda x, y: x // y, x1, x2)
 
 
 def mtf_range(mesh: mtf.Mesh, dim: DIM, dtype: tf.DType) -> mtf.Tensor:
@@ -260,16 +260,20 @@ def mtf_slice(tensor: mtf.Tensor, begin: int, size: int, dim_name: str):
     return scoped("slice", mtf.slice, tensor, begin, size, dim_name)
 
 
-def add(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: typing.Optional[SHAPE] = None):
-    return scoped("add", mtf.add, x1, x2, output_shape)
+def add(x1: mtf.Tensor, x2: mtf.Tensor):
+    return scoped("add", lambda x, y: x + y, x1, x2)
 
 
-def multiply(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: typing.Optional[SHAPE] = None):
-    return scoped("multiply", mtf.multiply, x1, x2, output_shape)
+def multiply(x1: mtf.Tensor, x2: mtf.Tensor):
+    return scoped("multiply", lambda x, y: x * y, x1, x2,)
 
 
-def divide(x1: mtf.Tensor, x2: float, output_shape: typing.Optional[SHAPE] = None):
-    return scoped("divide", mtf.divide, x1, x2, output_shape)
+def divide(x1: mtf.Tensor, x2: float):
+    return scoped("divide", lambda x, y: x / y, x1, x2)
+
+
+def subtract(x1: mtf.Tensor, x2: mtf.Tensor):
+    return scoped("subtract", lambda x, y: x - y, x1, x2)
 
 
 def ones(mesh: mtf.Mesh, shape: SHAPE, dtype: tf.DType) -> mtf.Tensor:
