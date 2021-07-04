@@ -8,8 +8,8 @@ from tensorflow.python.ops import array_ops, gen_linalg_ops, math_ops, random_op
 from tensorflow.python.ops.init_ops import Initializer
 
 from ..dataclass import BlockArgs, ModelParameter
-from ..mtf_wrapper import einsum, scoped
-from ..utils_core import random_name
+from ..mtf_wrapper import einsum
+from ..utils_core import random_name, scoped
 from ..utils_mtf import OPT_DIMS, SHAPE, deduplicate, feature_dims_used, non_replicated_variable, dims_from_shape
 
 tf1 = tf.compat.v1

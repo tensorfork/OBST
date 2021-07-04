@@ -6,9 +6,8 @@ import tensorflow as tf
 from tensorflow.python.ops.init_ops import Initializer
 
 from .dataclass import BlockArgs, ModelParameter
-from .mtf_wrapper import (cast, mtf_range, random_name, reshape, concat as mtf_concat, pad as mtf_pad, mtf_slice, add,
-                          multiply)
-from .utils_core import default
+from .mtf_wrapper import (cast, mtf_range, reshape, concat as mtf_concat, pad as mtf_pad, mtf_slice, multiply, add, negative)
+from .utils_core import default, random_name
 
 tf1 = tf.compat.v1
 
@@ -304,7 +303,7 @@ def replace_dim(inp: typing.Union[DIM_LIST, mtf.Shape, mtf.Tensor],
 
 
 def weighted_add(left: mtf.Tensor, right: mtf.Tensor, alpha: mtf.Tensor) -> mtf.Tensor:
-    return add(multiply(left, alpha), multiply(right, 1 - alpha))
+    return add(multiply(left, alpha), multiply(right, add(1, negative(alpha))))
 
 
 def utils_slice(tensor: mtf.Tensor, start: int, end: int, dim: typing.Union[mtf.Dimension, str]) -> mtf.Tensor:

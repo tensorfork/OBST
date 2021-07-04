@@ -9,7 +9,8 @@ from .convolution import convolution
 from .normalization import norm
 from .spatial import attention
 from ..dataclass import BlockArgs, BlockConfig, ModelParameter
-from ..mtf_wrapper import scoped, add, multiply
+from ..mtf_wrapper import add, multiply
+from ..utils_core import scoped
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -23,7 +24,7 @@ def _get_block_part(block_part_config: BlockConfig, params: ModelParameter, bloc
         out = scoped(name + '_', LAYER_FUNCTIONS[name], BlockArgs(params, out, extras))
 
     if block_part_config.skip and block_part_config.memory_reduction_strategy in ("none", "checkpoint"):
-        out += block_input
+        out = add(out, block_input)
     return out
 
 

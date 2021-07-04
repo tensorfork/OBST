@@ -4,7 +4,7 @@ import mesh_tensorflow as mtf
 import tensorflow as tf
 
 from .dataclass import ModelParameter
-from .utils_core import random_name
+from .utils_core import scoped
 
 tf1 = tf.compat.v1
 _NAME_INDEX = [0]
@@ -16,12 +16,6 @@ TENSORS = typing.List[mtf.Tensor]
 OPT_SHAPE = typing.Optional[SHAPE]
 OPT_DIMS = typing.Optional[DIM_LIST]
 OPT_DIM = typing.Optional[mtf.Dimension]
-
-
-def scoped(name: str, fn: typing.Callable, *args, **kwargs):
-    name = random_name(name)
-    with tf1.variable_scope(f'{name}v'), tf1.name_scope(f'{name}n'):
-        return fn(*args, **kwargs)
 
 
 def einsum(xs: TENSORS, output_shape: OPT_SHAPE = None, reduced_dims: OPT_DIMS = None) -> mtf.Tensor:
@@ -53,9 +47,22 @@ def recompute_grad(fn: typing.Callable, explicit_inputs: typing.List[mtf.Tensor]
     return scoped("recompute_grad", mtf.recompute_grad, fn, explicit_inputs)
 
 
-def softmax_cross_entropy_with_logits(logits: mtf.Tensor, targets: mtf.Tensor, vocab_dim: mtf.Dimension) -> mtf.Tensor:
-    return scoped("softmax_cross_entropy_with_logits", mtf.layers.softmax_cross_entropy_with_logits, logits, targets,
-                  vocab_dim)
+def stop_gradient(tensor: mtf.Tensor):
+    return scoped("stop_gradient", mtf.stop_gradient, tensor)
+
+
+def _softmax_cross_entropy_with_logits(params: ModelParameter, logits: mtf.Tensor, targets: mtf.Tensor):
+    max_logit = reduce_max(stop_gradient(logits), reduced_dim=params.vocab_dim)
+    log_z = add(log(reduce_sum(exp(add(logits, negative(max_logit))), reduced_dim=params.vocab_dim)), max_logit)
+    loss = einsum([add(logits, negative(log_z)), one_hot(targets, params.vocab_dim, dtype=logits.dtype),
+                   constant_scalar(params, -1 / targets.size)], output_shape=[])
+    if not params.z_loss:
+        return loss
+    return add(loss, einsum([log_z, log_z, constant_scalar(params, params.z_loss / targets.size)], output_shape=[]))
+
+
+def softmax_cross_entropy_with_logits(params: ModelParameter, logits: mtf.Tensor, targets: mtf.Tensor) -> mtf.Tensor:
+    return scoped("softmax_cross_entropy_with_logits", _softmax_cross_entropy_with_logits, params, logits, targets)
 
 
 def import_laid_out_tensor(params: ModelParameter, laid_out_tensor: object, shape: SHAPE,
@@ -100,10 +107,6 @@ def relu(tensor: mtf.Tensor):
 
 def tanh(tensor: mtf.Tensor):
     return scoped("tanh", mtf.tanh, tensor)
-
-
-def gelu(tensor: mtf.Tensor):
-    return scoped("gelu", mtf.gelu, tensor)
 
 
 def assign(var: mtf.Variable, new_val: mtf.Tensor):
@@ -161,16 +164,20 @@ def equal(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None) -> mtf
     return scoped("equal", mtf.equal, x1, x2, output_shape)
 
 
-def mod(x1: mtf.Tensor, x2: typing.Union[mtf.Tensor, int], output_shape: OPT_SHAPE = None) -> mtf.Tensor:
-    return scoped("mod", mtf.mod, x1, x2, output_shape)
+def mod(x1: mtf.Tensor, x2: typing.Union[mtf.Tensor, int]) -> mtf.Tensor:
+    return scoped("mod", lambda x, y: x % y, x1, x2)
 
 
 def sin(x: mtf.Tensor):
     return scoped("sin", mtf.sin, x)
 
 
-def floordiv(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None) -> mtf.Tensor:
-    return scoped("floordiv", mtf.floordiv, x1, x2, output_shape)
+def negative(tensor: mtf.Tensor):
+    return scoped("negative", lambda x: -x, tensor)
+
+
+def floordiv(x1: mtf.Tensor, x2: mtf.Tensor) -> mtf.Tensor:
+    return scoped("floordiv", lambda x, y: x // y, x1, x2)
 
 
 def mtf_range(mesh: mtf.Mesh, dim: DIM, dtype: tf.DType) -> mtf.Tensor:
@@ -209,8 +216,20 @@ def sqrt(tensor: mtf.Tensor) -> mtf.Tensor:
     return scoped("sqrt", mtf.sqrt, tensor)
 
 
+def sqrt_eps(tensor: mtf.Tensor, epsilon: float = 1e-5) -> mtf.Tensor:
+    return scoped("sqrt", lambda x: rsqrt(add(x, epsilon)), tensor)
+
+
 def rsqrt(tensor: mtf.Tensor) -> mtf.Tensor:
     return scoped("rsqrt", mtf.rsqrt, tensor)
+
+
+def rsqrt_eps(tensor: mtf.Tensor, epsilon: float = 1e-6) -> mtf.Tensor:
+    return scoped("rsqrt6", lambda x: rsqrt(add(x, epsilon)), tensor)
+
+
+def softplus(tensor: mtf.Tensor) -> mtf.Tensor:
+    return scoped("softplus", mtf.softplus, tensor)
 
 
 def square(tensor: mtf.Tensor) -> mtf.Tensor:
@@ -243,12 +262,20 @@ def mtf_slice(tensor: mtf.Tensor, begin: int, size: int, dim_name: str):
     return scoped("slice", mtf.slice, tensor, begin, size, dim_name)
 
 
-def add(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: typing.Optional[SHAPE] = None):
-    return scoped("add", mtf.add, x1, x2, output_shape)
+def add(x1: mtf.Tensor, x2: mtf.Tensor):
+    return scoped("add", lambda x, y: x + y, x1, x2)
 
 
-def multiply(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: typing.Optional[SHAPE] = None):
-    return scoped("multiply", mtf.multiply, x1, x2, output_shape)
+def multiply(x1: mtf.Tensor, x2: mtf.Tensor):
+    return scoped("multiply", lambda x, y: x * y, x1, x2, )
+
+
+def divide(x1: mtf.Tensor, x2: float):
+    return scoped("divide", lambda x, y: x / y, x1, x2)
+
+
+def subtract(x1: mtf.Tensor, x2: mtf.Tensor):
+    return scoped("subtract", lambda x, y: x - y, x1, x2)
 
 
 def ones(mesh: mtf.Mesh, shape: SHAPE, dtype: tf.DType) -> mtf.Tensor:

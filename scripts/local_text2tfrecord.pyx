@@ -3,6 +3,17 @@ tokenization to bpe or character embeddings of text datasets
 make sure to first run train_tokenizer to get the preprocessed files locally
 """
 
+#!python
+# cython: boundscheck=False
+# cython: initializedcheck=False
+# cython: nonecheck=False
+# cython: wraparound=False
+# cython: cdivision=True
+# cython: profile=False
+# cython: linetrace=False
+# cython: language_level=3
+
+
 import argparse
 import io
 import os
@@ -10,6 +21,7 @@ import shutil
 import time
 import random
 import multiprocessing
+import urllib3
 
 import jsonlines
 import requests
@@ -28,6 +40,7 @@ DEF PROCS = 12
 DEF SERVICE_ACCOUNT_JSON_PATH = "a.json"
 DEF BUFFER_SIZE = 2 ** 24
 DEF PRINTERVALL = 16
+
 
 cdef void create_tfrecords(unsigned short pid):
     cdef unicode prefix = f"{'int64' if INT64 else 'bytes'}_{NAME}_"
@@ -64,11 +77,17 @@ cdef void create_tfrecords(unsigned short pid):
                     tf_example = tf.train.Example(features=tf.train.Features(feature=feature))
                     writer.write(tf_example.SerializeToString())
 
-                bucket.blob(f'{OUTPUT_DIR}{filename}').upload_from_filename(filename)
+                while True:
+                    try:
+                        bucket.blob(f'{OUTPUT_DIR}{filename}').upload_from_filename(filename)
+                        break
+                    except urllib3.exceptions.TimeoutError:
+                        pass
                 tfrecord_count += 1
                 if tfrecord_count % PRINTERVALL == 0:
                     print(f"[{pid:{len(str(PROCS))}d}/{PROCS}] Processed: {processed_chars} - Total: {time.time()-start_time:.0f}s - Since last write: {time.time()-last_write:.0f}s")
                 last_write = time.time()
+
 
 cpdef main():
     processes = [multiprocessing.Process(target=create_tfrecords, args=(pid,)) for pid in range(PROCS)]
