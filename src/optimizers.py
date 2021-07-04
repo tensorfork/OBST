@@ -31,7 +31,8 @@ def get_var(params: ModelParameter, name: str, shape: SHAPE, initializer: Initia
 
 
 def variable(params: ModelParameter, base: mtf.Variable, name: str, shape: SHAPE):
-    return get_variable(params, f"{base.name}/{params.optimizer}/{name}", shape, zeros, False, params.optimizer_dtype)
+    return get_variable(params, f"{base.name}/{params.optimizer.replace(':', '_')}/{name}", shape, zeros, False,
+                        params.optimizer_dtype)
 
 
 class OptimizerCtx:
