@@ -14,7 +14,8 @@ from .dataclass import ModelParameter
 from .mtf_wrapper import (add_n, cast, constant_float, constant_scalar, einsum, equal, greater, greater_equal, minimum,
                           mod, reduce_max, reduce_mean, reduce_sum, rsqrt, sqrt, square, assign, assign_sub,
                           one_hot as mtf_one_hot, logical_and, add, multiply, identity, import_fully_replicated,
-                          reshape, scoped, reciprocal, constant, negative)
+                          reshape, reciprocal, constant, negative)
+from .utils_core import scoped
 from .utils_mtf import SHAPE, feature_dims_used, to_fp32, weighted_add, get_variable
 
 tf = tf2.compat.v1

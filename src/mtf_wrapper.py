@@ -4,7 +4,7 @@ import mesh_tensorflow as mtf
 import tensorflow as tf
 
 from .dataclass import ModelParameter
-from .utils_core import random_name
+from .utils_core import scoped
 
 tf1 = tf.compat.v1
 _NAME_INDEX = [0]
@@ -16,12 +16,6 @@ TENSORS = typing.List[mtf.Tensor]
 OPT_SHAPE = typing.Optional[SHAPE]
 OPT_DIMS = typing.Optional[DIM_LIST]
 OPT_DIM = typing.Optional[mtf.Dimension]
-
-
-def scoped(name: str, fn: typing.Callable, *args, **kwargs):
-    name = random_name(name)
-    with tf1.variable_scope(f'{name}v'), tf1.name_scope(f'{name}n'):
-        return fn(*args, **kwargs)
 
 
 def einsum(xs: TENSORS, output_shape: OPT_SHAPE = None, reduced_dims: OPT_DIMS = None) -> mtf.Tensor:
@@ -113,10 +107,6 @@ def relu(tensor: mtf.Tensor):
 
 def tanh(tensor: mtf.Tensor):
     return scoped("tanh", mtf.tanh, tensor)
-
-
-def gelu(tensor: mtf.Tensor):
-    return scoped("gelu", mtf.gelu, tensor)
 
 
 def assign(var: mtf.Variable, new_val: mtf.Tensor):

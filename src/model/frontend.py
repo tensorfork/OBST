@@ -9,7 +9,8 @@ from .convolution import convolution
 from .normalization import norm
 from .spatial import attention
 from ..dataclass import BlockArgs, BlockConfig, ModelParameter
-from ..mtf_wrapper import scoped, add, multiply
+from ..mtf_wrapper import add, multiply
+from ..utils_core import scoped
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 

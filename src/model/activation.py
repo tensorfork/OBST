@@ -1,9 +1,11 @@
 import mesh_tensorflow as mtf
+import numpy as np
 import tensorflow as tf
 
+from .. import tf_wrapper as tfw
 from ..dataclass import BlockArgs
-from ..mtf_wrapper import relu, gelu, sigmoid, tanh, scoped
-from ..utils_core import random_name
+from ..mtf_wrapper import relu as _relu, add, multiply, einsum, constant, sigmoid as _sigmoid, tanh as _tanh
+from ..utils_core import random_name, scoped
 
 tf1 = tf.compat.v1
 
@@ -20,7 +22,7 @@ class MishForward(mtf.Operation):
         mesh_impl = lowering.mesh_impl(self)
 
         def slicewise_fn(x):
-            return x * tf.tanh(tf.math.softplus(x))
+            return tfw.multiply(x, tfw.tanh(tfw.softplus(x)))
 
         y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]])
         lowering.set_tensor_lowering(self.outputs[0], y)
@@ -35,8 +37,9 @@ class MishBackward(mtf.Operation):
         mesh_impl = lowering.mesh_impl(self)
 
         def slicewise_fn(x, dy):
-            gte = tf.math.tanh(tf.math.softplus(x))
-            return dy * (gte + (1 - tf.math.square(gte)) * x * tf.math.sigmoid(x))
+            gte = tfw.tanh(tfw.softplus(x))
+            gte = tfw.add(gte, tfw.subtract(1, tfw.multiply(tfw.multiply(tfw.square(gte), x), tfw.sigmoid(x))))
+            return tfw.multiply(dy, gte)
 
         y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]], lowering.tensors[self.inputs[1]])
         lowering.set_tensor_lowering(self.outputs[0], y)
@@ -54,7 +57,7 @@ class SiluForward(mtf.Operation):
         mesh_impl = lowering.mesh_impl(self)
 
         def slicewise_fn(x):
-            return x * tf.math.sigmoid(x)
+            return tfw.multiply(x, tfw.sigmoid(x))
 
         y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]])
         lowering.set_tensor_lowering(self.outputs[0], y)
@@ -69,8 +72,8 @@ class SiluBackward(mtf.Operation):
         mesh_impl = lowering.mesh_impl(self)
 
         def slicewise_fn(x, dy):
-            gte = tf.math.sigmoid(x)
-            return [dy * (x * gte + (1 - gte))]
+            gte = tfw.sigmoid(x)
+            return tfw.multiply(dy, tfw.add(tfw.multiply(x, gte), tfw.subtract(1, gte)))
 
         y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]], lowering.tensors[self.inputs[1]])
         lowering.set_tensor_lowering(self.outputs[0], y)
@@ -88,7 +91,7 @@ class LeCunTanhForward(mtf.Operation):
         mesh_impl = lowering.mesh_impl(self)
 
         def slicewise_fn(x):
-            return tf.math.tanh(x) + x * 0.1
+            return tfw.add(tfw.tanh(x), tfw.multiply(x * 0.1))
 
         y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]])
         lowering.set_tensor_lowering(self.outputs[0], y)
@@ -103,7 +106,7 @@ class LeCunTanhBackward(mtf.Operation):
         mesh_impl = lowering.mesh_impl(self)
 
         def slicewise_fn(x, dy):
-            return dy * (1.1 - tf.math.square(tf.math.tanh(x)))
+            return tfw.multiply(dy, tfw.subtract(1.1, tfw.square(tfw.tanh(x))))
 
         y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]], lowering.tensors[self.inputs[1]])
         lowering.set_tensor_lowering(self.outputs[0], y)
@@ -121,7 +124,7 @@ class SoftsignForward(mtf.Operation):
         mesh_impl = lowering.mesh_impl(self)
 
         def slicewise_fn(x):
-            return x / (1 + tf.math.abs(x))
+            return tfw.divide(x, tfw.add(1, tfw.abs(x)))
 
         y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]])
         lowering.set_tensor_lowering(self.outputs[0], y)
@@ -136,7 +139,7 @@ class SoftsignBackward(mtf.Operation):
         mesh_impl = lowering.mesh_impl(self)
 
         def slicewise_fn(x, dy):
-            return dy / tf.math.square(1 + tf.math.abs(x))
+            return tfw.divide(dy, tfw.square(tfw.add(1, tfw.abs(x))))
 
         y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]], lowering.tensors[self.inputs[1]])
         lowering.set_tensor_lowering(self.outputs[0], y)
@@ -150,6 +153,28 @@ def _output0(op):
         return op(*args, **kwargs).outputs[0]
 
     return _wrapped
+
+
+def _gelu(params, tensor: mtf.Tensor):
+    return einsum([tensor, add(tanh(multiply(add(einsum([tensor, tensor, tensor, constant(params, 0.044715)],
+                                                        output_shape=tensor.shape), tensor), np.sqrt(2 / np.pi))), 1.0),
+                   constant(params, 0.5)], output_shape=[])
+
+
+def gelu(args: BlockArgs):
+    return scoped("gelu", _gelu, args.params, args.tensor)
+
+
+def relu(args: BlockArgs):
+    return _relu(args.tensor)
+
+
+def sigmoid(args: BlockArgs):
+    return _sigmoid(args.tensor)
+
+
+def tanh(args: BlockArgs):
+    return _tanh(args.tensor)
 
 
 ACTIVATIONS = {'relu': relu,

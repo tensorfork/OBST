@@ -14,8 +14,9 @@ from .revnet import RevGradOp
 from ..dataclass import BlockArgs, BlockConfig, ModelParameter
 from ..mtf_wrapper import (add_n, cast, constant_scalar, dropout, einsum, one_hot, ones, reciprocal, reduce_logsumexp,
                            reduce_mean, reduce_sum, sigmoid, sign, zeros_like, mod, floordiv, reshape, equal, argmax,
-                           softmax_cross_entropy_with_logits, recompute_grad, scoped, add, negative, divide)
+                           softmax_cross_entropy_with_logits, recompute_grad, add, negative, divide)
 from ..utils_mtf import concat, utils_slice, weighted_add, anonymize, anonymize_shape
+from ..utils_core import scoped
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 

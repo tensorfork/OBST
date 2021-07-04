@@ -2,17 +2,21 @@
 Generic utility functions that are called frequently across modules.
 """
 import functools
-import os
 import typing
 from datetime import datetime, timezone
 
-import pytz
+import tensorflow as tf
 
 from .dataclass import ModelParameter
 
-TZ = pytz.timezone(os.environ.get('TZ', 'US/Pacific'))
-
 _NAME_INDICES = {}
+tf1 = tf.compat.v1
+
+
+def scoped(name: str, fn: typing.Callable, *args, **kwargs):
+    name = random_name(name)
+    with tf1.variable_scope(f'{name}v'), tf1.name_scope(f'{name}n'):
+        return fn(*args, **kwargs)
 
 
 def default(value: typing.Any, default_value: typing.Any) -> typing.Any:
@@ -36,12 +40,8 @@ def chunks(lst: typing.List, n: int):
         yield lst[i:i + n]
 
 
-def timestamp(now=None, tz=None):
-    if now is None:
-        now = datetime.now(timezone.utc)
-    if tz is None:
-        tz = TZ
-    return "{}".format(now.astimezone(tz).isoformat())
+def timestamp():
+    return "{}".format(datetime.now(timezone.utc).isoformat())
 
 
 def color_print(params: ModelParameter, string):
