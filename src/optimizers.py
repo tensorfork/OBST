@@ -12,9 +12,10 @@ from tensorflow.python.ops.init_ops import Initializer
 from src.model.revnet import RevGradOp
 from .dataclass import ModelParameter
 from .mtf_wrapper import (add_n, cast, constant_float, constant_scalar, einsum, equal, greater, greater_equal, minimum,
-                          mod, reduce_max, reduce_mean, reduce_sum, rsqrt, square, assign, assign_sub,
+                          mod, reduce_max, reduce_mean, reduce_sum, square, assign, assign_sub,
                           one_hot as mtf_one_hot, logical_and, add, multiply, import_fully_replicated,
-                          reshape, scoped, assign_add, maximum, identity, zeros_like, negative, sqrt_eps, rsqrt_eps)
+                          reshape, scoped, assign_add, maximum, identity, zeros_like, negative, sqrt_eps, rsqrt_eps,
+                          constant, reciprocal)
 from .utils_mtf import SHAPE, feature_dims_used, to_fp32, weighted_add, get_variable, get_fan_in
 
 tf = tf2.compat.v1
@@ -171,13 +172,14 @@ def gradient_accumulation(ctx: OptimizerCtx):
 
 def adam(ctx: OptimizerCtx) -> mtf.Tensor:
     exp_avg_p2_ptr = variable(ctx.params, ctx.var, 'exp_avg_p2', ctx.var.shape)
+    exp_avg_p1_ptr = variable(ctx.params, ctx.var, 'exp_avg_p1', ctx.var.shape)
+
     exp_avg_p2 = weighted_add(exp_avg_p2_ptr, square(ctx.grad), ctx.beta2)
+    grad = weighted_add(exp_avg_p1_ptr, ctx.grad, ctx.beta1)
+
     ctx.update_ops.append(assign(exp_avg_p2_ptr, exp_avg_p2))
-    if ctx.params.opt_beta1:
-        exp_avg_p1_ptr = variable(ctx.params, ctx.var, 'exp_avg_p1', ctx.var.shape)
-        grad = weighted_add(exp_avg_p1_ptr, ctx.grad, ctx.beta1)
-        ctx.update_ops.append(assign(exp_avg_p1_ptr, grad))
-    return ctx.grad * rsqrt_eps(exp_avg_p2)
+    ctx.update_ops.append(assign(exp_avg_p1_ptr, grad))
+    return multiply(ctx.grad, rsqrt_eps(exp_avg_p2))
 
 
 def novograd(ctx: OptimizerCtx) -> mtf.Tensor:
@@ -203,7 +205,7 @@ def sm3(ctx: OptimizerCtx) -> mtf.Tensor:
 
     ctx.update_ops.extend([assign(buf_ptr, reduce_max(weight_update, output_shape=[dim]))
                            for buf_ptr, dim in zip(buffer, weight_update.shape.dims)])
-    return ctx.grad * rsqrt(weight_update + ctx.epsilon)
+    return multiply(ctx.grad, rsqrt_eps(weight_update))
 
 
 def return_grad(ctx: OptimizerCtx) -> mtf.Tensor:
@@ -214,8 +216,10 @@ def adaptive_gradient_clipping(ctx: OptimizerCtx, gradient_clip: str) -> mtf.Ten
     gradient_clip = float(gradient_clip)
     grd_norm = sqrt_eps(einsum([ctx.grad, ctx.grad], reduced_dims=get_fan_in(ctx.params, ctx.var)))
     wgt_norm = sqrt_eps(einsum([ctx.var.value, ctx.var.value], reduced_dims=get_fan_in(ctx.params, ctx.var)))
-    return weighted_add(grd_norm / wgt_norm * gradient_clip * ctx.grad, ctx.grad,
-                        cast(greater(wgt_norm / grd_norm, gradient_clip), ctx.dtype.activation_dtype))
+    return weighted_add(einsum([grd_norm, reciprocal(wgt_norm), gradient_clip, ctx.grad], output_shape=ctx.grad.shape),
+                        ctx.grad,
+                        cast(greater(multiply(wgt_norm, reciprocal(grd_norm)), gradient_clip),
+                             ctx.dtype.activation_dtype))
 
 
 def norm_gradient_clipping(ctx: OptimizerCtx, gradient_clip: str) -> mtf.Tensor:
@@ -269,15 +273,19 @@ def update(ctx: OptimizerCtx):
         ctx.grad = scoped(opt, OPTIMIZERS[opt], ctx, *args)
 
     if 'rezero' in var.name:
-        ctx.grad *= params.rezero_lr_multiplier
+        ctx.grad = multiply(params.rezero_lr_multiplier, ctx.grad)
 
-    large_tensor = feature_dims_used(params, var) and len(var.shape.dims) > len(params.feature_dims)
-    large_tensor |= not feature_dims_used(params, var) and len(var.shape.dims) >= 2
-    large_tensor &= var.shape.size > 1
-    large_tensor &= params.vocab_dim not in var.shape
+    features_used = feature_dims_used(params, var)
+    large_tensor = features_used and len(var.shape.dims) > len(params.feature_dims)
+    large_tensor |= not features_used and len(var.shape.dims) >= 2  # not norm or rezero + scalable catch-all
+    large_tensor &= var.shape.size > 1  # not rezero
+    large_tensor &= "embed" not in var.name  # not input/output embedding, position embedding, attention map bias
+    large_tensor &= "input" not in var.name or "lang_in" in var.name or "vid_in" in var.name  # not input
+    large_tensor &= "output" not in var.name or "lang_out" in var.name or "vid_out" in var.name  # not output
 
     if large_tensor and params.weight_decay > 0:
-        ctx.grad = add(ctx.grad, params.weight_decay * var.value * learning_rate)
+        ctx.grad = add(ctx.grad, einsum([constant(params, params.weight_decay), var.value, learning_rate],
+                                        output_shape=var.shape))
 
     if not large_tensor or not params.weight_standardisation:
         update_ops.append(assign_sub(var, ctx.grad))
@@ -287,12 +295,12 @@ def update(ctx: OptimizerCtx):
     fan_in_size = np.prod([d.size for d in get_fan_in(params, var)])
     size = np.prod([d.size for d in var.shape.dims])
     max_fan = max(fan_in_size, size // fan_in_size)
-    var = ((1 - 1 / max_fan) / size ** 2 + 1 / max_fan - 2 / size + 1 / max_fan)
+    variance = ((1 - 1 / max_fan) / size ** 2 + 1 / max_fan - 2 / size + 1 / max_fan)
     if params.scale_by_depth:
-        var *= params.n_blocks
-    std = rsqrt(1e-6 + reduce_sum(square(val * val.size ** -0.5), output_shape=[]))
-    std *= var ** 0.5
-    update_ops.append(assign(var, val * std))
+        variance *= params.n_blocks
+    val = einsum([val, rsqrt_eps(einsum([val, val, constant(params, 1 / val.size)], output_shape=[])),
+                  constant(params, variance ** 0.5)], output_shape=var.shape)
+    update_ops.append(assign(var, val))
 
 
 def import_mtf(params: ModelParameter, imported: typing.Union[tf.Tensor, float], name: str):
@@ -365,9 +373,10 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
     step = cast(equal(mod(tf.cast(manual_step + 1, dtype),
                           import_mtf(params, params.grad_accumulation * 1., "grad_accum")),
                       import_mtf(params, 0., "zero")), dtype)
-    mstep = 1 - step
-    beta1 = 1 - step * import_mtf(params, 1 - params.opt_beta1, "beta1") if params.opt_beta1 else None
-    beta2 = 1 - step * import_mtf(params, 1 - params.opt_beta2, "beta2")
+    neg_step = negative(step)
+    mstep = add(1, neg_step)
+    beta1 = add(1, multiply(neg_step, import_mtf(params, 1 - params.opt_beta1, "beta1")))
+    beta2 = add(1, multiply(neg_step, import_mtf(params, 1 - params.opt_beta2, "beta2")))
     epsilon = params.opt_epsilon
 
     debug_gradients_dict = {}
@@ -385,13 +394,19 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
             v1v2 = reduce_sum(loss_1__loss_2, output_shape=[])
             v2v2 = reduce_sum(loss_2__loss_2, output_shape=[])
             min_gamma = 0.001
-            gamma = constant_float(params, value=(1 - min_gamma), shape=[]) * to_fp32(greater_equal(v1v2, v1v1))
-            gamma += constant_float(params, value=min_gamma, shape=[]) * \
-                     to_fp32(greater_equal(v1v2, v2v2)) * to_fp32(equal(gamma, 0))
-            gamma += (-1.0 * ((v1v2 - v2v2) / (v1v1 + v2v2 - 2 * v1v2))) * to_fp32(equal(gamma, 0))
+            gamma = multiply(constant_float(params, value=(1 - min_gamma), shape=[]),
+                             to_fp32(greater_equal(v1v2, v1v1)))
+            gamma = add(gamma,
+                        einsum([constant_float(params, value=min_gamma, shape=[]), to_fp32(greater_equal(v1v2, v2v2)),
+                                to_fp32(equal(gamma, 0))], output_shape=[]))
+            gamma = add(gamma,
+                        einsum([constant(params, -1),
+                                to_fp32(equal(gamma, 0)),
+                                add(v1v2, negative(v2v2)),
+                                reciprocal(add(v1v1, v2v2) - multiply(-2, v1v2))],
+                               output_shape=[]))
 
-            loss = add(multiply(loss_list[0], gamma),
-                       multiply(loss_list[1], (1 - gamma)))
+            loss = add(multiply(loss_list[0], gamma), multiply(loss_list[1], (1 - gamma)))
 
         operations = loss.graph.operations
         xs = [x.outputs[0] for x in params.mesh.graph.trainable_variables]
