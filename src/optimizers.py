@@ -10,7 +10,7 @@ import tensorflow as tf2
 from src.model.revnet import RevGradOp
 from .dataclass import ModelParameter
 from .mtf_wrapper import (constant_scalar, einsum, rsqrt, square, assign, assign_sub, add, import_fully_replicated,
-                          scoped, minimum, multiply)
+                          scoped)
 from .utils_mtf import SHAPE, weighted_add, get_variable
 
 tf = tf2.compat.v1
@@ -46,7 +46,6 @@ def update(op: mtf.Operation, grad_outputs: typing.List[mtf.Tensor], downstream:
         grad: mtf.Tensor = grad_list[2]
         var: mtf.Variable = tensor_to_var[inp]
 
-        grad = multiply(minimum(rsqrt(add(einsum([grad, grad], []), 1e-6)), 1), grad)
         exp_avg_p2_ptr = variable(params, var, 'exp_avg_p2', var.shape)
         exp_avg_p1_ptr = variable(params, var, 'exp_avg_p1', var.shape)
 
