@@ -6,9 +6,8 @@ import tensorflow as tf
 from tensorflow.python.ops.init_ops import Initializer
 
 from .dataclass import BlockArgs, ModelParameter
-from .mtf_wrapper import (cast, mtf_range, random_name, reshape, concat as mtf_concat, pad as mtf_pad, mtf_slice, add,
-                          multiply)
-from .utils_core import default
+from .mtf_wrapper import cast, mtf_range, reshape, concat as mtf_concat, pad as mtf_pad, mtf_slice, add, multiply
+from .utils_core import default, random_name
 
 tf1 = tf.compat.v1
 
