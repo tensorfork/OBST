@@ -220,6 +220,10 @@ def rsqrt(tensor: mtf.Tensor) -> mtf.Tensor:
     return scoped("rsqrt", mtf.rsqrt, tensor)
 
 
+def softplus(tensor: mtf.Tensor) -> mtf.Tensor:
+    return scoped("softplus", mtf.softplus, tensor)
+
+
 def square(tensor: mtf.Tensor) -> mtf.Tensor:
     return scoped("square", mtf.square, tensor)
 

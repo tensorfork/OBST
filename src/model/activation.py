@@ -4,9 +4,10 @@ import tensorflow as tf
 
 from .. import tf_wrapper as tfw
 from ..dataclass import BlockArgs
-from ..mtf_wrapper import relu as _relu, add, multiply, einsum, constant, sigmoid as _sigmoid, tanh as _tanh
+from ..mtf_wrapper import relu as _relu, add, multiply, einsum, constant, sigmoid as _sigmoid, tanh as _tanh, softplus
 from ..utils_core import random_name, scoped
 
+mtf.softplus()
 tf1 = tf.compat.v1
 
 
@@ -178,6 +179,14 @@ def tanh(args: BlockArgs):
     return _tanh(args.tensor)
 
 
+def _mtf_mish(tensor: mtf.Tensor):
+    return multiply(_tanh(softplus(tensor)), tensor)
+
+
+def mtf_mish(args: BlockArgs):
+    return scoped("mtf_mish", _mtf_mish, args.tensor)
+
+
 ACTIVATIONS = {'relu': relu,
                'sigmoid': sigmoid,
                'tanh': tanh,
@@ -185,6 +194,7 @@ ACTIVATIONS = {'relu': relu,
                'lecun_tanh': _output0(LeCunTanhForward),
                'silu': _output0(SiluForward),
                'mish': _output0(MishForward),
+               "mtf_mish": mtf_mish,
                'softsign': _output0(SoftsignForward)
                }
 
