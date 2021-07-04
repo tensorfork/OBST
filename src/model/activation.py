@@ -149,8 +149,8 @@ def _output0(op):
     if not issubclass(op, mtf.Operation):
         raise ValueError
 
-    def _wrapped(*args, **kwargs):
-        return op(*args, **kwargs).outputs[0]
+    def _wrapped(args: BlockArgs):
+        return op(args.tensor).outputs[0]
 
     return _wrapped
 
@@ -195,7 +195,7 @@ def activate(args: BlockArgs) -> mtf.Tensor:
     for fn_name in args:
         if fn_name not in ACTIVATIONS:
             continue
-        return scoped(fn_name, ACTIVATIONS[fn_name], args.tensor)
+        return scoped(fn_name, ACTIVATIONS[fn_name], args)
     print(f'No activation function found for "{args.name_extras}". Falling back to identity. '
           f'Known functions: {list(ACTIVATIONS.keys())}')
     return args.tensor
