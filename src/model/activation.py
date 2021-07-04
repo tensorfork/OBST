@@ -7,7 +7,6 @@ from ..dataclass import BlockArgs
 from ..mtf_wrapper import relu as _relu, add, multiply, einsum, constant, sigmoid as _sigmoid, tanh as _tanh, softplus
 from ..utils_core import random_name, scoped
 
-mtf.softplus()
 tf1 = tf.compat.v1
 
 
