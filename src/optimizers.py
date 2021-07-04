@@ -12,9 +12,9 @@ from tensorflow.python.ops.init_ops import Initializer
 from src.model.revnet import RevGradOp
 from .dataclass import ModelParameter
 from .mtf_wrapper import (add_n, cast, constant_float, constant_scalar, einsum, equal, greater, greater_equal, minimum,
-                          mod, reduce_max, reduce_mean, reduce_sum, rsqrt, sqrt, square, assign, assign_sub,
+                          mod, reduce_max, reduce_mean, reduce_sum, rsqrt, square, assign, assign_sub,
                           one_hot as mtf_one_hot, logical_and, add, multiply, import_fully_replicated,
-                          reshape, scoped, assign_add, maximum, identity, zeros_like)
+                          reshape, scoped, assign_add, maximum, identity, zeros_like, negative, sqrt_eps, rsqrt_eps)
 from .utils_mtf import SHAPE, feature_dims_used, to_fp32, weighted_add, get_variable, get_fan_in
 
 tf = tf2.compat.v1
@@ -99,7 +99,7 @@ def gradients(ctx: OptimizerCtx):
         if inp in tensor_to_gradient:
             grad_list = tensor_to_gradient[inp]
             grad_list[1] += 1
-            grad_list[2] += grad
+            grad_list[2] = add(grad, grad_list[2])
         else:
             tensor_to_gradient[inp] = grad_list = [0, 1, grad]
 
@@ -126,12 +126,14 @@ def gradients(ctx: OptimizerCtx):
                     else:
 
                         all_grads = [grad, first_grad[op.name]]
-                        g_square = [1e-6 + einsum([g, g], output_shape=[]) for g in all_grads[1:]]
+                        g_square = [add(1e-6, einsum([g, g], output_shape=[])) for g in all_grads[1:]]
 
                         for i in range(len(all_grads)):
                             grad = all_grads.pop(0)
                             for g, sq in zip(all_grads, g_square):
-                                grad -= g * (minimum(einsum([grad, g], output_shape=[]), 0) / sq)
+                                grad = add(grad,
+                                           negative(einsum([g, minimum(einsum([grad, g], output_shape=[]), 0), sq],
+                                                           output_shape=grad.shape)))
 
                             all_grads.append(grad)
                             g_square.append(einsum([g, g], output_shape=[]))
@@ -147,10 +149,12 @@ def gradients(ctx: OptimizerCtx):
 
                             else:
 
-                                ctx.loss_1__loss_1 += einsum([first_grad[op.name], first_grad[op.name]],
-                                                             [params.head_dim])
-                                ctx.loss_1__loss_2 += einsum([first_grad[op.name], grad], [params.head_dim])
-                                ctx.loss_2__loss_2 += einsum([grad, grad], [params.head_dim])
+                                ctx.loss_1__loss_1 = add(ctx.loss_1__loss_1,
+                                                         einsum([first_grad[op.name], first_grad[op.name]],
+                                                                [params.head_dim]))
+                                ctx.loss_1__loss_2 = add(ctx.loss_1__loss_2,
+                                                         einsum([first_grad[op.name], grad], [params.head_dim]))
+                                ctx.loss_2__loss_2 = add(ctx.loss_2__loss_2, einsum([grad, grad], [params.head_dim]))
 
                                 del first_grad[op.name]
                                 continue
@@ -162,7 +166,7 @@ def gradients(ctx: OptimizerCtx):
 
 
 def gradient_accumulation(ctx: OptimizerCtx):
-    ctx.update_ops.append(assign_add(ctx.grad_buffer, ctx.grad + identity(ctx.grad_buffer)))
+    ctx.update_ops.append(assign_add(ctx.grad_buffer, add(ctx.grad, identity(ctx.grad_buffer))))
 
 
 def adam(ctx: OptimizerCtx) -> mtf.Tensor:
@@ -173,7 +177,7 @@ def adam(ctx: OptimizerCtx) -> mtf.Tensor:
         exp_avg_p1_ptr = variable(ctx.params, ctx.var, 'exp_avg_p1', ctx.var.shape)
         grad = weighted_add(exp_avg_p1_ptr, ctx.grad, ctx.beta1)
         ctx.update_ops.append(assign(exp_avg_p1_ptr, grad))
-    return ctx.grad * rsqrt(exp_avg_p2 + ctx.epsilon)
+    return ctx.grad * rsqrt_eps(exp_avg_p2)
 
 
 def novograd(ctx: OptimizerCtx) -> mtf.Tensor:
@@ -181,10 +185,10 @@ def novograd(ctx: OptimizerCtx) -> mtf.Tensor:
     exp_avg_p2 = exp_avg_p2_ptr = variable(ctx.params, ctx.var, "exp_avg_p2", [])
 
     exp_avg_p2 = weighted_add(exp_avg_p2, reduce_sum(square(ctx.grad)), ctx.beta2)
-    ctx.update_ops.extend([assign(exp_avg_p1_ptr, ctx.beta1 * exp_avg_p1_ptr +
-                                  ctx.grad * rsqrt(exp_avg_p2 + ctx.epsilon)),
+    ctx.update_ops.extend([assign(exp_avg_p1_ptr, add(multiply(ctx.beta1, exp_avg_p1_ptr),
+                                                      multiply(ctx.grad, rsqrt_eps(exp_avg_p2)))),
                            assign(exp_avg_p2_ptr, exp_avg_p2)])
-    return ctx.beta1 * exp_avg_p1 + ctx.grad * rsqrt(exp_avg_p2 + ctx.epsilon)
+    return add(multiply(ctx.beta1, exp_avg_p1), multiply(ctx.grad, rsqrt_eps(exp_avg_p2)))
 
 
 def sm3(ctx: OptimizerCtx) -> mtf.Tensor:
@@ -195,7 +199,7 @@ def sm3(ctx: OptimizerCtx) -> mtf.Tensor:
         buffer.append(variable(ctx.params, ctx.var, f"dim{i}", [ctx.var.shape.dims[i]]))
         weight_update = minimum(weight_update, buffer[-1])
 
-    weight_update += square(ctx.grad)
+    weight_update = add(weight_update, square(ctx.grad))
 
     ctx.update_ops.extend([assign(buf_ptr, reduce_max(weight_update, output_shape=[dim]))
                            for buf_ptr, dim in zip(buffer, weight_update.shape.dims)])
@@ -208,15 +212,15 @@ def return_grad(ctx: OptimizerCtx) -> mtf.Tensor:
 
 def adaptive_gradient_clipping(ctx: OptimizerCtx, gradient_clip: str) -> mtf.Tensor:
     gradient_clip = float(gradient_clip)
-    grd_norm = sqrt(einsum([ctx.grad, ctx.grad], reduced_dims=get_fan_in(ctx.params, ctx.var)) + 1e-5)
-    wgt_norm = sqrt(einsum([ctx.var.value, ctx.var.value], reduced_dims=get_fan_in(ctx.params, ctx.var)) + 1e-3)
+    grd_norm = sqrt_eps(einsum([ctx.grad, ctx.grad], reduced_dims=get_fan_in(ctx.params, ctx.var)))
+    wgt_norm = sqrt_eps(einsum([ctx.var.value, ctx.var.value], reduced_dims=get_fan_in(ctx.params, ctx.var)))
     return weighted_add(grd_norm / wgt_norm * gradient_clip * ctx.grad, ctx.grad,
                         cast(greater(wgt_norm / grd_norm, gradient_clip), ctx.dtype.activation_dtype))
 
 
 def norm_gradient_clipping(ctx: OptimizerCtx, gradient_clip: str) -> mtf.Tensor:
     gradient_clip = float(gradient_clip)
-    return einsum([minimum(rsqrt(einsum([ctx.grad, ctx.grad], []) + 1e-6), 1 / gradient_clip),
+    return einsum([minimum(rsqrt_eps(einsum([ctx.grad, ctx.grad], [])), 1 / gradient_clip),
                    ctx.grad, constant_scalar(ctx.params, gradient_clip)], ctx.grad.shape)
 
 
@@ -230,11 +234,11 @@ def gradient_centralisation(ctx: OptimizerCtx) -> mtf.Tensor:
 
 
 def weight_centralisation(ctx: OptimizerCtx) -> mtf.Tensor:
-    return ctx.grad + reduce_mean(ctx.var.value)
+    return add(ctx.grad, reduce_mean(ctx.var.value))
 
 
 def multiply_learning_rate(ctx: OptimizerCtx) -> mtf.Tensor:
-    return ctx.grad * ctx.learning_rate
+    return multiply(ctx.grad, ctx.learning_rate)
 
 
 OPTIMIZERS = {"adam": adam,
@@ -273,7 +277,7 @@ def update(ctx: OptimizerCtx):
     large_tensor &= params.vocab_dim not in var.shape
 
     if large_tensor and params.weight_decay > 0:
-        ctx.grad += params.weight_decay * var.value * learning_rate
+        ctx.grad = add(ctx.grad, params.weight_decay * var.value * learning_rate)
 
     if not large_tensor or not params.weight_standardisation:
         update_ops.append(assign_sub(var, ctx.grad))

@@ -393,3 +393,13 @@ def get_attention_dim(args: BlockArgs) -> ATTENTION_DIM:
 
 def is_masked(args: BlockArgs):
     return get_attention_dim(args).index in args.params.masked_attention_dimensions
+
+
+def get_fan_in(params: ModelParameter, shape: ALL_SHAPES) -> DIM_LIST:
+    shape = dims_from_shape(shape)
+    features_used = feature_dims_used(params, shape)
+    if features_used and shape.index(params.key_dim) == len(shape):
+        return shape[:-2]
+    if features_used:
+        return shape[:2]
+    return shape[:1]

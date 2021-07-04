@@ -113,6 +113,10 @@ def assign(var: mtf.Variable, new_val: mtf.Tensor):
     return scoped("assign", mtf.assign, var, new_val)
 
 
+def assign_add(var: mtf.Variable, new_val: mtf.Tensor):
+    return scoped("assign_add", mtf.assign_add, var, new_val)
+
+
 def assign_sub(var: mtf.Variable, new_val: mtf.Tensor):
     return scoped("assign_sub", mtf.assign_sub, var, new_val)
 
