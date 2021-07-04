@@ -134,6 +134,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.own_color = "\x1b[32;1m"
         self.other_color = "\x1b[0m"
         self.scale_by_depth = True
+        self.z_loss = 1e-4
         self.block_config = [{'layer': ["norm-group-shift-scale",
                                         "feed_forward-in_relu-group-in_glu_add-in_norm"]
                               },
@@ -143,7 +144,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
                               }]
 
         self.input_block_config = []
-        self.output_block_config = [{'layer': ["norm-shift-scale"]}]
+        self.output_block_config = []
 
         self.mesh: typing.Optional[mtf.Mesh] = None
         self.d_assignment: typing.Optional[DeviceAssignment] = None
@@ -224,8 +225,10 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.optimizer_dtype = mtf.VariableDType(self.storage_dtype, self.optimizer_slice_dtype, self.calculation_dtype)
         self.block_config = [BlockConfig(conf, memory_reduction_strategy=self.memory_reduction_strategy) for conf in
                              self.block_config]
-        self.input_block_config = [BlockConfig(conf, memory_reduction_strategy="checkpoint") for conf in self.input_block_config]
-        self.output_block_config = [BlockConfig(conf, memory_reduction_strategy="checkpoint") for conf in self.output_block_config]
+        self.input_block_config = [BlockConfig(conf, memory_reduction_strategy="checkpoint") for conf in
+                                   self.input_block_config]
+        self.output_block_config = [BlockConfig(conf, memory_reduction_strategy="checkpoint") for conf in
+                                    self.output_block_config]
         self.time_patch_size = self.n_ctx // self.time_patch
         self.frame_height_patch = self.frame_height // self.patch_size
         self.frame_width_patch = self.frame_width // self.patch_size
@@ -267,15 +270,16 @@ class ModelParameter(typing.Dict[str, typing.Any]):
                     "height", self.frame_height_patch * self.frame_width_patch
                 )
             ]
-
-        frame_input_shape += [mtf.Dimension("color_channels", self.channel_color_size)]
+        self.color_channel_dim = mtf.Dimension("color_channels", self.channel_color_size)
+        frame_input_shape += [self.color_channel_dim]
         self.frame_input_shape = mtf.Shape(frame_input_shape)
         self.input_pipeline_shape = {}
 
         self.sequence_dim = mtf.Dimension("sequence", self.time_patch_size)
+        self.token_patch_dim = mtf.Dimension("language_token_patch", self.token_patch_size)
         self.token_dim_shape = mtf.Shape([self.batch_dim,
                                           self.sequence_dim,
-                                          mtf.Dimension("language_token_patch", self.token_patch_size)])
+                                          self.token_patch_dim])
         self.frame_mask_shape = mtf.Shape([self.batch_dim, self.sequence_dim])
 
         if self.use_video:
@@ -300,6 +304,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
 
         self.attention_idx = 0
         self.cached_parameters = {}
+        self.debug_outfeed = {}
 
     def __getitem__(self, key: str) -> typing.Any:
         print(f"Getting {key} via deprecated interface")

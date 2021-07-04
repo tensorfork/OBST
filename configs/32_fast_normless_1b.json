@@ -1,0 +1,63 @@
+{
+    "scale_by_depth": false,
+    "block_config": [
+        {
+            "layer": [
+                "feed_forward-in_relu-in_group-out_group-in:relu-in:group-out:group"
+            ]
+        },
+        {
+            "layer": [
+                "attention-embedded-relative-in_relu-dot_product-in:relu"
+            ]
+        }
+    ],
+    "group_linear_factor": 16,
+    "intermediate_feed_forward_multiplier": 0.0625,
+    "n_blocks": 8,
+    "n_ctx": 128,
+    "n_embd_per_head": 256,
+    "n_head": 32,
+    "use_initial_position_embedding": false,
+    "shuffle_buffer": 0,
+    "buffer_size": 1,
+    "train_batch_size": 256,
+    "interleaved_datasets": 1024,
+    "data_seed": 2,
+    "dataset_configs": [
+        {
+            "path": "gs://obst-euw4a-aa/the-new-gpt2-bpe-pile/*",
+            "type": "text",
+            "weight": 1
+        }
+    ],
+    "vocab_size": 50304,
+    "model_mode": "gpt",
+    "use_language": true,
+    "batch_splits": 1,
+    "head_splits": 32,
+    "adaptive_gradient_clipping": false,
+    "gradient_clip": 1,
+    "learning_rate": 0.0002,
+    "opt_beta1": 0.9,
+    "opt_beta2": 0.999,
+    "optimizer": "adam",
+    "warmup_steps": 0,
+    "weight_decay": 0.001,
+    "weight_centralisation": false,
+    "weight_standardisation": false,
+    "learning_rate_decay_multi": 0.999999,
+    "learning_rate_decay_start_step": 5120,
+    "learning_rate_decay_min": 5e-06,
+    "macro_batching": 512,
+    "macro_batch_loss_smoothing": true,
+    "model_path": "gs://obst-euw4a-aa/runs/aa/activation/old_config-batch=256-mbatch=512-mtf-loss",
+    "steps_per_checkpoint": 2048,
+    "use_checkpointing": false,
+    "calculation_dtype": "bfloat16",
+    "storage_dtype": "bfloat16",
+    "optimizer_slice_dtype": "float32",
+    "slice_dtype": "float32",
+    "sampling_temperature": 0.75,
+    "use_autoregressive_sampling": true
+}

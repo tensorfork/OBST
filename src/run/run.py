@@ -10,15 +10,17 @@ from tensorflow.python.tpu import tpu
 from tensorflow.python.tpu.ops import tpu_ops
 from tensorflow.python.training import checkpoint_management
 
-from src.dataclass import ModelParameter
-from src.run.dataloader_placement import place_dataloader, infeed_from_session
-from src.run.inference import get_infrence_model
-from src.run.train import get_train_model
-from src.run.utils_run import CheckpointLoaderHook, add_summary, add_histogram, _import_tensor, analyze_model
-from src.utils_core import color_print
+from .dataloader_placement import place_dataloader, infeed_from_session
+from .inference import get_infrence_model
+from .train import get_train_model
+from .utils_run import CheckpointLoaderHook, add_summary, add_histogram, _import_tensor, analyze_model
+from ..dataclass import ModelParameter
+from ..mtf_wrapper import reduce_sum
+from ..utils_core import color_print
 
 tf1 = tf.compat.v1
 Dataset = tf1.data.Dataset
+
 
 def computation_func(params: ModelParameter, input_fn: typing.Callable,
                      session_config, cluster_resolver, callback_fns, query_input_fns=None):
@@ -30,17 +32,14 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
     tf.config.optimizer.set_experimental_options(params.tensorflow_optimization_settings)
 
     def _model_fn(*args):
+        manual_global_step = tf1.get_variable("manual_global_step", [], tf.int64, initializer=tf.zeros_initializer(),
+                                              trainable=False,
+                                              aggregation=variables.VariableAggregation.ONLY_FIRST_REPLICA)
         # Construct mtf graph + mesh from params
         graph = mtf.Graph()
 
         # Build mtf mesh object
         params.mesh = mtf.Mesh(graph, "mesh", mtf.utils.BalancedVariablePlacer(params.cpu_devices))
-
-        manual_global_step = mtf.get_variable(mesh=params.mesh,
-                                              name="manual_global_step",
-                                              shape=[], dtype=tf.int64,
-                                              initializer=tf.zeros_initializer(),
-                                              trainable=False)
 
         def _base_model_fn(*args):
 
@@ -93,13 +92,11 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 if not query_input_fns is None:
                     initial_pos_dim = mtf.Dimension("_initial_pos_dim", 1)
                     initial_pos = _import_tensor(params, args[2], mtf.Shape([initial_pos_dim]), "initial_pos")
-                    initial_pos = mtf.reduce_sum(initial_pos, output_shape=[])
+                    initial_pos = reduce_sum(initial_pos, output_shape=[])
                     sampling_temperature = _import_tensor(params, args[3], mtf.Shape([initial_pos_dim]), "temperature")
-                    sampling_temperature = mtf.reduce_sum(sampling_temperature, output_shape=[])
+                    sampling_temperature = reduce_sum(sampling_temperature, output_shape=[])
                     end_iterations = _import_tensor(params, args[4], mtf.Shape([initial_pos_dim]), "end_iterations")
-                    end_iterations = mtf.reduce_sum(end_iterations, output_shape=[])
-
-
+                    end_iterations = reduce_sum(end_iterations, output_shape=[])
 
             if params.train:
                 frame_out, token_out, learning_rate, loss, video_loss, \
@@ -125,7 +122,6 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                                   sampling_temperature,
                                                                   end_iterations)
 
-            print(id(graph))
             analyze_model(params, time_to_build=(time.time() - start_time), graph=graph)
             color_print(params, "Lowering graph to TensorFlow...")
             start_time = time.time()
@@ -146,8 +142,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 with tf.control_dependencies(comput_ops):
                     global_step = tf1.train.get_or_create_global_step()
 
-                    step = tf.math.mod(lowering.export_to_tf_tensor(manual_global_step),
-                                       tf.constant(params.grad_accumulation, dtype=tf.int64))
+                    step = tf.math.mod(manual_global_step + 1, tf.constant(params.grad_accumulation, dtype=tf.int64))
                     step = tf.equal(step, tf.constant(0, dtype=tf.int64))
                     step = tf.cast(step, tf.int64)
 
@@ -170,7 +165,8 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                         comput_ops.append(add_histogram(tf_loss=tf_loss, value=debug_gradients_dict,
                                                         global_step=global_step))
 
-                    comput_ops.extend([tf1.assign_add(global_step, step)])
+                    comput_ops.extend([tf1.assign_add(global_step, step),
+                                       tf1.assign_add(manual_global_step, tf.constant(1, dtype=tf.int64, shape=[]))])
 
                 hooks.append(mtf.MtfRestoreHook(lowering))
                 with mtf.utils.outside_all_rewrites():
@@ -207,6 +203,10 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 if params.use_language:
                     predictions['token_out'] = lowering.export_to_tf_tensor(token_out)
                     predictions['token_tgt'] = args[1 + int(params.use_video) * 5]
+
+
+                for key in params.debug_outfeed:
+                    predictions[key] = lowering.export_to_tf_tensor(params.debug_outfeed[key])
 
                 predictions = [val if val.dtype == tf.float32 else tf.cast(val, tf.float32) for val in
                                predictions.values()]

@@ -7,8 +7,9 @@ from .activation import activate
 from .backend import get_var, linear, orthogonal_var
 from .normalization import norm
 from ..dataclass import BlockArgs
-from ..mtf_wrapper import dropout as utils_dropout, sigmoid, exp, reduce_max, reduce_sum, einsum, reciprocal
-from ..utils_mtf import linear_shapes
+from ..mtf_wrapper import (dropout as utils_dropout, sigmoid, exp, reduce_max, reduce_sum, einsum, reciprocal, reshape,
+                           multiply, add)
+from ..utils_mtf import linear_shapes, anonymize_shape
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -45,21 +46,26 @@ def activated_linear(args: BlockArgs, prefix: str) -> mtf.Tensor:
     feed_forward_fn = mixture_of_experts if 'mixture_of_experts' in args else wrapped_linear
     out = dropout(args(activate(args(feed_forward_fn(args)))))
     if 'glu' in args or 'glu_add' in args:
-        out *= sigmoid(feed_forward_fn(args))
+        out = multiply(out, sigmoid(feed_forward_fn(args)))
     if 'glu_add' in args:
-        out += activate(args(feed_forward_fn(args)))
+        out = add(out, activate(args(feed_forward_fn(args))))
     if 'norm' in args:
         out = norm(args(out))
     return out
 
 
 def activated_linear_in(args: BlockArgs):
-    return activated_linear(args, 'in_')
+    return activated_linear(args, 'in:')
 
 
 def activated_linear_out(args: BlockArgs):
-    return activated_linear(args, 'out_')
+    return activated_linear(args, 'out:')
 
 
 def feed_forward(args: BlockArgs) -> mtf.Tensor:
     return activated_linear_out(args(activated_linear_in(args)))
+
+
+def group_linear(args: BlockArgs):
+    return reshape(linear(args('group'), args.params.feature_dims,
+                          anonymize_shape(args.params.feature_dims, args.params.key_dim)), args.tensor.shape)

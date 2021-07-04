@@ -40,8 +40,8 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    if args.run_mode not in ['train', 'sample', 'query', 'debug'] :
+    if args.run_mode not in ['train', 'sample', 'query', 'debug', 'debug_old']:
         raise ValueError(f"'{args.run_mode}' is not a supported argument for"
-                         f" --train, please use 'train', 'sample' , 'query' or 'debug'.")
+                         f" --train, please use 'train', 'sample' , 'query' 'debug' or 'debug_old'.")
 
     main(args)

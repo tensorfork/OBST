@@ -7,8 +7,8 @@ import tensorflow as tf
 
 from .backend import normal_var, orthogonal_var
 from ..dataclass import BlockArgs, ModelParameter
-from ..mtf_wrapper import einsum, scoped
-from ..utils_core import random_name
+from ..mtf_wrapper import einsum, reshape, multiply
+from ..utils_core import random_name, scoped
 from ..utils_mtf import DIM_LIST, SHAPE, linear_shapes, shape_size
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
@@ -110,12 +110,12 @@ def _embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
             _new_part(final)
             for i in range(1, splits):
                 _new_part(base)
-        out = mtf.reshape(einsum(variables, output_shape=tmp_dims + feature_dims), shape)
+        out = reshape(einsum(variables, output_shape=tmp_dims + feature_dims), shape)
 
     elif 'relative' in args:
         out = RelativeEmbeddingForward(args, shape).outputs[0]
         if 'learned' in args:
-            out *= _embed_var(args, feature_dims)
+            out = multiply(out, _embed_var(args, feature_dims))
     else:
         raise ValueError("The following embeddings are supported:"
                          " relative(-learned) or absolute(-split) or axial(-split) are supported")

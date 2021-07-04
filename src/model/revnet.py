@@ -5,6 +5,7 @@ import tensorflow as tf
 
 from .frontend import block_part_fn
 from ..utils_core import random_name
+from ..mtf_wrapper import add
 
 tf1 = tf.compat.v1
 
@@ -18,7 +19,7 @@ class RevGradOp(mtf.Operation):
     def __init__(self, params, block_config, x1, x1_backwards, x2, x2_backwards, index):
         graph: mtf.Graph = x1.graph
         prev_ops = len(graph.operations)
-        y1 = x1 + block_part_fn(params, block_config, x2, index)
+        y1 = add(x1, block_part_fn(params, block_config, x2, index))
         fn_outputs = [x2, x2_backwards, y1, x1_backwards]
         forward_operations = graph.operations[prev_ops:]
         new_outputs = set()
@@ -73,10 +74,10 @@ class RevGradOp(mtf.Operation):
                             if inp not in downstream or grad is None:
                                 continue
                             if inp in tensor_to_gradient:
-                                tensor_to_gradient[inp] += grad
+                                tensor_to_gradient[inp] = add(tensor_to_gradient[inp], grad)
                             else:
                                 tensor_to_gradient[inp] = grad
-            yield dy2 + tensor_to_gradient[x2]
+            yield add(dy2, tensor_to_gradient[x2])
             yield x2
             yield from (tensor_to_gradient.get(x) for x in self._variables)
             return
@@ -105,7 +106,7 @@ class RevGradOp(mtf.Operation):
                         grad_list = tensor_to_gradient[inp]
                         grad_list[1] += 1
                         with tf1.variable_scope(op.name + "/revnet/gradients"):
-                            grad_list[2] += grad
+                            grad_list[2] = add(grad_list[2], grad)
                     else:
                         tensor_to_gradient[inp] = grad_list = [0, 1, grad]
                     if len(inp.operation.outputs) != grad_list[1]:
@@ -113,4 +114,4 @@ class RevGradOp(mtf.Operation):
                     if inp not in self._variables:
                         continue
                     yield params[4 + self._variables.index(inp)], grad_list[2]
-        yield params[2], dy2 + tensor_to_gradient[x2][2]
+        yield params[2], add(dy2, tensor_to_gradient[x2][2])
