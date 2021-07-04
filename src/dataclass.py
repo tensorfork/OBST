@@ -164,6 +164,10 @@ class ModelParameter(typing.Dict[str, typing.Any]):
                 print(f"WARNING: Unknown ModelParameter {k}={v!r}")
             self.__dict__[k] = v
 
+        if self.grad_accumulation > 1:
+            raise ValueError("Gradient accumulation is not supported right now. The optimizer was split into two "
+                             "different 'sections' where the 'accumulation' section still has to be integrated")
+
         if isinstance(self.position_embedding, str):
             self.position_embedding = self.position_embedding.split('-')
             self.token_embedding = self.token_embedding.split('-')

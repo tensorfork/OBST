@@ -445,6 +445,6 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                     full_name = f'{tf.get_variable_scope().name}/f"{ctx.var.name}/{params.optimizer}/grad_accumulation'
                     if fn == "accumulate" or full_name in params.mesh.graph.name_to_variable:
                         ctx.grad_buffer = variable(params, ctx.var, "grad_accumulation", ctx.var.shape)
-                    scoped(fn, gradient_accumulation if "accumulate" else update, ctx)
+                    scoped(fn, gradient_accumulation if fn == "accumulate" else update, ctx)
     return params.mesh.graph.trainable_variables[0].graph.combine_assignments(update_ops), \
            tf_learning_rate, debug_gradients_dict
