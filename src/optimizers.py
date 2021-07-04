@@ -51,7 +51,7 @@ def update(op: mtf.Operation, grad_outputs: typing.List[mtf.Tensor], downstream:
         if inp in tensor_to_gradient:
             grad_list = tensor_to_gradient[inp]
             grad_list[1] += 1
-            grad_list[2] = add(loss_list[2], grad)
+            grad_list[2] = add(grad_list[2], grad)
         else:
             tensor_to_gradient[inp] = grad_list = [0, 1, grad]
 
