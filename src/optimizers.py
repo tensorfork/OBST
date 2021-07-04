@@ -14,7 +14,7 @@ from .dataclass import ModelParameter
 from .mtf_wrapper import (add_n, cast, constant_float, constant_scalar, einsum, equal, greater, greater_equal, minimum,
                           mod, reduce_max, reduce_mean, reduce_sum, rsqrt, sqrt, square, assign, assign_sub,
                           one_hot as mtf_one_hot, logical_and, add, multiply, identity, import_fully_replicated,
-                          reshape, scoped)
+                          reshape, scoped, reciprocal, constant, negative)
 from .utils_mtf import SHAPE, feature_dims_used, to_fp32, weighted_add, get_variable
 
 tf = tf2.compat.v1
@@ -50,7 +50,7 @@ def update(op: mtf.Operation, grad_outputs: typing.List[mtf.Tensor], downstream:
         if inp in tensor_to_gradient:
             grad_list = tensor_to_gradient[inp]
             grad_list[1] += 1
-            grad_list[2] += grad
+            grad_list[2] = add(loss_list[2], grad)
         else:
             tensor_to_gradient[inp] = grad_list = [0, 1, grad]
 
@@ -113,7 +113,8 @@ def update(op: mtf.Operation, grad_outputs: typing.List[mtf.Tensor], downstream:
             grad_buffer = variable(params, var, "grad_accumulation", var.shape)
             next_grad = grad + identity(grad_buffer)
             update_ops.append(assign(grad_buffer, next_grad * mstep))
-            grad = next_grad * step / params.grad_accumulation
+            grad = einsum([next_grad, step, constant(params, 1 / params.grad_accumulation)],
+                          output_shape=next_grad.shape)
 
         features_used = feature_dims_used(params, var)
         if features_used and var.shape.dims.index(params.key_dim) == var.shape.ndims - 1:
@@ -123,12 +124,13 @@ def update(op: mtf.Operation, grad_outputs: typing.List[mtf.Tensor], downstream:
         else:
             fan_in = var.shape.dims[:1]
         if params.gradient_clip > 0 and params.adaptive_gradient_clipping:
-            grd_norm = sqrt(einsum([grad, grad], reduced_dims=fan_in) + 1e-5)
-            wgt_norm = sqrt(einsum([var.value, var.value], reduced_dims=fan_in) + 1e-3)
-            grad = weighted_add(grd_norm / wgt_norm * params.gradient_clip * grad, grad,
-                                cast(greater(wgt_norm / grd_norm, params.gradient_clip), dtype))
+            grd_norm = sqrt(add(einsum([grad, grad], reduced_dims=fan_in), 1e-5))
+            wgt_norm = sqrt(add(einsum([var.value, var.value], reduced_dims=fan_in), 1e-3))
+            grad = weighted_add(einsum([grd_norm, reciprocal(wgt_norm), constant(params, params.gradient_clip), grad],
+                                       output_shape=grad.shape),
+                                grad, cast(greater(wgt_norm / grd_norm, params.gradient_clip), dtype))
         elif params.gradient_clip > 0:
-            grad = einsum([minimum(rsqrt(einsum([grad, grad], []) + 1e-6), 1 / params.gradient_clip),
+            grad = einsum([minimum(rsqrt(add(einsum([grad, grad], []), 1e-6)), 1 / params.gradient_clip),
                            grad, constant_scalar(params, params.gradient_clip)], grad.shape)
         if var.shape.ndims <= 1 or params.optimizer == 'adam':
             exp_avg_p2_ptr = variable(params, var, 'exp_avg_p2', var.shape)
@@ -138,8 +140,7 @@ def update(op: mtf.Operation, grad_outputs: typing.List[mtf.Tensor], downstream:
                 exp_avg_p1_ptr = variable(params, var, 'exp_avg_p1', var.shape)
                 grad = weighted_add(exp_avg_p1_ptr, grad, beta1)
                 update_ops.append(assign(exp_avg_p1_ptr, grad))
-            weight_update = grad * rsqrt(exp_avg_p2 + epsilon)
-
+            weight_update = multiply(grad, rsqrt(add(exp_avg_p2, epsilon)))
 
         elif params.optimizer == 'sgd':
             weight_update = grad
@@ -149,9 +150,9 @@ def update(op: mtf.Operation, grad_outputs: typing.List[mtf.Tensor], downstream:
             exp_avg_p2 = exp_avg_p2_ptr = variable(params, var, "exp_avg_p2", [])
 
             exp_avg_p2 = weighted_add(exp_avg_p2, reduce_sum(square(grad)), beta2)
-            weight_update = beta1 * exp_avg_p1 + grad * rsqrt(exp_avg_p2 + epsilon)
-            update_ops.extend([assign(exp_avg_p1_ptr, beta1 * exp_avg_p1_ptr +
-                                      grad * rsqrt(exp_avg_p2 + epsilon)),
+            weight_update = add(multiply(beta1, exp_avg_p1), multiply(grad, rsqrt(exp_avg_p2 + epsilon)))
+            update_ops.extend([assign(exp_avg_p1_ptr, add(multiply(beta1, exp_avg_p1_ptr),
+                                                          multiply(grad, rsqrt(exp_avg_p2 + epsilon)))),
                                assign(exp_avg_p2_ptr, exp_avg_p2)])
 
         elif params.optimizer == 'sm3':
@@ -168,30 +169,33 @@ def update(op: mtf.Operation, grad_outputs: typing.List[mtf.Tensor], downstream:
             update_ops.extend([assign(buf_ptr, reduce_max(update, output_shape=[dim]))
                                for buf_ptr, dim in zip(buffer, update.shape.dims)])
 
-        weight_update *= learning_rate
+        weight_update = multiply(weight_update, learning_rate)
 
         large_tensor = features_used and len(var.shape.dims) > len(params.feature_dims)
         large_tensor |= not features_used and len(var.shape.dims) >= 2  # not norm or rezero + scalable catch-all
         large_tensor &= var.shape.size > 1  # not rezero
         large_tensor &= "embed" not in var.name  # not input/output embedding, position embedding, attention map bias
+        large_tensor &= "input" not in var.name or "lang_in" in var.name or "vid_in" in var.name  # not input
+        large_tensor &= "output" not in var.name or "lang_out" in var.name or "vid_out" in var.name  # not output
 
         if 'rezero' in var.name:
-            weight_update *= params.rezero_lr_multiplier
+            weight_update = multiply(weight_update, params.rezero_lr_multiplier)
         if large_tensor and params.weight_decay > 0:
-            weight_update += params.weight_decay * var.value * learning_rate
+            weight_update = add(var.value,
+                                einsum([constant(params, params.weight_decay), var.value, learning_rate], var.shape))
         if large_tensor and params.weight_centralisation:
-            weight_update += reduce_mean(var.value)
+            weight_update = add(weight_update, reduce_mean(var.value))
         if params.grad_accumulation > 1:
-            weight_update *= step
+            weight_update = multiply(weight_update, step)
         if large_tensor and params.weight_standardisation:
-            val: mtf.Tensor = var.value - weight_update
-            std = rsqrt(1e-6 + reduce_sum(square(val / (val.size ** 0.5)), output_shape=[]))
+            val: mtf.Tensor = add(var.value, negative(weight_update))
+            std = rsqrt(add(1e-6, einsum([val, val, constant(params, val.size ** -0.5)], output_shape=[])))
             shape = [d.size for d in var.shape.dims]
             fan_in_size = np.prod([d.size for d in fan_in])
             size = np.prod(shape)
-            # ((1 - 1 / max_fan) / size ** 2 + 1 / max_fan - 2 / size + 1 / min_fan / size) ** 0.5
-            std *= ((fan_in_size - 2) / size / params.n_blocks) ** 0.5  # 0.01% error
-            update_ops.append(assign(var, val * std))
+            val = einsum([constant(params, ((fan_in_size - 2) / size / params.n_blocks) ** 0.5),
+                          val, std], output_shape=var.shape)
+            update_ops.append(assign(var, val))
         else:
             update_ops.append(assign_sub(var, weight_update))
 
