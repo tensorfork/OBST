@@ -40,7 +40,7 @@ def attention(args: BlockArgs):
             key = add(key, embed(args, [dim] + args.params.feature_dims))
         qry = activated_linear_out(base)
         qry = multiply(qry, dim.size ** -0.5)
-        logit_shape = shape - (mtf.Shape(linear_shapes(args).old) - [args.params.head_dim]) + anonymize_dim(dim)
+        logit_shape = shape - (mtf.Shape(linear_shapes(args).old) - [args.params.head_dim]) + tmp
         logit = einsum([qry, anonymize(key, dim)], output_shape=logit_shape)
         if "shared_key_value" in args:
             val = key

@@ -159,7 +159,7 @@ def _gelu(params, tensor: mtf.Tensor):
     return einsum([tensor, add(_tanh(multiply(add(einsum([tensor, tensor, tensor, constant(params, 0.044715)],
                                                          output_shape=tensor.shape), tensor), np.sqrt(2 / np.pi))),
                                1.0),
-                   constant(params, 0.5)], output_shape=[])
+                   constant(params, 0.5)], output_shape=tensor.shape)
 
 
 def gelu(args: BlockArgs):
