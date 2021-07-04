@@ -129,7 +129,6 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             color_print(params, f"Lowered in {time.time() - start_time:.1f}s")
 
             if params.train:
-                log_dict = {}
                 if params.use_video:
                     log_dict['video_loss'] = tf.cast(lowering.export_to_tf_tensor(video_loss), tf.float32)
                 if params.use_language:
