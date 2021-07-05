@@ -1,10 +1,11 @@
 import typing
 
 import tensorflow as tf
+from .utils_core import scoped as general_scoped
 
 
 def scoped(name: str, fn: typing.Callable, *args, **kwargs):
-    return scoped(f"tf_{name}", fn, *args, **kwargs)
+    return general_scoped(f"tf_{name}", fn, *args, **kwargs)
 
 
 def softplus(tensor: tf.Tensor) -> tf.Tensor:
