@@ -1,6 +1,7 @@
 import typing
 
 import tensorflow as tf
+
 from .utils_core import scoped as general_scoped
 
 
@@ -26,6 +27,18 @@ def add(x1: tf.Tensor, x2: tf.Tensor) -> tf.Tensor:
 
 def subtract(x1: tf.Tensor, x2: tf.Tensor) -> tf.Tensor:
     return scoped("subtract", lambda x, y: x - y, x1, x2)
+
+
+def pow(x1: tf.Tensor, x2: tf.Tensor) -> tf.Tensor:
+    return scoped("pow", lambda x, y: x ** y, x1, x2)
+
+
+def maximum(x1: tf.Tensor, x2: tf.Tensor) -> tf.Tensor:
+    return scoped("maximum", tf.maximum, x1, x2)
+
+
+def minimum(x1: tf.Tensor, x2: tf.Tensor) -> tf.Tensor:
+    return scoped("minimum", tf.minimum, x1, x2)
 
 
 def tanh(tensor: tf.Tensor) -> tf.Tensor:

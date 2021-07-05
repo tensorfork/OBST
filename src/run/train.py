@@ -1,6 +1,6 @@
 from ..dataclass import ModelParameter
 from ..model import build
-from ..optimizers import get_optimizer
+from ..optimizer import get_optimizer
 
 
 def get_train_model(params: ModelParameter):

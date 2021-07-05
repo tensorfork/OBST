@@ -19,6 +19,13 @@ class BlockConfig:
         self.__dict__.update(config)
 
 
+class LearningRateConfig:
+    def __init__(self, start_step: int = 0, final_step: int = 0, factor: float = 1.):
+        self.start_step = start_step
+        self.final_step = final_step
+        self.factor = factor
+
+
 class ModelParameter(typing.Dict[str, typing.Any]):
     def __init__(self, config: typing.Dict[str, typing.Any]):
         super().__init__()
@@ -69,6 +76,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.slice_dtype = "float32"
         self.calculation_dtype = "float32"
         self.optimizer_slice_dtype = "float32"
+        self.learning_rate_config = {}
         self.train_batch_size = 1
         self.grad_accumulation = 1
         self.macro_batching = 1
@@ -178,6 +186,9 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             self.storage_dtype = getattr(tf, self.storage_dtype)
             self.calculation_dtype = getattr(tf, self.calculation_dtype)
             self.optimizer_slice_dtype = getattr(tf, self.optimizer_slice_dtype)
+
+            self.learning_rate_config = {key: LearningRateConfig(**config) for key, config in
+                                         self.learning_rate_config.items()}
 
         self.multi_loss_strategy = self.multi_loss_strategy.lower()
         if self.multi_loss_strategy not in ["linear", "pcgrad", "mgda"]:
