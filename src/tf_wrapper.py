@@ -63,7 +63,7 @@ def reshape(tensor: tf.Tensor, new_shape: typing.List[int]):
     return scoped("reshape", tf.reshape, tensor, new_shape)
 
 
-def range(start: int, end: int, step: int):
+def tf_range(start: int, end: int, step: int):
     return scoped("range", tf.range, start, end, step)
 
 
