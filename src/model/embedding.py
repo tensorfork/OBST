@@ -1,28 +1,23 @@
 import math
-import typing
 
 import mesh_tensorflow as mtf
 import numpy as np
-import tensorflow as tf
 
 from .backend import normal_var, orthogonal_var
+from .. import tf_wrapper as tfw
 from ..dataclass import BlockArgs, ModelParameter
 from ..mtf_wrapper import einsum, reshape, multiply
 from ..utils_core import random_name, scoped
 from ..utils_mtf import DIM_LIST, SHAPE, linear_shapes, shape_size
 
-ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
-
-tf1 = tf.compat.v1
-
 
 def _multi_dim_range_tf(params: ModelParameter, dims: DIM_LIST) -> mtf.Tensor:
-    out, *items = [tf.reshape(tf.range(0, dim.size * size, size),
-                              [1] * idx + [dim.size] + [1] * (len(dims) - idx - 1))
+    out, *items = [tfw.reshape(tfw.range(0, dim.size * size, size),
+                               [1] * idx + [dim.size] + [1] * (len(dims) - idx - 1))
                    for idx, (dim, size) in enumerate(zip(dims, np.cumprod([1] + [d.size for d in dims[:-1]])))]
     for i in items:
-        out += i
-    return tf.cast(out, params.variable_dtype.activation_dtype)
+        out = tfw.add(out, i)
+    return tfw.cast(out, params.variable_dtype.activation_dtype)
 
 
 class RelativeEmbeddingForward(mtf.Operation):
@@ -59,16 +54,16 @@ class RelativeEmbeddingForward(mtf.Operation):
         feature_count = shape_size(feature_dims)
 
         if cosine:
-            additive = tf.math.mod(features, 2)
-            features = (features - additive) / 2
-            additive *= math.pi
+            additive = tfw.mod(features, 2)
+            features = tfw.divide(tfw.subtract(features, additive), 2)
+            additive = tfw.multiply(additive, math.pi)
             feature_count /= 2
 
-        features *= 4 / feature_count
-        features -= math.log(position_count / 2 / math.pi) + 2
-        features = tf.exp(features) + additive
-        out = tf.einsum(f'{position_formula},{feature_formula}->{shape_formula}', positions, features)
-        out = tf.math.sin(out) * params.embedding_stddev
+        features = tfw.multiply(features, 4 / feature_count)
+        features = tfw.subtract(features, math.log(position_count / 2 / math.pi))
+        features = tfw.add(tfw.exp(features), additive)
+        out = tfw.einsum(f'{position_formula},{feature_formula}->{shape_formula}', positions, features)
+        out = multiply(tfw.sin(out), params.embedding_stddev)
         lowering.set_tensor_lowering(self.outputs[0], mesh_impl.import_tf_tensor(self.outputs[0], out))
 
 

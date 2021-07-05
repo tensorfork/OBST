@@ -1,12 +1,12 @@
 
-numpy==1.19.2
-mesh-tensorflow==0.1.19
-tensorflow==2.5.0
-tokenizers==0.10.3
-transformers==3.5.1
+numpy
+mesh-tensorflow
+tensorflow==2.4.2
+tokenizers
+transformers
 
 tpunicorn
-google-auth==1.21.1
+google-auth
 google-api-python-client
 
 absl-py
@@ -16,7 +16,7 @@ lm_dataformat
 ortools
 pytest
 sacred
-attrs>=18.1.0
+attrs
 
 opencv-python
 Pillow
