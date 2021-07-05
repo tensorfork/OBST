@@ -38,7 +38,7 @@ class MishBackward(mtf.Operation):
 
         def slicewise_fn(x, dy):
             gte = tfw.tanh(tfw.softplus(x))
-            gte = tfw.add(gte, tfw.subtract(1, tfw.multiply(tfw.multiply(tfw.square(gte), x), tfw.sigmoid(x))))
+            gte = tfw.add(gte, tfw.subtract(1., tfw.multiply(tfw.multiply(tfw.square(gte), x), tfw.sigmoid(x))))
             return tfw.multiply(dy, gte)
 
         y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]], lowering.tensors[self.inputs[1]])
@@ -73,7 +73,7 @@ class SiluBackward(mtf.Operation):
 
         def slicewise_fn(x, dy):
             gte = tfw.sigmoid(x)
-            return tfw.multiply(dy, tfw.add(tfw.multiply(x, gte), tfw.subtract(1, gte)))
+            return tfw.multiply(dy, tfw.add(tfw.multiply(x, gte), tfw.subtract(1., gte)))
 
         y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]], lowering.tensors[self.inputs[1]])
         lowering.set_tensor_lowering(self.outputs[0], y)
@@ -124,7 +124,7 @@ class SoftsignForward(mtf.Operation):
         mesh_impl = lowering.mesh_impl(self)
 
         def slicewise_fn(x):
-            return tfw.divide(x, tfw.add(1, tfw.abs(x)))
+            return tfw.divide(x, tfw.add(1., tfw.abs(x)))
 
         y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]])
         lowering.set_tensor_lowering(self.outputs[0], y)
@@ -139,7 +139,7 @@ class SoftsignBackward(mtf.Operation):
         mesh_impl = lowering.mesh_impl(self)
 
         def slicewise_fn(x, dy):
-            return tfw.divide(dy, tfw.square(tfw.add(1, tfw.abs(x))))
+            return tfw.divide(dy, tfw.square(tfw.add(1., tfw.abs(x))))
 
         y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]], lowering.tensors[self.inputs[1]])
         lowering.set_tensor_lowering(self.outputs[0], y)

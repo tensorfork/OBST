@@ -13,27 +13,27 @@ def softplus(tensor: tf.Tensor) -> tf.Tensor:
 
 
 def divide(x1: tf.Tensor, x2: tf.Tensor) -> tf.Tensor:
-    return scoped("divide", tf.math.divide, x1, x2)
+    return scoped("divide", lambda x, y: x / y, x1, x2)
 
 
 def multiply(x1: tf.Tensor, x2: tf.Tensor) -> tf.Tensor:
-    return scoped("multiply", tf.math.multiply, x1, x2)
+    return scoped("multiply", lambda x, y: x * y, x1, x2)
 
 
 def add(x1: tf.Tensor, x2: tf.Tensor) -> tf.Tensor:
-    return scoped("add", tf.math.add, x1, x2)
+    return scoped("add", lambda x, y: x + y, x1, x2)
 
 
 def subtract(x1: tf.Tensor, x2: tf.Tensor) -> tf.Tensor:
-    return scoped("subtract", tf.math.subtract, x1, x2)
+    return scoped("subtract", lambda x, y: x - y, x1, x2)
 
 
 def tanh(tensor: tf.Tensor) -> tf.Tensor:
-    return scoped("divide", tf.math.tanh, tensor)
+    return scoped("tanh", tf.math.tanh, tensor)
 
 
 def square(tensor: tf.Tensor) -> tf.Tensor:
-    return scoped("divide", tf.math.square, tensor)
+    return scoped("square", tf.math.square, tensor)
 
 
 def sigmoid(tensor: tf.Tensor) -> tf.Tensor:
@@ -57,7 +57,7 @@ def einsum(equation: str, *inputs: tf.Tensor) -> tf.Tensor:
 
 
 def mod(tensor: tf.Tensor, modulo: int) -> tf.Tensor:
-    return scoped("mod", tf.math.mod, tensor, modulo)
+    return scoped("mod", lambda x, y: (x % y), tensor, modulo)
 
 
 def reshape(tensor: tf.Tensor, new_shape: typing.List[int]):
