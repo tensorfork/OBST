@@ -226,8 +226,22 @@ def get_command_line_input_and_output_fn(params: ModelParameter):
 class InterfaceWrapper:
     def __init__(self, params: ModelParameter):
         self.params = params
-        self.input_queue = multiprocessing.Queue()
-        self.output_queue = multiprocessing.Queue()
+        self.manager = multiprocessing.Manager()
+        self.input_prompt_id = self.manager.Value(int, 0)
+        self.tpu_input_id = self.manager.Value(int, 0)
+        self.output_prompt_id = self.manager.Value(int, 0)
+        self.input = self.manager.dict()
+        self.output = self.manager.dict()
+
+    def blocked_get(self, inp: dict, key: int):
+        while key not in inp:
+            time.sleep(self.params.default_sleep_duration)
+        return inp.pop(key)
+
+    def increment(self, idx) -> int:
+        prompt_id = idx.get()
+        idx.set(prompt_id + 1)
+        return prompt_id
 
     def complete(self, query: typing.List[int], temperature: float, response_len: int, debug: bool = False,
                  asynchronous: bool = False) -> typing.Union[typing.Callable, typing.Tuple[np.array, np.array],
@@ -237,24 +251,26 @@ class InterfaceWrapper:
         if iter_pos >= self.params.n_ctx or max(query) >= self.params.vocab_size:
             return None
 
+        prompt_id = self.increment(self.input_prompt_id)
+
         query = query + [random.randint(0, self.params.vocab_size - 1) for _ in range((self.params.n_ctx - len(query)))]
         query = np.reshape(np.array(query, np.int32), newshape=(1, self.params.n_ctx, 1))
 
-        response_len = np.array([min(response_len + len(query), self.params.n_ctx)], np.int32)
-        self.input_queue.put((query, np.array([iter_pos], np.int32), np.array([temperature], np.float32), response_len))
+        self.input[prompt_id] = (query, np.array([iter_pos], np.int32), np.array([temperature], np.float32),
+                                 np.array([min(response_len + len(query), self.params.n_ctx)], np.int32))
 
         def _result():
-            response = self.output_queue.get()
+            response = self.blocked_get(self.output, prompt_id)
             out = response[0][:, iter_pos:]
             return (out, response) if debug else out
 
         return _result if asynchronous else _result()
 
     def input_query(self):
-        return self.input_queue.get()
+        return self.blocked_get(self.input, self.increment(self.tpu_input_id))
 
     def output_responds(self, out):
-        self.output_queue.put(out)
+        self.output[self.increment(self.output_prompt_id)] = out
 
 
 def get_similarity_input_and_output_fn(params: ModelParameter):

@@ -86,6 +86,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.momentumnet_alpha = 0.99
         self.current_step = 0
         self.batch_splits = 1
+        self.default_sleep_duration = 0.1
         self.head_splits = 32.
         self.prefix = "datasets/full_hd_video"
         self.model_path = "gs://text-datasets/video-transformer/ctx=32-layer=64-heads=8-feat=256"
