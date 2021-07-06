@@ -5,7 +5,7 @@ from ..dataclass import ModelParameter
 from ..model import build
 from ..mtf_wrapper import (constant_scalar, log, argmax, reshape, one_hot, equal, less_equal, mtf_range, greater,
                            reduce_sum, cast, shift, ones, zeros, constant, random_uniform, greater_equal, logical_not,
-                           anonymize)
+                           anonymize, add, negative, multiply)
 from ..utils_mtf import concat, pad, utils_slice, to_fp32, weighted_add
 
 tf1 = tf.compat.v1
@@ -59,7 +59,7 @@ def autoregressive_model(params: ModelParameter,
 
                 token_x_input = cast(token_x_input, dtype=tf.int32)
 
-            return position + 1, token_x_input, token_y_input, frame_input, frame_mask_src, \
+            return add(position, 1), token_x_input, token_y_input, frame_input, frame_mask_src, \
                    frame_mask_tag, token_mask
 
         if token_mask is not None:
@@ -86,25 +86,26 @@ def autoregressive_model(params: ModelParameter,
                                                 ones(params.mesh, [], tf.float32))
 
             one_hot_mask = one_hot(position, output_dim=params.sequence_dim, dtype=tf.int32)
-            token_out = cast(token_out, dtype=tf.float32)
-
-            token_out += (log(-log(random_uniform(params, token_out.shape, maxval=1, minval=1e-9, dtype=tf.float32)))
-                          * (-sampling_temperature))
+            token_out = add(cast(token_out, dtype=tf.float32),
+                            multiply(log(negative(log(random_uniform(params, token_out.shape,
+                                                                     maxval=1, minval=1e-9, dtype=tf.float32)))),
+                                     negative(sampling_temperature)))
             token_out = argmax(token_out, params.vocab_dim)
 
             token_out = shift(token_out, offset=1, dim=params.sequence_dim, wrap=False)
 
-            return (position + 1, weighted_add(token_out, token_x, one_hot_mask),
+            return (add(position, 1), weighted_add(token_out, token_x, one_hot_mask),
                     token_y, cast(sampling_temperature, dtype=tf.float32))
 
         if initial_pos is None:
             initial_pos = constant(params, value=params.initial_autoregressive_position, dtype=tf.int32)
 
         if params.debug_sample:
-            token_initial_pos_mask = less_equal(mtf_range(params.mesh, params.sequence_dim, dtype=tf.int32), initial_pos)
+            token_initial_pos_mask = less_equal(mtf_range(params.mesh, params.sequence_dim, dtype=tf.int32),
+                                                initial_pos)
             token_initial_pos_mask = cast(token_initial_pos_mask, tf.int32)
             token_x_input_a = utils_slice(token_x_input, 0, 1, dim=params.batch_dim)
-            token_x_input_b = token_x_input_a * token_initial_pos_mask
+            token_x_input_b = multiply(token_x_input_a, token_initial_pos_mask)
             token_x_input = concat([token_x_input_a, token_x_input_b], dim=token_x_input_a.shape[0])
 
         if sampling_temperature is None:

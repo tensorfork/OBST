@@ -6,6 +6,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.python.data.experimental.ops.distribute_options import AutoShardPolicy
 from tensorflow.python.framework import ops
+from .. import tf_wrapper as tfw
 from tensorflow.python.tpu import tpu, tpu_feed
 
 from ..dataclass import ModelParameter
@@ -204,7 +205,7 @@ def place_dataloader(params: ModelParameter, input_fn):
                     else:
                         s_shape = params.mesh_impl.slice_shape(mtf_input_shape)
                         s_shape[0] = s_shape[0] * macro_batching_multi
-                        input_slice = tf.slice(input_tensor, s_begin, s_shape)
+                        input_slice = tfw.slice(input_tensor, s_begin, s_shape)
 
                     all_laidout_tensors[pnum][input_i] = input_slice
 

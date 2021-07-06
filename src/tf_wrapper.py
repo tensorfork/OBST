@@ -1,8 +1,11 @@
 import typing
 
+import tensorflow
 import tensorflow as tf
 
 from .utils_core import scoped as general_scoped
+
+tf1 = tf.compat.v1
 
 
 def scoped(name: str, fn: typing.Callable, *args, **kwargs):
@@ -37,8 +40,60 @@ def maximum(x1: tf.Tensor, x2: tf.Tensor) -> tf.Tensor:
     return scoped("maximum", tf.maximum, x1, x2)
 
 
+def equal(x1: tf.Tensor, x2: tf.Tensor) -> tf.Tensor:
+    return scoped("equal", tf.equal, x1, x2)
+
+
+def greater(x1: tf.Tensor, x2: tf.Tensor) -> tf.Tensor:
+    return scoped("greater", tf.greater, x1, x2)
+
+
+def less(x1: tf.Tensor, x2: tf.Tensor) -> tf.Tensor:
+    return scoped("less", tf.less, x1, x2)
+
+
+def less_equal(x1: tf.Tensor, x2: tf.Tensor) -> tf.Tensor:
+    return scoped("less_equal", tf.less_equal, x1, x2)
+
+
+def greater_equal(x1: tf.Tensor, x2: tf.Tensor) -> tf.Tensor:
+    return scoped("greater_equal", tf.greater_equal, x1, x2)
+
+
 def minimum(x1: tf.Tensor, x2: tf.Tensor) -> tf.Tensor:
     return scoped("minimum", tf.minimum, x1, x2)
+
+
+def assign(var: tf.Tensor, val: tf.Tensor) -> tf.Tensor:
+    return scoped("minimum", tf1.assign, var, val)
+
+
+def assign_add(var: tf.Tensor, val: tf.Tensor) -> tf.Tensor:
+    return scoped("assign_add", tf1.assign_add, var, val)
+
+
+def assign_sub(var: tf.Tensor, val: tf.Tensor) -> tf.Tensor:
+    return scoped("assign_sub", tf1.assign_sub, var, val)
+
+
+def group(ops: list):
+    return scoped("group", tf.group, ops)
+
+
+def identity(tensor: tf.Tensor):
+    return scoped("identity", tf.identity, tensor)
+
+
+def control_dependencies(ops: list):
+    return scoped("control_dependencies", tf.control_dependencies, ops)
+
+
+def slice(tensor: tf.Tensor, start: int, end: int) -> tf.Tensor:
+    return scoped("slice", tf.slice, tensor, start, end)
+
+
+def constant(value: float, dtype: tensorflow.DType):
+    return scoped("constant", tf.constant, value, dtype, [])
 
 
 def tanh(tensor: tf.Tensor) -> tf.Tensor:

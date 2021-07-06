@@ -14,6 +14,7 @@ from .dataloader_placement import place_dataloader, infeed_from_session
 from .inference import get_infrence_model
 from .train import get_train_model
 from .utils_run import CheckpointLoaderHook, add_summary, add_histogram, _import_tensor, analyze_model
+from .. import tf_wrapper as tfw
 from ..dataclass import ModelParameter
 from ..mtf_wrapper import reduce_sum
 from ..utils_core import color_print
@@ -129,30 +130,32 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             color_print(params, f"Lowered in {time.time() - start_time:.1f}s")
 
             if params.train:
-                log_dict = {'learning_rate': tf.cast(learning_rate, tf.float32)}
+                log_dict = {'learning_rate': tfw.cast(learning_rate, tf.float32)}
                 if params.use_video:
-                    log_dict['video_loss'] = tf.cast(lowering.export_to_tf_tensor(video_loss), tf.float32)
+                    log_dict['video_loss'] = tfw.cast(lowering.export_to_tf_tensor(video_loss), tf.float32)
                 if params.use_language:
-                    log_dict['token_loss'] = tf.cast(lowering.export_to_tf_tensor(token_loss), tf.float32)
+                    log_dict['token_loss'] = tfw.cast(lowering.export_to_tf_tensor(token_loss), tf.float32)
                 if accuracy is not None:
-                    log_dict['accuracy'] = tf.cast(lowering.export_to_tf_tensor(accuracy), tf.float32)
+                    log_dict['accuracy'] = tfw.cast(lowering.export_to_tf_tensor(accuracy), tf.float32)
 
                 comput_ops = [lowering.lowered_operation(op) for op in update_ops]
 
                 with tf.control_dependencies(comput_ops):
                     global_step = tf1.train.get_or_create_global_step()
 
-                    step = tf.math.mod(manual_global_step + 1, tf.constant(params.grad_accumulation, dtype=tf.int64))
-                    step = tf.equal(step, tf.constant(0, dtype=tf.int64))
-                    step = tf.cast(step, tf.int64)
+                    step = tfw.mod(tfw.add(manual_global_step, 1),
+                                   tfw.constant(params.grad_accumulation, dtype=tf.int64))
+                    step = tfw.equal(step, tfw.constant(0, dtype=tf.int64))
+                    step = tfw.cast(step, tf.int64)
 
-                    tf_loss = tf.cast(lowering.export_to_tf_tensor(loss), tf.float32)
+                    tf_loss = tfw.cast(lowering.export_to_tf_tensor(loss), tf.float32)
 
                     if params.macro_batching > 1 and params.train:
                         if params.macro_batch_loss_smoothing:
-                            tf_loss = tf.cast(tf_loss, tf.float32)
-                            tf_loss += tf.cast(prev_loss, tf.float32) * tf.cast(loop_idx, tf.float32)
-                            tf_loss /= tf.cast(1 + loop_idx, tf.float32)
+                            tf_loss = tfw.divide(tfw.add(tfw.cast(tf_loss, tf.float32),
+                                                         tfw.multiply(tfw.cast(prev_loss, tf.float32),
+                                                                      tfw.cast(loop_idx, tf.float32))),
+                                                 tfw.cast(tfw.add(loop_idx, 1), tf.float32))
                         params.log_dict_keys = list(log_dict.keys())
                     else:
                         comput_ops.append(add_summary(tf_loss=tf_loss, value=log_dict, global_step=global_step))
@@ -160,13 +163,13 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     if params.debug_gradients:
                         for grad_key in debug_gradients_dict.keys():
                             debug_gradients_dict[grad_key] = \
-                                tf.cast(lowering.export_to_tf_tensor(debug_gradients_dict[grad_key]), tf.float32)
+                                tfw.cast(lowering.export_to_tf_tensor(debug_gradients_dict[grad_key]), tf.float32)
 
                         comput_ops.append(add_histogram(tf_loss=tf_loss, value=debug_gradients_dict,
                                                         global_step=global_step))
 
-                    comput_ops.extend([tf1.assign_add(global_step, step),
-                                       tf1.assign_add(manual_global_step, tf.constant(1, dtype=tf.int64, shape=[]))])
+                    comput_ops.extend([tfw.assign_add(global_step, step),
+                                       tfw.assign_add(manual_global_step, tfw.constant(1, dtype=tf.int64))])
 
                 hooks.append(mtf.MtfRestoreHook(lowering))
                 with mtf.utils.outside_all_rewrites():
@@ -188,10 +191,11 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                             saver.recover_last_checkpoints(ckpt.all_model_checkpoint_paths)
 
                 if params.macro_batching > 1 and params.train:
-                    with tf.control_dependencies(comput_ops):
-                        return [loop_idx + 1, tf_loss] + [log_dict[key] for key in params.log_dict_keys] + inp_args
+                    with tfw.control_dependencies(comput_ops):
+                        return ([tfw.add(loop_idx, 1), tf_loss] + [log_dict[key] for key in params.log_dict_keys] +
+                                inp_args)
                 else:
-                    return tf.group(comput_ops)
+                    return tfw.group(comput_ops)
 
             else:  # train == 'sample'
                 predictions = {}
@@ -203,7 +207,6 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                 if params.use_language:
                     predictions['token_out'] = lowering.export_to_tf_tensor(token_out)
                     predictions['token_tgt'] = args[1 + int(params.use_video) * 5]
-
 
                 for key in params.debug_outfeed:
                     predictions[key] = lowering.export_to_tf_tensor(params.debug_outfeed[key])
@@ -217,12 +220,11 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         if params.train and params.macro_batching > 1:
             log_len = int(params.use_language) + int(params.use_video) + \
                       int(params.calc_accuracy) * int(params.use_language) + 1
-            loop_inputs = [tf.constant(0, dtype=tf.int32, shape=[]), tf.constant(0, dtype=tf.float32, shape=[])]
-            loop_inputs = loop_inputs + [tf.constant(0, dtype=tf.float32, shape=[]) for _ in range(log_len)] \
-                          + list(args)
+            loop_inputs = [tfw.constant(0, dtype=tf.int32), tfw.constant(0, dtype=tf.float32)]
+            loop_inputs = loop_inputs + [tfw.constant(0, dtype=tf.float32) for _ in range(log_len)] + list(args)
 
             def con(i, *args):
-                return tf.less(i, tf.constant(params.macro_batching, dtype=tf.int32, shape=[]))
+                return tfw.less(i, tfw.constant(params.macro_batching, dtype=tf.int32))
 
             loop_out = tf.while_loop(cond=con, body=_base_model_fn,
                                      loop_vars=loop_inputs, back_prop=False, parallel_iterations=1)
@@ -232,7 +234,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             log_dict = {key: val for (key, val) in zip(params.log_dict_keys, log_list)}
             global_step = tf1.train.get_or_create_global_step()
 
-            with tf.control_dependencies(log_list):
+            with tfw.control_dependencies(log_list):
                 ret = add_summary(tf_loss=tf_loss, value=log_dict, global_step=global_step)
         else:
             ret = _base_model_fn(*args)

@@ -7,6 +7,7 @@ from tensorflow.python.tpu import tpu
 from ..dataclass import ModelParameter
 from ..mtf_wrapper import import_laid_out_tensor
 from ..utils_core import color_print
+from .. import tf_wrapper as tfw
 
 tf1 = tf.compat.v1
 Dataset = tf1.data.Dataset
@@ -31,13 +32,13 @@ def add_summary(tf_loss, value, global_step):
 
     def _host_loss_summary(local_tf_loss, local_value, local_global_step):
         """Add summary.scalar in host side."""
-        gs = tf.cast(local_global_step, tf.int64)
-        with tf.control_dependencies([summary.scalar(key, local_value[key], step=gs) for key in local_value.keys()]):
-            return tf.identity(local_tf_loss)
+        gs = tfw.cast(local_global_step, tf.int64)
+        with tfw.control_dependencies([summary.scalar(key, local_value[key], step=gs) for key in local_value.keys()]):
+            return tfw.identity(local_tf_loss)
 
     # Cast the global step to tf.int32, since
     # outside_compilation does not support tf.int64.
-    return tpu.outside_compilation(_host_loss_summary, tf_loss, value, tf.cast(global_step, tf.int32))
+    return tpu.outside_compilation(_host_loss_summary, tf_loss, value, tfw.cast(global_step, tf.int32))
 
 
 def add_histogram(tf_loss, value, global_step):
@@ -45,13 +46,14 @@ def add_histogram(tf_loss, value, global_step):
 
     def _host_loss_summary(local_tf_loss, local_value, local_global_step):
         """Add summary.scalar in host side."""
-        gs = tf.cast(local_global_step, tf.int64)
-        with tf.control_dependencies([summary.histogram(key, local_value[key], step=gs) for key in local_value.keys()]):
-            return tf.identity(local_tf_loss)
+        gs = tfw.cast(local_global_step, tf.int64)
+        with tfw.control_dependencies([summary.histogram(key, local_value[key], step=gs)
+                                       for key in local_value.keys()]):
+            return tfw.identity(local_tf_loss)
 
     # Cast the global step to tf.int32, since
     # outside_compilation does not support tf.int64.
-    return tpu.outside_compilation(_host_loss_summary, tf_loss, value, tf.cast(global_step, tf.int32))
+    return tpu.outside_compilation(_host_loss_summary, tf_loss, value, tfw.cast(global_step, tf.int32))
 
 
 def _import_tensor(params: ModelParameter, tensor, shape, name):
