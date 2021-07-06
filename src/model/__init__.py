@@ -151,9 +151,11 @@ def _output(params: ModelParameter, out: mtf.Tensor, spatial_ctx: mtf.Dimension
         token_out = utils_slice(out, 0, params.language_token_patch, spatial_ctx)
         for config_idx, config in enumerate(params.output_block_config):
             token_out = block_part_fn(params, config, token_out, f'lang_out{config_idx}')
-        old = anonymize_shape(params.feature_dims, params.head_dim)
         new = [params.token_patch_dim, params.vocab_dim]
-        token_out = anonymize(token_out, params.head_dim)
+        old = params.feature_dims
+        if params.split_vocab:
+            old = anonymize_shape(old, params.head_dim)
+            token_out = anonymize(token_out, params.head_dim)
         token_out = einsum([token_out, embed(base_args(params.output_embedding), old + new)],
                            output_shape=token_out.shape - old + new)
 
