@@ -28,7 +28,7 @@ def get_api_input_and_output_fn(params: ModelParameter):
     rest_api = RestAPI(params)
     fast_api = FastAPI()
 
-    for key, fn in rest_api.__dict__:
+    for key, fn in rest_api.__dict__.items():
         if key.startswith('_') or key.endswith('_') or not isinstance(fn, typing.Callable):
             continue
         fast_api.get(key)(fn)
