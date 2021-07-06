@@ -27,10 +27,10 @@ def get_api_input_and_output_fn(params: ModelParameter):
     rest_api = RestAPI(params)
     fast_api = FastAPI()
 
-    for key, fn in dir(rest_api).items():
+    for key, fn in dir(rest_api):
         if key.startswith('_') or key.endswith('_'):
             continue
-        fast_api.get(key)(fn)
+        fast_api.get(key)(getattr(rest_api, key))
 
     run = multiprocessing.Process(target=uvicorn.run, daemon=True, args=(fast_api,),
                                   kwargs={'host': '0.0.0.0', 'port': 62220, 'log_level': 'info',
