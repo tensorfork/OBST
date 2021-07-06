@@ -6,8 +6,8 @@ import typing
 import numpy as np
 from transformers import GPT2TokenizerFast
 
-from src.dataclass import ModelParameter
-from src.utils_core import chunks, color_print
+from .dataclass import ModelParameter
+from .utils_core import chunks, color_print
 
 
 def render_video(model_output: typing.List[typing.Tuple[np.ndarray, typing.List[str]]],
@@ -229,7 +229,7 @@ class InterfaceWrapper:
         self.input_queue = multiprocessing.Queue()
         self.output_queue = multiprocessing.Queue()
 
-    def complete(self, query: typing.List[int], samp_temp: float, responds_len: int, debug: bool = False,
+    def complete(self, query: typing.List[int], temperature: float, response_len: int, debug: bool = False,
                  asynchronous: bool = False) -> typing.Union[typing.Callable, typing.Tuple[np.array, np.array],
                                                              np.array]:
         iter_pos = len(query) + 1
@@ -240,8 +240,8 @@ class InterfaceWrapper:
         query = query + [random.randint(0, self.params.vocab_size - 1) for _ in range((self.params.n_ctx - len(query)))]
         query = np.reshape(np.array(query, np.int32), newshape=(1, self.params.n_ctx, 1))
 
-        responds_len = np.array([min(responds_len + len(query), self.params.n_ctx)], np.int32)
-        self.input_queue.put((query, np.array([iter_pos], np.int32), np.array([samp_temp], np.float32), responds_len))
+        response_len = np.array([min(response_len + len(query), self.params.n_ctx)], np.int32)
+        self.input_queue.put((query, np.array([iter_pos], np.int32), np.array([temperature], np.float32), response_len))
 
         def _result():
             response = self.output_queue.get()
@@ -266,7 +266,7 @@ def get_similarity_input_and_output_fn(params: ModelParameter):
         for idx in range(params.num_of_sample):
             query = [random.randint(0, params.vocab_size - 1) for _ in range(min(32, params.n_ctx - 8))]
 
-            out = [interface.complete(query=query, samp_temp=0.0, responds_len=params.n_ctx, debug=True,
+            out = [interface.complete(query=query, temperature=0.0, response_len=params.n_ctx, debug=True,
                                       asynchronous=True) for _ in range(params.equal_debugging_items_per_check)]
             base, *out = [f() for f in out]
 
