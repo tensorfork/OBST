@@ -17,7 +17,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--tpu", type=str, help="Name of TPU to train on")
     parser.add_argument("--model", type=str, default=None, help="JSON file that contains model parameters.")
-    parser.add_argument("--worker", type=int, default=1, help="Number of workers in WebAPI.")
+    parser.add_argument("--workers", type=int, default=1, help="Number of workers in WebAPI.")
     parser.add_argument("--run_mode", type=str, default="train", help=modes)
     parser.add_argument("--debug_grad", help="Log the gradients to tensorbord.")
 
