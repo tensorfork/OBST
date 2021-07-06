@@ -510,14 +510,25 @@ class WhileLoopWithControlDependencies(mtf.Operation):
             for op in self._body_ops:
                 with tf.name_scope(op.name):
                     op.lower(lowering)
+
+            if self.control_dependencies is not None:
+                lower_control_dependencies = [lowering.lowered_operation(op) for op in self.control_dependencies]
+
             ret = []
             for i, mtf_out in enumerate(self._body_outputs):
                 lowered_out = lowering.tensors[mtf_out]
                 if isinstance(lowered_out, mtf.LazyAllreduceSum):
                     is_lazyallreducesum[i] = lowered_out
-                    ret.append(lowered_out.laid_out_input.tensor_list)
+                    lowered_out = lowered_out.laid_out_input.tensor_list
                 else:
-                    ret.append(lowered_out.to_laid_out_tensor().tensor_list)
+                    lowered_out = lowered_out.to_laid_out_tensor().tensor_list
+
+                if self.control_dependencies is not None:
+                    with tf.control_dependencies(lower_control_dependencies):
+                        lowered_out = tf.identity(lowered_out)
+
+                ret.append(lowered_out)
+
             # accumulators
             for i in range(len(self._inputs), len(self._outputs)):
                 ret[i] = [x + y for x, y in zip(ret[i], tf_inputs[i])]
@@ -525,15 +536,9 @@ class WhileLoopWithControlDependencies(mtf.Operation):
             return ret
 
         lowered_inputs = []
-        if self.control_dependencies is not None:
-            lower_control_dependencies = [lowering.lowered_operation(op) for op in self.control_dependencies]
 
         for t in self.inputs:
-            lower_input = lowering.tensors[t].to_laid_out_tensor().tensor_list
-            if self.control_dependencies is not None:
-                with tf.control_dependencies(lower_control_dependencies):
-                    lower_input = tf.identity(lower_input)
-            lowered_inputs.append(lower_input)
+            lowered_inputs.append(lowering.tensors[t].to_laid_out_tensor().tensor_list)
 
         # accumulators get initial value 0
         for t in self._body_outputs[len(self.inputs):]:
