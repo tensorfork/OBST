@@ -1,5 +1,4 @@
 import multiprocessing
-import typing
 
 import uvicorn
 from fastapi import FastAPI
@@ -11,17 +10,17 @@ from .interface import InterfaceWrapper
 
 class RestAPI:
     def __init__(self, params: ModelParameter):
-        self.functions = {}
-        self.interface = InterfaceWrapper(params)
-        self.params = params
-        self.tokenizer = GPT2TokenizerFast.from_pretrained('gpt2')
+        self._functions = {}
+        self._interface = InterfaceWrapper(params)
+        self._params = params
+        self._tokenizer = GPT2TokenizerFast.from_pretrained('gpt2')
 
     async def tokenize(self, prompt: str):
-        return list(prompt.encode()) if self.params.vocab_size == 256 else self.tokenizer.encode(prompt)
+        return list(prompt.encode()) if self._params.vocab_size == 256 else self._tokenizer.encode(prompt)
 
     async def completion(self, prompt: str = "", max_tokens: int = 16, temperature: float = 1.):
-        prompt = await self.tokenizer.encode(prompt)
-        return self.interface.complete(prompt, temperature, max_tokens)
+        prompt = await self._tokenizer.encode(prompt)
+        return self._interface.complete(prompt, temperature, max_tokens)
 
 
 def get_api_input_and_output_fn(params: ModelParameter):
@@ -29,7 +28,7 @@ def get_api_input_and_output_fn(params: ModelParameter):
     fast_api = FastAPI()
 
     for key, fn in rest_api.__dict__.items():
-        if key.startswith('_') or key.endswith('_') or not isinstance(fn, typing.Callable):
+        if key.startswith('_') or key.endswith('_'):
             continue
         fast_api.get(key)(fn)
 
@@ -38,4 +37,4 @@ def get_api_input_and_output_fn(params: ModelParameter):
                                           'workers': params.web_workers})
     run.start()
 
-    return rest_api.interface.input_query, rest_api.interface.output_responds
+    return rest_api._interface.input_query, rest_api._interface.output_responds
