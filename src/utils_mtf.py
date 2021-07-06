@@ -403,3 +403,151 @@ def get_fan_in(params: ModelParameter, shape: ALL_SHAPES) -> DIM_LIST:
     if features_used:
         return shape[:2]
     return shape[:1]
+
+
+class WhileLoopWithControlDependencies(mtf.Operation):
+    """While loop, like tf.while_loop."""
+
+    def __init__(self, cond_fn, body_fn, inputs, control_dependencies=None,
+                 tf_kwargs=None, has_accumulators=False, name="custom_while_loop"):
+        """Create a WhileLoopOperation.
+        A few differences from tf.while_loop:
+        - gradients are not yet supported
+        - inputs must be a list of tensors, as opposed to an arbitrary nested
+          structure.  cond_fn and body_fn take an argument list
+        - we support optional "accumulators" which are additional outputs
+          returned by body_fn.  These are summed across all iterations and
+          retured as additional outputs of the while-loop.  To use accumulators,
+          the has_accumulators argument must be True.  For better performance,
+          we delay allreduce on the accumulators until after the loop, so that it
+          only needs to happen once.  This is useful, for example, if the
+          accumulators are summing gradients for many mini-batches.
+        Args:
+          cond_fn: a function from n mtf Tensors to mtf Scalar
+          body_fn: a function from n mtf Tensors to sequence of mtf Tensors
+          inputs: list of n mtf Tensors
+          tf_kwargs: a dictionary of arguments for tf.while_loop
+          has_accumulators: a boolean
+          name: a string
+        Returns:
+          a WhileLoopOperation
+        """
+
+        super(WhileLoopWithControlDependencies, self).__init__(inputs, mesh=inputs[0].mesh, name=name)
+        self._cond_fn = cond_fn
+        self._body_fn = body_fn
+        self._tf_kwargs = tf_kwargs or {}
+        self.control_dependencies = control_dependencies
+        assert not self._tf_kwargs.get("back_prop", False)
+        ops = self.graph.operations
+        # remove self from the graph's operations
+        ops.pop()
+        before = len(ops)
+
+        def make_placeholders(name):
+            return [mtf.Tensor(self, t.shape, t.dtype, name="%s:%d" % (name, i)) for i, t in enumerate(inputs)]
+
+        self._cond_inputs = make_placeholders("cond_input")
+        self._cond_output = self._cond_fn(*self._cond_inputs)
+        self._cond_ops = ops[before:]
+        del ops[before:]
+        self._body_inputs = make_placeholders("body_input")
+        self._body_outputs = self._body_fn(*self._body_inputs)
+        if len(self._body_outputs) < len(inputs):
+            raise ValueError("body_fn produces fewer outputs than inputs")
+        if len(self._body_outputs) > len(inputs) and not has_accumulators:
+            raise ValueError("body_fn produces more outputs than inputs")
+        for (i, (inp, body_out)) in enumerate(zip(inputs, self._body_outputs[:len(inputs)])):
+            if inp.shape != body_out.shape:
+                raise ValueError("shape mismatch i=%d inp=%s body_out=%s" % (i, inp, body_out))
+        # Pull new variables outside the loop.
+        added_ops = ops[before:]
+        del ops[before:]
+        self._body_ops = []
+        for op in added_ops:
+            if isinstance(op, mtf.Variable):
+                ops.append(op)
+            else:
+                self._body_ops.append(op)
+        # re-add self to graph's operations
+        ops.append(self)
+        self._outputs = [mtf.Tensor(self, t.shape, t.dtype, name="output:%d" % i)
+                         for i, t in enumerate(self._body_outputs)]
+
+        # Rerun to take the new output into account.
+        self._splittable_dims, self._unsplittable_dims = (self._initialize_all_dimensions_as_splittable())
+
+    def lower(self, lowering):
+        mesh_impl = lowering.mesh_impl(self)
+
+        def tf_cond_fn(*tf_inputs):
+            for tf_inp, mtf_inp in zip(tf_inputs[:len(self._cond_inputs)], self._cond_inputs):
+                lowering.tensors[mtf_inp] = mesh_impl.LaidOutTensor(tf_inp)
+            for op in self._cond_ops:
+                with tf.name_scope(op.name):
+                    op.lower(lowering)
+            lowered_output = lowering.tensors[self._cond_output]
+            ret = lowered_output.to_laid_out_tensor().tensor_list[0]
+            return ret
+
+        # This array keeps track of which lowered body-outputs have type
+        # LazyAllreduceSum.  We treat these specially  - instead of
+        # immediately converting to LaidOutTensor (executing the allreduce)
+        # we sum across iterations first, then allreduce at the end.
+        # When one of the body outputs is a LazyAllreduceSum, we put the
+        #  LazyAllreduceSum object into this array for future reference.
+        is_lazyallreducesum = [None] * len(self._outputs)
+
+        def tf_body_fn(*tf_inputs):
+            """Body function for tf.while_loop.
+            Args:
+              *tf_inputs: a list of tf.Tensor
+            Returns:
+              a list of tf.Tensor
+            """
+            for tf_inp, mtf_inp in zip(tf_inputs[:len(self._inputs)], self._body_inputs):
+                lowering.tensors[mtf_inp] = mesh_impl.LaidOutTensor(tf_inp)
+            for op in self._body_ops:
+                with tf.name_scope(op.name):
+                    op.lower(lowering)
+            ret = []
+            for i, mtf_out in enumerate(self._body_outputs):
+                lowered_out = lowering.tensors[mtf_out]
+                if isinstance(lowered_out, mtf.LazyAllreduceSum):
+                    is_lazyallreducesum[i] = lowered_out
+                    ret.append(lowered_out.laid_out_input.tensor_list)
+                else:
+                    ret.append(lowered_out.to_laid_out_tensor().tensor_list)
+            # accumulators
+            for i in range(len(self._inputs), len(self._outputs)):
+                ret[i] = [x + y for x, y in zip(ret[i], tf_inputs[i])]
+
+            return ret
+
+        lowered_inputs = []
+        for t in self.inputs:
+            if self.control_dependencies is not None:
+                with tf.control_dependencies([lowering.lowered_operation(op) for op in self.control_dependencies]):
+                    lowered_inputs.append(tf.identity(lowering.tensors[t].to_laid_out_tensor().tensor_list))
+            else:
+                lowered_inputs.append(lowering.tensors[t].to_laid_out_tensor().tensor_list)
+
+        # accumulators get initial value 0
+        for t in self._body_outputs[len(self.inputs):]:
+            def slice_fn():
+                return tf.zeros(mesh_impl.slice_shape(t.shape), dtype=t.dtype)
+
+            lowered_inputs.append(mesh_impl.slicewise(slice_fn).tensor_list)
+
+        tf_outs = tf.while_loop(tf_cond_fn,
+                                tf_body_fn,
+                                lowered_inputs,
+                                back_prop=False,
+                                **self._tf_kwargs)
+        for i, (tf_out, mtf_out) in enumerate(zip(tf_outs, self._outputs)):
+            out = mesh_impl.LaidOutTensor(tf_out)
+            lazy = is_lazyallreducesum[i]
+            if lazy:
+                out = mtf.LazyAllreduceSum(
+                    mesh_impl, out, lazy.mesh_axes, lazy.add_counter_fn)
+            lowering.set_tensor_lowering(mtf_out, out)
