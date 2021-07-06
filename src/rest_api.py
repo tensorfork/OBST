@@ -27,7 +27,7 @@ def get_api_input_and_output_fn(params: ModelParameter):
     rest_api = RestAPI(params)
     fast_api = FastAPI()
 
-    for key, fn in dir(rest_api):
+    for key in dir(rest_api):
         if key.startswith('_') or key.endswith('_'):
             continue
         fast_api.get(key)(getattr(rest_api, key))
