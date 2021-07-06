@@ -4,7 +4,7 @@ from .backend import variable
 from .context import OptimizerCtx
 from ..mtf_wrapper import (cast, constant_scalar, einsum, greater, minimum,
                            reduce_mean, reduce_sum, assign, add, multiply, maximum, sqrt_eps, rsqrt_eps,
-                           reciprocal, square, reduce_max)
+                           reciprocal, square, reduce_max, rsqrt)
 from ..utils_mtf import weighted_add, get_fan_in
 
 
@@ -60,10 +60,16 @@ def adaptive_gradient_clipping(ctx: OptimizerCtx, gradient_clip: str) -> mtf.Ten
                              ctx.dtype.activation_dtype))
 
 
-def norm_gradient_clipping(ctx: OptimizerCtx, gradient_clip: str) -> mtf.Tensor:
+def l2norm_gradient_clipping(ctx: OptimizerCtx, gradient_clip: str) -> mtf.Tensor:
     gradient_clip = float(gradient_clip)
-    return einsum([minimum(rsqrt_eps(einsum([ctx.grad, ctx.grad], [])), 1 / gradient_clip),
-                   ctx.grad, constant_scalar(ctx.params, gradient_clip)], ctx.grad.shape)
+    return einsum([ctx.grad, constant_scalar(ctx.params, gradient_clip),
+                   reciprocal(maximum(einsum([ctx.grad, ctx.grad], []), gradient_clip))])
+
+
+def stddev_gradient_clipping(ctx: OptimizerCtx, gradient_clip: str) -> mtf.Tensor:
+    gradient_clip = float(gradient_clip)
+    return einsum([ctx.grad, constant_scalar(ctx.params, gradient_clip),
+                   rsqrt(maximum(einsum([ctx.grad, ctx.grad], []), gradient_clip))])
 
 
 def value_gradient_clipping(ctx: OptimizerCtx, gradient_clip: str) -> mtf.Tensor:
@@ -88,7 +94,8 @@ OPTIMIZERS = {"adam": adam,
               "novograd": novograd,
               "sgd": return_grad,
               "adaptive_clip": adaptive_gradient_clipping,
-              "norm_clip": norm_gradient_clipping,
+              "l2norm_clip": l2norm_gradient_clipping,
+              "stddev_clip": stddev_gradient_clipping,
               "value_clip": value_gradient_clipping,
               "gradient_centralisation": gradient_centralisation,
               "weight_centralisation": weight_centralisation,
