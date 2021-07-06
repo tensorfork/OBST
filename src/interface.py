@@ -261,7 +261,7 @@ class InterfaceWrapper:
 
         def _result():
             response = self.blocked_get(self.output, prompt_id)
-            out = response[0][:, iter_pos:]
+            out = response[0][0, iter_pos:]
             return (out, response) if debug else out
 
         return _result if asynchronous else _result()
