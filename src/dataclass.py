@@ -49,7 +49,6 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.frame_height = 176
         self.opt_beta1 = 0.9
         self.opt_beta2 = 0.999
-        self.opt_epsilon = 1e-6
         self.vocab_size = 256
         self.color_channels = 3
         self.three_axes = True

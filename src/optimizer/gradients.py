@@ -24,7 +24,7 @@ def pcgrad(ctx: OptimizerCtx, grad: mtf.Tensor):
         return None
 
     all_grads = [grad, first_grad[op.name]]
-    g_square = [add(1e-6, einsum([g, g], output_shape=[])) for g in all_grads[1:]]
+    g_square = [add(1e-8, einsum([g, g], output_shape=[])) for g in all_grads[1:]]
 
     for i in range(len(all_grads)):
         grad = all_grads.pop(0)
