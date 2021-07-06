@@ -8,8 +8,8 @@ from .. import tf_wrapper as tfw
 from ..dataclass import ModelParameter, LearningRateConfig
 from ..utils_mtf import weighted_add
 
-
 tf = tf2.compat.v1
+
 
 class LearningRateCtx:
     def __init__(self, params: ModelParameter, loss_list: typing.List[mtf.Tensor],
