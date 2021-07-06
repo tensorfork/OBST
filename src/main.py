@@ -40,6 +40,7 @@ def main(args: argparse.Namespace) -> None:
         _params = f.read()
     _params = jsonpickle.loads(_params)
     params = ModelParameter(_params)
+    params.web_workers = args.workers
     params.train = args.run_mode == 'train'
     params.debug_sample = args.run_mode == 'debug_old'
     params.debug_gradients = args.debug_grad is not None
