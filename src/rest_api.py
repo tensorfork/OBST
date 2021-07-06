@@ -16,31 +16,26 @@ class RestAPI:
         self.params = params
         self.tokenizer = GPT2TokenizerFast.from_pretrained('gpt2')
 
-    def api(self, fn: typing.Callable):
-        self.functions[fn.__name__] = fn
-
-    @api
     async def tokenize(self, prompt: str):
         return list(prompt.encode()) if self.params.vocab_size == 256 else self.tokenizer.encode(prompt)
 
-    @api
     async def completion(self, prompt: str = "", max_tokens: int = 16, temperature: float = 1.):
         prompt = await self.tokenizer.encode(prompt)
         return self.interface.complete(prompt, temperature, max_tokens)
 
-    def main(self):
-        app = FastAPI()
-
-        for key, fn in self.functions.items():
-            app.get(key)(fn)
-
-        uvicorn.run(app, host='0.0.0.0', port=62220, log_level='info', workers=self.params.web_workers)
-
 
 def get_api_input_and_output_fn(params: ModelParameter):
-    api = RestAPI(params)
+    rest_api = RestAPI(params)
+    fast_api = FastAPI()
 
-    run = multiprocessing.Process(target=api.main, daemon=True)
+    for key, fn in rest_api.__dict__:
+        if key.startswith('_') or key.endswith('_') or not isinstance(fn, typing.Callable):
+            continue
+        fast_api.get(key)(fn)
+
+    run = multiprocessing.Process(target=uvicorn.run, daemon=True, args=(fast_api,),
+                                  kwargs={'host': '0.0.0.0', 'port': 62220, 'log_level': 'info',
+                                          'workers': params.web_workers})
     run.start()
 
-    return api.interface.input_query, api.interface.output_responds
+    return rest_api.interface.input_query, rest_api.interface.output_responds
