@@ -15,7 +15,7 @@ def norm(args: BlockArgs) -> mtf.Tensor:
     normalized_shape = block_input.shape - (feature_shape - [args.params.head_dim] * ('group' in args))
 
     block_input = add(block_input, negative(reduce_mean(block_input, output_shape=normalized_shape)))
-    scale = [rsqrt_eps(reduce_mean(square(block_input), output_shape=normalized_shape)), block_input]
+    scale = [rsqrt_eps(reduce_mean(square(block_input), output_shape=normalized_shape), 1e-5), block_input]
     if 'scale' in args:
         scale.append(normal_var(args, feature_shape, mean=1))
     block_input = einsum(scale, output_shape=block_input.shape)
