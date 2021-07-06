@@ -124,6 +124,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.shuffle_input_filenames = True
         self.calc_accuracy = False
         self.num_of_sample = 10
+        self.equal_debugging_items_per_check = 16
         self.group_linear_factor = 2
         self.embedding_stddev = 0.04
         self.color_quantization_value = 256
