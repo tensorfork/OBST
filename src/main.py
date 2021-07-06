@@ -15,13 +15,30 @@ from tensorflow.python.tpu.device_assignment import device_assignment
 from tensorflow.python.tpu.topology import Topology
 from tensorflow_estimator.python.estimator import estimator as estimator_lib
 
-from src.run.run import computation_func
 from .dataclass import ModelParameter
 from .inputs import dataset, gpt_neo_input
 from .interface import gen_sample_fn, get_command_line_input_and_output_fn, get_similarity_input_and_output_fn
+from .rest_api import get_api_input_and_output_fn
+from .run.run import computation_func
 
 tf = tf2.compat.v1
 tpu = tf.tpu
+
+
+def sample_output_fn(params: ModelParameter):
+    return None, gen_sample_fn(params)
+
+
+def raise_str(arg: str):
+    raise ValueError(arg)
+
+
+RUN_MODE_FNS = {'debug_old': sample_output_fn,
+                'sample': sample_output_fn,
+                'web_api': get_api_input_and_output_fn,
+                'debug': get_similarity_input_and_output_fn,
+                'query': get_command_line_input_and_output_fn,
+                'train': lambda x: raise_str("Train should've been caught by code above. Something is wrong.")}
 
 
 def main(args: argparse.Namespace) -> None:
@@ -50,7 +67,6 @@ def main(args: argparse.Namespace) -> None:
         param_dump = jsonpickle.dumps(_params, indent=4)
         with tf.io.gfile.GFile(f"{params.model_path}/run_config_{int(time.time())}.json", 'w') as f:
             f.write(param_dump)
-
 
     params.current_step = int(estimator_lib._load_global_step_from_checkpoint_dir(params.model_path))
 
@@ -84,15 +100,6 @@ def main(args: argparse.Namespace) -> None:
     mesh_shape = mtf.convert_to_shape(params.mesh_shape)
     params.num_cores = mesh_shape.size
     # Expand attention types param
-
-    '''
-    if args.dry:
-        inp = {'token_x': tf.zeros([1]), 'token_y': tf.zeros([1]), 'frame': tf.zeros([1]), 'vid_msk': tf.zeros([1]),
-               'txt_msk': tf.zeros([1])
-               }
-        get_model_fn(params)(inp)
-        return
-    '''
 
     mtf_mesh_shape = mtf.convert_to_shape(params.mesh_shape)
     params.layout_rules = mtf.convert_to_layout_rules(params.layout)
@@ -147,18 +154,9 @@ def main(args: argparse.Namespace) -> None:
                                  session_config,
                                  tpu_cluster_resolver,
                                  [lambda x: print(f"Current step: {x}")] * params.debug_train_step)
-        elif args.run_mode == 'sample' or args.run_mode == 'debug_old':
-            computation_func(params,
-                             input_fn,
-                             session_config,
-                             tpu_cluster_resolver,
-                             [gen_sample_fn(params)])
+            return
 
-        elif args.run_mode == 'query':
-            input_fns, output_fn = get_command_line_input_and_output_fn(params)
-
-        elif args.run_mode == 'debug':
-            input_fns, output_fn = get_similarity_input_and_output_fn(params)
+        input_fns, output_fn = RUN_MODE_FNS[args.run_mode](params)
 
         computation_func(params,
                          input_fn,
@@ -166,8 +164,3 @@ def main(args: argparse.Namespace) -> None:
                          tpu_cluster_resolver,
                          [output_fn],
                          input_fns)
-
-    tf.logging.info('finished.')
-
-    with tf.Session(target=tpu_cluster_resolver.get_master(), config=session_config) as sess:
-        sess.run(tpu.shutdown_system())
