@@ -19,7 +19,7 @@ class RestAPI:
         return list(prompt.encode()) if self._params.vocab_size == 256 else self._tokenizer.encode(prompt)
 
     async def completion(self, prompt: str = "", max_tokens: int = 16, temperature: float = 1.):
-        prompt = await self._tokenizer.encode(prompt)
+        prompt = self._tokenizer.encode(prompt)
         return self._interface.complete(prompt, temperature, max_tokens)
 
 
