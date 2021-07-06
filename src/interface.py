@@ -260,8 +260,8 @@ class InterfaceWrapper:
                                  np.array([min(response_len + len(query), self.params.n_ctx)], np.int32))
 
         def _result():
-            response = self.blocked_get(self.output, prompt_id)
-            out = np.cast(response[0][0, iter_pos:].flatten(), np.int64)
+            response = self.blocked_get(self.output, prompt_id).astype(np.int64)
+            out = response[0][0, iter_pos:].flatten()
             return (out, response) if debug else out
 
         return _result if asynchronous else _result()
