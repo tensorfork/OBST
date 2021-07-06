@@ -1,8 +1,7 @@
-import copy
+import multiprocessing
 import random
 import time
 import typing
-from threading import Thread, Lock
 
 import numpy as np
 from transformers import GPT2TokenizerFast
@@ -225,76 +224,37 @@ def get_command_line_input_and_output_fn(params: ModelParameter):
 
 
 class InterfaceWrapper:
-
     def __init__(self, params: ModelParameter):
         self.params = params
+        self.input_queue = multiprocessing.Queue()
+        self.output_queue = multiprocessing.Queue()
 
-        self._lock = Lock()
-        self._is_busy = False
-        self._responds = None
-        self._query = None
-        self._exit = False
+    def complete(self, query: typing.List[int], samp_temp: float, responds_len: int, debug: bool = False,
+                 asynchronous: bool = False) -> typing.Union[typing.Callable, typing.Tuple[np.array, np.array],
+                                                             np.array]:
+        iter_pos = len(query) + 1
 
-    def complete(self, query: typing.List[int], samp_temp: float, responds_len: int, debug: bool = False) \
-            -> [np.ndarray, None]:
-
-        _iter_pos = len(query) + 1
-
-        if _iter_pos >= self.params.n_ctx or max(query) >= self.params.vocab_size:
+        if iter_pos >= self.params.n_ctx or max(query) >= self.params.vocab_size:
             return None
 
         query = query + [random.randint(0, self.params.vocab_size - 1) for _ in range((self.params.n_ctx - len(query)))]
         query = np.reshape(np.array(query, np.int32), newshape=(1, self.params.n_ctx, 1))
 
-        iter_pos = np.array([_iter_pos], np.int32)
-
-        samp_temp = np.array([samp_temp], np.float32)
-
         responds_len = np.array([min(responds_len + len(query), self.params.n_ctx)], np.int32)
+        self.input_queue.put((query, np.array([iter_pos], np.int32), np.array([samp_temp], np.float32), responds_len))
 
-        with self._lock:
-            self._is_busy = True
-            self._query = (query, iter_pos, samp_temp, responds_len)
+        def _result():
+            response = self.output_queue.get()
+            out = response[0][:, iter_pos:]
+            return (out, response) if debug else out
 
-        responds = None
-
-        while responds is None:
-            with self._lock:
-                if self._responds is not None:
-                    responds = copy.copy(self._responds)
-                    self._responds = None
-                    self._is_busy = False
-                else:
-                    time.sleep(0.1)
-
-        if debug:
-            return responds[0][:, _iter_pos:], responds
-        return responds[0][:, _iter_pos:]
+        return _result if asynchronous else _result()
 
     def input_query(self):
-        query = None
-
-        while query is None:
-            with self._lock:
-
-                if self._exit:
-                    exit()
-
-                if self._query is not None:
-                    query = copy.copy(self._query)
-                    self._query = None
-                else:
-                    time.sleep(0.1)
-
-        return query
+        return self.input_queue.get()
 
     def output_responds(self, out):
-        with self._lock:
-            self._responds = out
-
-    def exit_fn(self):
-        with self._lock:
-            self._exit = True
+        self.output_queue.put(out)
 
 
 def get_similarity_input_and_output_fn(params: ModelParameter):
@@ -306,15 +266,14 @@ def get_similarity_input_and_output_fn(params: ModelParameter):
         for idx in range(params.num_of_sample):
             query = [random.randint(0, params.vocab_size - 1) for _ in range(min(32, params.n_ctx - 8))]
 
-            out_1, *args_1 = interface.complete(query=query, samp_temp=0.0, responds_len=params.n_ctx, debug=True)
-            out_2, *args_1 = interface.complete(query=query, samp_temp=0.0, responds_len=params.n_ctx, debug=True)
+            out = [interface.complete(query=query, samp_temp=0.0, responds_len=params.n_ctx, debug=True,
+                                      asynchronous=True) for _ in range(params.equal_debugging_items_per_check)]
+            base, *out = [f() for f in out]
 
-            score = np.int(np.mean(np.equal(out_1, out_2)) * 100)
-            print(f"test:{idx} similarity score: {score}%\n")
+            score = float(np.mean([np.mean(np.equal(base, o)) * 100 for o in out]))
+            print(f"test:{idx} similarity score: {score:6.2f}%\n")
 
-        interface.exit_fn()
-
-    run = Thread(target=run, daemon=True)
+    run = multiprocessing.Process(target=run, daemon=True)
     run.start()
 
     return interface.input_query, interface.output_responds
