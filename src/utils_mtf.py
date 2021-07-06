@@ -525,12 +525,15 @@ class WhileLoopWithControlDependencies(mtf.Operation):
             return ret
 
         lowered_inputs = []
+        if self.control_dependencies is not None:
+            lower_control_dependencies = [lowering.lowered_operation(op) for op in self.control_dependencies]
+
         for t in self.inputs:
+            lower_input = lowering.tensors[t].to_laid_out_tensor().tensor_list
             if self.control_dependencies is not None:
-                with tf.control_dependencies([lowering.lowered_operation(op) for op in self.control_dependencies]):
-                    lowered_inputs.append(tf.identity(lowering.tensors[t].to_laid_out_tensor().tensor_list))
-            else:
-                lowered_inputs.append(lowering.tensors[t].to_laid_out_tensor().tensor_list)
+                with tf.control_dependencies(lower_control_dependencies):
+                    lower_input = tf.identity(lower_input)
+            lowered_inputs.append(lower_input)
 
         # accumulators get initial value 0
         for t in self._body_outputs[len(self.inputs):]:
