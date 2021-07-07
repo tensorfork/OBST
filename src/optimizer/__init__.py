@@ -102,7 +102,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
     mstep = add(1, neg_step)
     beta1 = add(1, multiply(neg_step, import_mtf(params, 1 - params.opt_beta1, "beta1")))
     beta2 = add(1, multiply(neg_step, import_mtf(params, 1 - params.opt_beta2, "beta2")))
-    step_count = add(multiply(learning_rate_ctx.global_steps_mtf, step), multiply(neg_step, 10 ** 9))
+    step_count = add(multiply(cast(learning_rate_ctx.global_steps_mtf, step.dtype), step), multiply(neg_step, 10 ** 9))
 
     debug_gradients_dict = {}
     first_grad = {}
