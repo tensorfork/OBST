@@ -16,8 +16,8 @@ def adam(ctx: OptimizerCtx) -> mtf.Tensor:
     exp_avg_p2_ptr = variable(ctx.params, ctx.var, 'exp_avg_p2', ctx.var.shape)
     exp_avg_p1_ptr = variable(ctx.params, ctx.var, 'exp_avg_p1', ctx.var.shape)
 
-    exp_avg_p2 = weighted_add(exp_avg_p2_ptr, square(ctx.grad), ctx.beta2)
-    ctx.grad = weighted_add(exp_avg_p1_ptr, ctx.grad, ctx.beta1)
+    exp_avg_p2 = multiply(weighted_add(exp_avg_p2_ptr, square(ctx.grad), ctx.beta2), pow(ctx.beta2, ctx.neg_step))
+    ctx.grad = multiply(weighted_add(exp_avg_p1_ptr, ctx.grad, ctx.beta1), pow(ctx.beta1, ctx.neg_step))
 
     ctx.update_ops.append(assign(exp_avg_p2_ptr, exp_avg_p2))
     ctx.update_ops.append(assign(exp_avg_p1_ptr, ctx.grad))

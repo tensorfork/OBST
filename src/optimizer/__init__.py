@@ -164,7 +164,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                     continue
                 ctx = OptimizerCtx(op, grad_outputs, downstream, tensor_to_gradient, tensor_to_var, params,
                                    loss_idx, update_ops, debug_gradients_dict, loss_list, first_grad, loss_1__loss_1,
-                                   loss_1__loss_2, loss_2__loss_2, mstep, step, dtype, beta1, beta2,
+                                   loss_1__loss_2, loss_2__loss_2, mstep, step, neg_step, dtype, beta1, beta2,
                                    learning_rate)
                 for _ in gradients(ctx):
                     full_name = f'{tf.get_variable_scope().name}/f"{ctx.var.name}/{params.optimizer}/grad_accumulation'
