@@ -54,7 +54,8 @@ def update(ctx: OptimizerCtx):
     large_tensor &= "output" not in var.name or "lang_out" in var.name or "vid_out" in var.name  # not output
 
     if large_tensor and params.weight_decay > 0:
-        ctx.grad = add(ctx.grad, einsum([optimizer_scalar(params, params.weight_decay), var.value, learning_rate],
+        ctx.grad = add(ctx.grad, einsum([optimizer_scalar(params, params.weight_decay),
+                                         cast(var.value, params.optimizer_calculation_dtype), learning_rate],
                                         output_shape=var.shape))
 
     if not large_tensor or not params.weight_standardisation:
