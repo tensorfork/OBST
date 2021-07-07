@@ -75,6 +75,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.slice_dtype = "float32"
         self.calculation_dtype = "float32"
         self.optimizer_slice_dtype = "float32"
+        self.optimizer_calculation_dtype = "float32"
         self.learning_rate_config = {}
         self.train_batch_size = 1
         self.grad_accumulation = 1
@@ -188,6 +189,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             self.storage_dtype = getattr(tf, self.storage_dtype)
             self.calculation_dtype = getattr(tf, self.calculation_dtype)
             self.optimizer_slice_dtype = getattr(tf, self.optimizer_slice_dtype)
+            self.optimizer_calculation_dtype = getattr(tf, self.optimizer_calculation_dtype)
 
             self.learning_rate_config = {key: LearningRateConfig(**config) for key, config in
                                          self.learning_rate_config.items()}
@@ -239,7 +241,8 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.layout = ','.join([f"batch:b"] * split_batch +
                                [f"heads:h"] * split_heads)
         self.variable_dtype = mtf.VariableDType(self.storage_dtype, self.slice_dtype, self.calculation_dtype)
-        self.optimizer_dtype = mtf.VariableDType(self.storage_dtype, self.optimizer_slice_dtype, self.calculation_dtype)
+        self.optimizer_dtype = mtf.VariableDType(self.storage_dtype, self.optimizer_slice_dtype,
+                                                 self.optimizer_calculation_dtype)
         self.block_config = [BlockConfig(conf, memory_reduction_strategy=self.memory_reduction_strategy) for conf in
                              self.block_config]
         self.input_block_config = [BlockConfig(conf, memory_reduction_strategy="checkpoint") for conf in

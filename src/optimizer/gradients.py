@@ -4,7 +4,7 @@ import tensorflow as tf2
 from .backend import variable
 from .context import OptimizerCtx
 from ..model.revnet import RevGradOp
-from ..mtf_wrapper import (add_n, einsum, assign, add, negative, reshape, minimum)
+from ..mtf_wrapper import add_n, einsum, assign, add, negative, reshape, minimum, cast
 
 tf = tf2.compat.v1
 zeros = tf.zeros_initializer()
@@ -91,6 +91,8 @@ def gradients(ctx: OptimizerCtx):
     for inp, grad in itr:
         if inp not in downstream or grad is None:
             continue
+
+        grad = cast(grad, params.optimizer_calculation_dtype)
 
         if inp in tensor_to_gradient:
             grad_list = tensor_to_gradient[inp]
