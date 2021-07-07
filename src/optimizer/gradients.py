@@ -92,8 +92,6 @@ def gradients(ctx: OptimizerCtx):
         if inp not in downstream or grad is None:
             continue
 
-        grad = cast(grad, params.optimizer_calculation_dtype)
-
         if inp in tensor_to_gradient:
             grad_list = tensor_to_gradient[inp]
             grad_list[1] += 1
@@ -104,7 +102,7 @@ def gradients(ctx: OptimizerCtx):
         if len(inp.operation.outputs) != grad_list[1] or inp not in tensor_to_var:
             continue
 
-        grad: mtf.Tensor = grad_list[2]
+        grad: mtf.Tensor = cast(grad_list[2], params.optimizer_calculation_dtype)
         var: mtf.Variable = tensor_to_var[inp]
 
         if params.debug_gradients:
