@@ -88,7 +88,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
     called "accumulate".
     """
 
-    dtype = params.variable_dtype.activation_dtype
+    dtype = params.optimizer_calculation_dtype
     update_ops = []
 
     learning_rate_ctx = get_learning_rate(params, loss_list, update_ops)

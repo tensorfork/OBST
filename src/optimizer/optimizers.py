@@ -57,7 +57,7 @@ def adaptive_gradient_clipping(ctx: OptimizerCtx, gradient_clip: str) -> mtf.Ten
     return weighted_add(einsum([grd_norm, reciprocal(wgt_norm), gradient_clip, ctx.grad], output_shape=ctx.grad.shape),
                         ctx.grad,
                         cast(greater(multiply(wgt_norm, reciprocal(grd_norm)), gradient_clip),
-                             ctx.dtype.activation_dtype))
+                             ctx.params.optimizer_calculation_dtype))
 
 
 def l2norm_gradient_clipping(ctx: OptimizerCtx, gradient_clip: str) -> mtf.Tensor:
