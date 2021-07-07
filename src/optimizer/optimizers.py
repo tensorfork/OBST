@@ -4,7 +4,7 @@ from .backend import variable
 from .context import OptimizerCtx
 from ..mtf_wrapper import (cast, optimizer_scalar, einsum, greater, minimum,
                            reduce_mean, reduce_sum, assign, add, multiply, maximum, sqrt_eps, rsqrt_eps,
-                           reciprocal, square, reduce_max, rsqrt)
+                           reciprocal, square, reduce_max, rsqrt, sqrt)
 from ..utils_mtf import weighted_add, get_fan_in
 
 
@@ -17,7 +17,7 @@ def adam(ctx: OptimizerCtx) -> mtf.Tensor:
 
     ctx.update_ops.append(assign(exp_avg_p2_ptr, exp_avg_p2))
     ctx.update_ops.append(assign(exp_avg_p1_ptr, grad))
-    return multiply(ctx.grad, reciprocal(add(sqrt_eps(exp_avg_p2), 1e-8)))
+    return multiply(ctx.grad, reciprocal(add(sqrt(exp_avg_p2), 1e-8)))
 
 
 def novograd(ctx: OptimizerCtx) -> mtf.Tensor:
