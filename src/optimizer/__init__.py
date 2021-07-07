@@ -135,7 +135,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
         operations = loss.graph.operations
         xs = [x.outputs[0] for x in params.mesh.graph.trainable_variables]
         tensor_to_var = dict(zip(xs, params.mesh.graph.trainable_variables))
-        loss_grad = optimizer_scalar(params, 1.0)
+        loss_grad = constant_scalar(params, 1.0)
         downstream = set(xs)
 
         for op in operations:
