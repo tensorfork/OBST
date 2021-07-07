@@ -294,6 +294,10 @@ def zeros(mesh: mtf.Mesh, shape: SHAPE, dtype: tf.DType) -> mtf.Tensor:
     return scoped("zeros", mtf.zeros, mesh, shape, dtype)
 
 
+def pow(x1: mtf.Tensor, x2: mtf.Tensor) -> mtf.Tensor:
+    return scoped("pow", mtf.pow, x1, x2)
+
+
 def zeros_like(tensor: mtf.Tensor) -> mtf.Tensor:
     return scoped("zeros_like", mtf.zeros_like, tensor)
 
