@@ -26,4 +26,4 @@ def variable(params: ModelParameter, base: mtf.Variable, name: str, shape: SHAPE
 
 
 def import_mtf(params: ModelParameter, imported: typing.Union[tf.Tensor, float], name: str):
-    return import_fully_replicated(params, tf.cast(imported, params.variable_dtype.activation_dtype), [], name)
+    return import_fully_replicated(params, tf.cast(imported, params.optimizer_calculation_dtype), [], name)
