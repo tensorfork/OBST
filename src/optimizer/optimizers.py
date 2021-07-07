@@ -3,8 +3,8 @@ import mesh_tensorflow as mtf
 from .backend import variable
 from .context import OptimizerCtx
 from ..mtf_wrapper import (cast, optimizer_scalar, einsum, greater, minimum,
-                           reduce_mean, reduce_sum, assign, add, multiply, maximum, sqrt_eps, rsqrt_eps,
-                           reciprocal, square, reduce_max, rsqrt, sqrt, pow, negative)
+                           reduce_mean, reduce_sum, assign, add, multiply, maximum, sqrt_eps, reciprocal, square,
+                           reduce_max, rsqrt, sqrt, pow, negative)
 from ..utils_mtf import weighted_add, get_fan_in
 
 
@@ -16,14 +16,13 @@ def adam(ctx: OptimizerCtx) -> mtf.Tensor:
     exp_avg_p2_ptr = variable(ctx.params, ctx.var, 'exp_avg_p2', ctx.var.shape)
     exp_avg_p1_ptr = variable(ctx.params, ctx.var, 'exp_avg_p1', ctx.var.shape)
 
-    exp_avg_p2 = multiply(weighted_add(exp_avg_p2_ptr, square(ctx.grad), ctx.beta2),
-                          reciprocal(add(1, negative(pow(ctx.beta2, ctx.step_count)))))
-    ctx.grad = multiply(weighted_add(exp_avg_p1_ptr, ctx.grad, ctx.beta1),
-                        reciprocal(add(1, negative(pow(ctx.beta1, ctx.step_count)))))
+    exp_avg_p2 = weighted_add(exp_avg_p2_ptr, square(ctx.grad), ctx.beta2)
+    ctx.grad = weighted_add(exp_avg_p1_ptr, ctx.grad, ctx.beta1)
 
     ctx.update_ops.append(assign(exp_avg_p2_ptr, exp_avg_p2))
     ctx.update_ops.append(assign(exp_avg_p1_ptr, ctx.grad))
-    return multiply(ctx.grad, opt_rsqrt(exp_avg_p2))
+    return einsum([opt_rsqrt(multiply(exp_avg_p2, reciprocal(add(1, negative(pow(ctx.beta2, ctx.step_count)))))),
+                   reciprocal(add(1, negative(pow(ctx.beta1, ctx.step_count)))), ctx.grad], output_shape=ctx.grad.shape)
 
 
 def novograd(ctx: OptimizerCtx) -> mtf.Tensor:
