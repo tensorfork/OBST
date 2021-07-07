@@ -2,7 +2,7 @@ import mesh_tensorflow as mtf
 import tensorflow as tf2
 
 from .context import OptimizerCtx
-from ..mtf_wrapper import add_n, einsum, add, negative, minimum, gradients as mtf_gradients
+from ..mtf_wrapper import add_n, einsum, add, negative, minimum, gradients as mtf_gradients, cast
 
 tf = tf2.compat.v1
 zeros = tf.zeros_initializer()
@@ -75,5 +75,5 @@ def gradients(ctx: OptimizerCtx):
     loss_list = ctx.loss_list
     variables = params.mesh.graph.trainable_variables
     for var, grad in zip(variables, mtf_gradients(loss_list, [v.outputs[0] for v in variables])):
-        ctx(var, grad)
+        ctx(var, cast(grad, params.optimizer_calculation_dtype))
         yield None
