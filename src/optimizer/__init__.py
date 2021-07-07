@@ -17,7 +17,7 @@ from ..dataclass import ModelParameter
 from ..mtf_wrapper import (cast, constant_float, constant_scalar, einsum, equal, greater_equal, mod,
                            reduce_sum, assign, assign_sub,
                            add, multiply, scoped, assign_add, identity, zeros_like, negative, rsqrt_eps,
-                           constant, reciprocal)
+                           optimizer_scalar, reciprocal)
 from ..utils_mtf import feature_dims_used, to_fp32, get_fan_in
 
 tf = tf2.compat.v1
@@ -54,7 +54,7 @@ def update(ctx: OptimizerCtx):
     large_tensor &= "output" not in var.name or "lang_out" in var.name or "vid_out" in var.name  # not output
 
     if large_tensor and params.weight_decay > 0:
-        ctx.grad = add(ctx.grad, einsum([constant(params, params.weight_decay), var.value, learning_rate],
+        ctx.grad = add(ctx.grad, einsum([optimizer_scalar(params, params.weight_decay), var.value, learning_rate],
                                         output_shape=var.shape))
 
     if not large_tensor or not params.weight_standardisation:
@@ -68,8 +68,8 @@ def update(ctx: OptimizerCtx):
     variance = ((1 - 1 / max_fan) / size ** 2 + 1 / max_fan - 2 / size + 1 / max_fan)
     if params.scale_by_depth:
         variance *= params.n_blocks
-    val = einsum([val, rsqrt_eps(einsum([val, val, constant(params, 1 / val.size)], output_shape=[])),
-                  constant(params, variance ** 0.5)], output_shape=var.shape)
+    val = einsum([val, rsqrt_eps(einsum([val, val, optimizer_scalar(params, 1 / val.size)], output_shape=[])),
+                  optimizer_scalar(params, variance ** 0.5)], output_shape=var.shape)
     update_ops.append(assign(var, val))
 
 
@@ -124,7 +124,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                         einsum([constant_float(params, value=min_gamma, shape=[]), to_fp32(greater_equal(v1v2, v2v2)),
                                 to_fp32(equal(gamma, 0))], output_shape=[]))
             gamma = add(gamma,
-                        einsum([constant(params, -1),
+                        einsum([optimizer_scalar(params, -1),
                                 to_fp32(equal(gamma, 0)),
                                 add(v1v2, negative(v2v2)),
                                 reciprocal(add(v1v1, v2v2) - multiply(-2, v1v2))],
@@ -135,7 +135,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
         operations = loss.graph.operations
         xs = [x.outputs[0] for x in params.mesh.graph.trainable_variables]
         tensor_to_var = dict(zip(xs, params.mesh.graph.trainable_variables))
-        loss_grad = constant_scalar(params, 1.0)
+        loss_grad = optimizer_scalar(params, 1.0)
         downstream = set(xs)
 
         for op in operations:
