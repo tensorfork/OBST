@@ -8,6 +8,10 @@ from ..mtf_wrapper import (cast, optimizer_scalar, einsum, greater, minimum,
 from ..utils_mtf import weighted_add, get_fan_in
 
 
+def opt_rsqrt(tensor: mtf.Tensor):
+    return reciprocal(add(sqrt(tensor), 1e-8))
+
+
 def adam(ctx: OptimizerCtx) -> mtf.Tensor:
     exp_avg_p2_ptr = variable(ctx.params, ctx.var, 'exp_avg_p2', ctx.var.shape)
     exp_avg_p1_ptr = variable(ctx.params, ctx.var, 'exp_avg_p1', ctx.var.shape)
@@ -17,7 +21,7 @@ def adam(ctx: OptimizerCtx) -> mtf.Tensor:
 
     ctx.update_ops.append(assign(exp_avg_p2_ptr, exp_avg_p2))
     ctx.update_ops.append(assign(exp_avg_p1_ptr, grad))
-    return multiply(ctx.grad, reciprocal(add(sqrt(exp_avg_p2), 1e-8)))
+    return multiply(ctx.grad, opt_rsqrt(exp_avg_p2))
 
 
 def novograd(ctx: OptimizerCtx) -> mtf.Tensor:
@@ -26,9 +30,9 @@ def novograd(ctx: OptimizerCtx) -> mtf.Tensor:
 
     exp_avg_p2 = weighted_add(exp_avg_p2, reduce_sum(square(ctx.grad)), ctx.beta2)
     ctx.update_ops.extend([assign(exp_avg_p1_ptr, add(multiply(ctx.beta1, exp_avg_p1_ptr),
-                                                      multiply(ctx.grad, rsqrt_eps(exp_avg_p2)))),
+                                                      multiply(ctx.grad, opt_rsqrt(exp_avg_p2)))),
                            assign(exp_avg_p2_ptr, exp_avg_p2)])
-    return add(multiply(ctx.beta1, exp_avg_p1), multiply(ctx.grad, rsqrt_eps(exp_avg_p2)))
+    return add(multiply(ctx.beta1, exp_avg_p1), multiply(ctx.grad, opt_rsqrt(exp_avg_p2)))
 
 
 def sm3(ctx: OptimizerCtx) -> mtf.Tensor:
@@ -43,7 +47,7 @@ def sm3(ctx: OptimizerCtx) -> mtf.Tensor:
 
     ctx.update_ops.extend([assign(buf_ptr, reduce_max(weight_update, output_shape=[dim]))
                            for buf_ptr, dim in zip(buffer, weight_update.shape.dims)])
-    return multiply(ctx.grad, rsqrt_eps(weight_update))
+    return multiply(ctx.grad, opt_rsqrt(weight_update))
 
 
 def return_grad(ctx: OptimizerCtx) -> mtf.Tensor:
