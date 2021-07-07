@@ -148,6 +148,10 @@ def constant_scalar(params: ModelParameter, value: typing.Union[int, float], dty
     return scoped("constant_scalar", mtf.constant, params.mesh, value, [], dtype)
 
 
+def optimizer_scalar(params: ModelParameter, value: typing.Union[int, float]) -> mtf.Tensor:
+    return scoped("optimizer_scalar", mtf.constant, params.mesh, value, [], params.optimizer_calculation_dtype)
+
+
 def greater_equal(x1: mtf.Tensor, x2: mtf.Tensor, output_shape: OPT_SHAPE = None) -> mtf.Tensor:
     return scoped("greater_equal", mtf.greater_equal, x1, x2, output_shape)
 
