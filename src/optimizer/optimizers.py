@@ -17,7 +17,7 @@ def adam(ctx: OptimizerCtx) -> mtf.Tensor:
 
     ctx.update_ops.append(assign(exp_avg_p2_ptr, exp_avg_p2))
     ctx.update_ops.append(assign(exp_avg_p1_ptr, grad))
-    return multiply(ctx.grad, rsqrt_eps(exp_avg_p2))
+    return multiply(ctx.grad, reciprocal(add(sqrt_eps(exp_avg_p2), 1e-8)))
 
 
 def novograd(ctx: OptimizerCtx) -> mtf.Tensor:
