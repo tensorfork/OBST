@@ -11,7 +11,7 @@ from ..utils_mtf import weighted_add, get_fan_in
 def opt_rsqrt(tensor: mtf.Tensor):
     return reciprocal(add(sqrt(tensor), 1e-8))
 
-
+mtf.optimize.Optimizer
 def adam(ctx: OptimizerCtx) -> mtf.Tensor:
     exp_avg_p2_ptr = variable(ctx.params, ctx.var, 'exp_avg_p2', ctx.var.shape)
     exp_avg_p1_ptr = variable(ctx.params, ctx.var, 'exp_avg_p1', ctx.var.shape)
