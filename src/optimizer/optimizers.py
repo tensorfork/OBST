@@ -21,8 +21,7 @@ def adam(ctx: OptimizerCtx) -> mtf.Tensor:
 
     ctx.update_ops.append(assign(exp_avg_p2_ptr, exp_avg_p2))
     ctx.update_ops.append(assign(exp_avg_p1_ptr, ctx.grad))
-    return einsum([opt_rsqrt(multiply(exp_avg_p2, reciprocal(add(1, negative(pow(ctx.beta2, ctx.step_count)))))),
-                   reciprocal(add(1, negative(pow(ctx.beta1, ctx.step_count)))), ctx.grad], output_shape=ctx.grad.shape)
+    return einsum([opt_rsqrt(exp_avg_p2), ctx.grad], output_shape=ctx.grad.shape)
 
 
 def novograd(ctx: OptimizerCtx) -> mtf.Tensor:
