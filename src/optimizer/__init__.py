@@ -10,14 +10,13 @@ import tensorflow as tf2
 
 from .backend import import_mtf, import_float, get_var, variable
 from .context import OptimizerCtx
-from .gradients import gradients
 from .learning_rate import get_learning_rate
 from .optimizers import OPTIMIZERS
 from ..dataclass import ModelParameter
 from ..mtf_wrapper import (cast, einsum, equal, mod,
                            assign, assign_sub,
                            add, multiply, scoped, assign_add, identity, zeros_like, negative, rsqrt_eps,
-                           optimizer_scalar)
+                           optimizer_scalar, gradients as mtf_gradients)
 from ..utils_mtf import feature_dims_used, get_fan_in
 
 tf = tf2.compat.v1
@@ -108,10 +107,16 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                        0, update_ops, {}, loss_list, {}, 0,
                        0, 0, mstep, step, neg_step, dtype, beta1, beta2,
                        learning_rate, step_count)
-    for _ in gradients(ctx):
+
+    variables = params.mesh.graph.trainable_variables
+    for var, grad in zip(variables, mtf_gradients(loss_list, [v.outputs[0] for v in variables])):
+        ctx(var, grad)
+
         full_name = f'{tf.get_variable_scope().name}/f"{ctx.var.name}/{params.optimizer}/grad_accumulation'
         if fn == "accumulate" or full_name in params.mesh.graph.name_to_variable:
             ctx.grad_buffer = variable(params, ctx.var, "grad_accumulation", ctx.var.shape)
+
         scoped(fn, gradient_accumulation if fn == "accumulate" else update, ctx)
+
     return params.mesh.graph.trainable_variables[0].graph.combine_assignments(update_ops), \
            learning_rate_ctx.learning_rate, {}
