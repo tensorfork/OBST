@@ -73,7 +73,7 @@ MULTI_LOSS_GRADIENTS = {'mgda': mgda,
 def gradients(ctx: OptimizerCtx):
     params = ctx.params
     loss_list = ctx.loss_list
-    variables = [v.outputs[0] for v in params.mesh.graph.trainable_variables]
-    for var, grad in zip(variables, mtf_gradients(loss_list, variables)):
+    variables = params.mesh.graph.trainable_variables
+    for var, grad in zip(variables, mtf_gradients(loss_list, [v.outputs[0] for v in variables])):
         ctx(var, grad)
         yield None
