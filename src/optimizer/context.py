@@ -11,7 +11,9 @@ class OptimizerCtx:
                  debug_gradients_dict: dict, loss_list: list, first_grad: dict,
                  loss_1__loss_1: typing.Optional[mtf.Tensor], loss_1__loss_2: typing.Optional[mtf.Tensor],
                  loss_2__loss_2: typing.Optional[mtf.Tensor], mstep: mtf.Tensor, step: mtf.Tensor, neg_step,
-                 dtype: mtf.VariableDType, beta1: mtf.Tensor, beta2: mtf.Tensor, learning_rate: mtf.Tensor):
+                 dtype: mtf.VariableDType, beta1: mtf.Tensor, beta2: mtf.Tensor, learning_rate: mtf.Tensor,
+                 neg_step_count: mtf.Tensor):
+        self.neg_step_count = neg_step_count
         self.op = op
         self.grad_outputs = grad_outputs
         self.downstream = downstream

@@ -102,6 +102,8 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
     mstep = add(1, neg_step)
     beta1 = add(1, multiply(neg_step, import_mtf(params, 1 - params.opt_beta1, "beta1")))
     beta2 = add(1, multiply(neg_step, import_mtf(params, 1 - params.opt_beta2, "beta2")))
+    neg_step_count = add(multiply(negative(learning_rate_ctx.global_steps_mtf), step),
+                         multiply(neg_step, 10 ** 9))
 
     debug_gradients_dict = {}
     first_grad = {}
@@ -165,7 +167,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                 ctx = OptimizerCtx(op, grad_outputs, downstream, tensor_to_gradient, tensor_to_var, params,
                                    loss_idx, update_ops, debug_gradients_dict, loss_list, first_grad, loss_1__loss_1,
                                    loss_1__loss_2, loss_2__loss_2, mstep, step, neg_step, dtype, beta1, beta2,
-                                   learning_rate)
+                                   learning_rate, neg_step_count)
                 for _ in gradients(ctx):
                     full_name = f'{tf.get_variable_scope().name}/f"{ctx.var.name}/{params.optimizer}/grad_accumulation'
                     if fn == "accumulate" or full_name in params.mesh.graph.name_to_variable:
