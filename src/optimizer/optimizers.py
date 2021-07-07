@@ -63,13 +63,7 @@ def adaptive_gradient_clipping(ctx: OptimizerCtx, gradient_clip: str) -> mtf.Ten
 def l2norm_gradient_clipping(ctx: OptimizerCtx, gradient_clip: str) -> mtf.Tensor:
     gradient_clip = float(gradient_clip)
     return einsum([ctx.grad, optimizer_scalar(ctx.params, gradient_clip),
-                   reciprocal(maximum(einsum([ctx.grad, ctx.grad], []), gradient_clip))])
-
-
-def stddev_gradient_clipping(ctx: OptimizerCtx, gradient_clip: str) -> mtf.Tensor:
-    gradient_clip = float(gradient_clip)
-    return einsum([ctx.grad, optimizer_scalar(ctx.params, gradient_clip),
-                   rsqrt(maximum(einsum([ctx.grad, ctx.grad], []), gradient_clip))])
+                   rsqrt(maximum(einsum([ctx.grad, ctx.grad], []), gradient_clip ** -2))])
 
 
 def value_gradient_clipping(ctx: OptimizerCtx, gradient_clip: str) -> mtf.Tensor:
@@ -95,7 +89,6 @@ OPTIMIZERS = {"adam": adam,
               "sgd": return_grad,
               "adaptive_clip": adaptive_gradient_clipping,
               "l2norm_clip": l2norm_gradient_clipping,
-              "stddev_clip": stddev_gradient_clipping,
               "value_clip": value_gradient_clipping,
               "gradient_centralisation": gradient_centralisation,
               "weight_centralisation": weight_centralisation,
