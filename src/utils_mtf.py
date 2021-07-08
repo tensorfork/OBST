@@ -404,12 +404,15 @@ def get_fan_in(params: ModelParameter, shape: ALL_SHAPES) -> DIM_LIST:
         return shape[:2]
     return shape[:1]
 
-
+# The majority of this Function was copied from:
+# 'https://github.com/tensorflow/mesh/blob/8931eb9025f833b09d8425404ebd5801acbb0cac/mesh_tensorflow/ops.py#L5956-L6104'
+# Copyright 2021 The Mesh TensorFlow Authors.
 class WhileLoopWithControlDependencies(mtf.Operation):
     """While loop, like tf.while_loop."""
 
-    def __init__(self, cond_fn, body_fn, inputs, control_dependencies=None,
-                 tf_kwargs=None, has_accumulators=False, name="custom_while_loop"):
+    def __init__(self, cond_fn: typing.Callable, body_fn: typing.Callable, inputs: typing.Callable,
+                 control_dependencies: typing.List[mtf.Operation] = None, tf_kwargs: typing.Dict = None,
+                 has_accumulators: bool = False, name: str = "custom_while_loop"):
         """Create a WhileLoopOperation.
         A few differences from tf.while_loop:
         - gradients are not yet supported
@@ -426,6 +429,7 @@ class WhileLoopWithControlDependencies(mtf.Operation):
           cond_fn: a function from n mtf Tensors to mtf Scalar
           body_fn: a function from n mtf Tensors to sequence of mtf Tensors
           inputs: list of n mtf Tensors
+          control_dependencies: a list of mtf Operations
           tf_kwargs: a dictionary of arguments for tf.while_loop
           has_accumulators: a boolean
           name: a string
@@ -438,39 +442,43 @@ class WhileLoopWithControlDependencies(mtf.Operation):
         self._body_fn = body_fn
         self._tf_kwargs = tf_kwargs or {}
         self.control_dependencies = control_dependencies
+        self.has_accumulators = has_accumulators
         assert not self._tf_kwargs.get("back_prop", False)
-        ops = self.graph.operations
+
         # remove self from the graph's operations
-        ops.pop()
-        before = len(ops)
+        self.graph.operations.pop()
+        before = len(self.graph.operations)
 
         def make_placeholders(name):
             return [mtf.Tensor(self, t.shape, t.dtype, name="%s:%d" % (name, i)) for i, t in enumerate(inputs)]
 
         self._cond_inputs = make_placeholders("cond_input")
         self._cond_output = self._cond_fn(*self._cond_inputs)
-        self._cond_ops = ops[before:]
-        del ops[before:]
+        self._cond_ops = self.graph.operations[before:]
+        del self.graph.operations[before:]
         self._body_inputs = make_placeholders("body_input")
         self._body_outputs = self._body_fn(*self._body_inputs)
+
         if len(self._body_outputs) < len(inputs):
             raise ValueError("body_fn produces fewer outputs than inputs")
-        if len(self._body_outputs) > len(inputs) and not has_accumulators:
+        if len(self._body_outputs) > len(inputs) and not self.has_accumulators:
             raise ValueError("body_fn produces more outputs than inputs")
         for (i, (inp, body_out)) in enumerate(zip(inputs, self._body_outputs[:len(inputs)])):
             if inp.shape != body_out.shape:
                 raise ValueError("shape mismatch i=%d inp=%s body_out=%s" % (i, inp, body_out))
+
         # Pull new variables outside the loop.
-        added_ops = ops[before:]
-        del ops[before:]
+        added_ops = self.graph.operations[before:]
+        del self.graph.operations[before:]
         self._body_ops = []
         for op in added_ops:
             if isinstance(op, mtf.Variable):
-                ops.append(op)
+                self.graph.operations.append(op)
             else:
                 self._body_ops.append(op)
+
         # re-add self to graph's operations
-        ops.append(self)
+        self.graph.operations.append(self)
         self._outputs = [mtf.Tensor(self, t.shape, t.dtype, name="output:%d" % i)
                          for i, t in enumerate(self._body_outputs)]
 
@@ -530,8 +538,9 @@ class WhileLoopWithControlDependencies(mtf.Operation):
                 ret.append(lowered_out)
 
             # accumulators
-            for i in range(len(self._inputs), len(self._outputs)):
-                ret[i] = [x + y for x, y in zip(ret[i], tf_inputs[i])]
+            if self.has_accumulators:
+                for i in range(len(self._inputs), len(self._outputs)):
+                    ret[i] = [x + y for x, y in zip(ret[i], tf_inputs[i])]
 
             return ret
 
