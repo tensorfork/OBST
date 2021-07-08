@@ -48,6 +48,7 @@ def update(ctx: OptimizerCtx):
     large_tensor = features_used and len(var.shape.dims) > len(params.feature_dims)
     large_tensor |= not features_used and len(var.shape.dims) >= 2  # not norm or rezero + scalable catch-all
     large_tensor &= var.shape.size > 1  # not rezero
+    large_tensor &= "norm" not in var.name  # not norm
     large_tensor &= "embed" not in var.name  # not input/output embedding, position embedding, attention map bias
     large_tensor &= "input" not in var.name or "lang_in" in var.name or "vid_in" in var.name  # not input
     large_tensor &= "output" not in var.name or "lang_out" in var.name or "vid_out" in var.name  # not output
