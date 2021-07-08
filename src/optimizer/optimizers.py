@@ -9,9 +9,9 @@ from ..utils_mtf import weighted_add, get_fan_in
 
 
 def opt_rsqrt(tensor: mtf.Tensor):
-    return reciprocal(add(sqrt(tensor), 1e-8))
+    return reciprocal(maximum(sqrt(tensor), 1e-5))
 
-mtf.optimize.Optimizer
+
 def adam(ctx: OptimizerCtx) -> mtf.Tensor:
     exp_avg_p2_ptr = variable(ctx.params, ctx.var, 'exp_avg_p2', ctx.var.shape)
     exp_avg_p1_ptr = variable(ctx.params, ctx.var, 'exp_avg_p1', ctx.var.shape)
@@ -56,12 +56,12 @@ def return_grad(ctx: OptimizerCtx) -> mtf.Tensor:
 
 def adaptive_gradient_clipping(ctx: OptimizerCtx, gradient_clip: str) -> mtf.Tensor:
     gradient_clip = float(gradient_clip)
-    grd_norm = sqrt_eps(einsum([ctx.grad, ctx.grad], reduced_dims=get_fan_in(ctx.params, ctx.var)))
-    wgt_norm = sqrt_eps(einsum([cast(ctx.var.value, ctx.params.optimizer_calculation_dtype)] * 2,
-                               reduced_dims=get_fan_in(ctx.params, ctx.var)))
-    return weighted_add(einsum([grd_norm, reciprocal(wgt_norm), optimizer_scalar(ctx.params, gradient_clip), ctx.grad],
+    grd_norm = maximum(sqrt(einsum([ctx.grad, ctx.grad], output_shape=[])), 1e-6)
+    wgt_norm = maximum(sqrt(einsum([cast(ctx.var.value, ctx.params.optimizer_calculation_dtype)] * 2, output_shape=[])),
+                       0.001)
+    return weighted_add(einsum([wgt_norm, reciprocal(grd_norm), optimizer_scalar(ctx.params, gradient_clip), ctx.grad],
                                output_shape=ctx.grad.shape), ctx.grad,
-                        cast(greater(multiply(wgt_norm, reciprocal(grd_norm)), gradient_clip),
+                        cast(greater(multiply(grd_norm, reciprocal(wgt_norm)), gradient_clip),
                              ctx.params.optimizer_calculation_dtype))
 
 
