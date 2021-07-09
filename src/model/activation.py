@@ -91,7 +91,7 @@ class LeCunTanhForward(mtf.Operation):
         mesh_impl = lowering.mesh_impl(self)
 
         def slicewise_fn(x):
-            return tfw.add(tfw.tanh(x), tfw.multiply(x * 0.1))
+            return tfw.add(tfw.tanh(x), tfw.multiply(x, 0.1))
 
         y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]])
         lowering.set_tensor_lowering(self.outputs[0], y)

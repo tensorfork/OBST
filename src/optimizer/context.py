@@ -16,7 +16,6 @@ class OptimizerCtx:
         self.step_count = step_count
         self.op = op
         self.grad_outputs = grad_outputs
-        self.downstream = downstream
         self.tensor_to_gradient = tensor_to_gradient
         self.tensor_to_var = tensor_to_var
         self.params = params
@@ -42,6 +41,9 @@ class OptimizerCtx:
         self.var: typing.Optional[mtf.Variable] = None
         self.grad_buffer: typing.Optional[mtf.Variable] = None
         self.grad: typing.Optional[mtf.Tensor] = None
+        self.variable_to_gradient: typing.Optional[typing.Dict[mtf.Variable:mtf.Tensor]] = None
+
+        self.global_norm_reciprocal: typing.Optional[mtf.Tensor] = None
 
     def __call__(self, var: mtf.Variable, grad: mtf.Tensor):
         self.var, self.grad = var, grad

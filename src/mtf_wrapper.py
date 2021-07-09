@@ -224,16 +224,16 @@ def sqrt(tensor: mtf.Tensor) -> mtf.Tensor:
     return scoped("sqrt", mtf.sqrt, tensor)
 
 
-def sqrt_eps(tensor: mtf.Tensor, epsilon: float = 1e-8) -> mtf.Tensor:
-    return scoped("sqrt", lambda x: rsqrt(add(x, epsilon)), tensor)
+def sqrt_eps(tensor: mtf.Tensor, epsilon: float = 1e-6) -> mtf.Tensor:
+    return scoped("sqrt_eps", lambda x: sqrt(add(x, epsilon)), tensor)
 
 
 def rsqrt(tensor: mtf.Tensor) -> mtf.Tensor:
     return scoped("rsqrt", mtf.rsqrt, tensor)
 
 
-def rsqrt_eps(tensor: mtf.Tensor, epsilon: float = 1e-8) -> mtf.Tensor:
-    return scoped("rsqrt6", lambda x: rsqrt(add(x, epsilon)), tensor)
+def rsqrt_eps(tensor: mtf.Tensor, epsilon: float = 1e-6) -> mtf.Tensor:
+    return scoped("rsqrt_eps", lambda x: rsqrt(add(x, epsilon)), tensor)
 
 
 def softplus(tensor: mtf.Tensor) -> mtf.Tensor:
