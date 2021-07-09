@@ -74,7 +74,7 @@ def l2norm_gradient_clipping(ctx: OptimizerCtx, gradient_clip: str) -> mtf.Tenso
 def global_l2norm_gradient_clipping(ctx: OptimizerCtx, gradient_clip: str) -> mtf.Tensor:
     gradient_clip = float(gradient_clip)
     if ctx.global_norm_reciprocal is None:
-        global_sum = add_n([reduce_sum(square(grad[2])) for grad in ctx.tensor_to_gradient.values()])
+        global_sum = add_n([reduce_sum(square(grad)) for grad in ctx.tensor_to_gradient.values()])
         ctx.global_norm_reciprocal = rsqrt(maximum(global_sum, gradient_clip ** -2))
     return einsum([ctx.grad, optimizer_scalar(ctx.params, gradient_clip), ctx.global_norm_reciprocal])
 
