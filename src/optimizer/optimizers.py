@@ -4,7 +4,7 @@ from .backend import variable
 from .context import OptimizerCtx
 from ..mtf_wrapper import (cast, optimizer_scalar, einsum, greater, minimum,
                            reduce_mean, reduce_sum, assign, add, multiply, maximum, reciprocal, square,
-                           reduce_max, rsqrt, sqrt, add_n, negative)
+                           reduce_max, rsqrt, sqrt, add_n, negative, pow as mtf_pow)
 from ..utils_mtf import weighted_add
 
 
@@ -13,7 +13,7 @@ def opt_rsqrt(tensor: mtf.Tensor) -> mtf.Tensor:
 
   
 def debias_momentum(ctx: OptimizerCtx, momentum: mtf.Tensor) -> mtf.Tensor:
-    return reciprocal(add(1, negative(pow(momentum, ctx.step_count))))
+    return reciprocal(add(1, negative(mtf_pow(momentum, ctx.step_count))))
 
   
 def debias(ctx: OptimizerCtx, tensor: mtf.Tensor, momentum: mtf.Tensor) -> mtf.Tensor:
