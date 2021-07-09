@@ -205,7 +205,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
 
                     if grad is None:
                         continue
-    tensor_to_gradient = ctx.tensor_to_gradient = {name: cast(grad, params.optimizer_calculation_dtype)
+    tensor_to_gradient = ctx.tensor_to_gradient = {name: cast(grad[2], params.optimizer_calculation_dtype)
                                                    for name, grad in tensor_to_gradient.items()}
     for var, grad in tensor_to_gradient.items():
         full_name = f'{tf.get_variable_scope().name}/f"{var.name}/{params.optimizer}/grad_accumulation'
