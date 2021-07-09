@@ -1,10 +1,8 @@
 import mesh_tensorflow as mtf
 import tensorflow as tf2
 
-from .backend import variable
 from .context import OptimizerCtx
-from ..model.revnet import RevGradOp
-from ..mtf_wrapper import add_n, einsum, assign, add, negative, reshape, minimum, cast
+from ..mtf_wrapper import add_n, einsum, add, negative, minimum
 
 tf = tf2.compat.v1
 zeros = tf.zeros_initializer()
