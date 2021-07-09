@@ -12,15 +12,7 @@ tf1 = tf.compat.v1
 def norm(args: BlockArgs) -> mtf.Tensor:
     block_input = args.tensor
     feature_shape = mtf.Shape(linear_shapes(args).old)
-    normalized_shape = block_input.shape
-    subtracted = mtf.Shape([])
-    if 'features' in args:
-        subtracted = feature_shape
-    if 'group' in args:
-        subtracted = subtracted - [args.params.head_dim]
-    if 'batch' in args:
-        subtracted = subtracted + [args.params.batch_dim]
-    normalized_shape = normalized_shape - subtracted
+    normalized_shape = block_input.shape - (feature_shape - [args.params.head_dim] * ('group' in args))
 
     block_input = add(block_input, negative(reduce_mean(block_input, output_shape=normalized_shape)))
     scale = [rsqrt_eps(reduce_mean(square(block_input), output_shape=normalized_shape), 1e-5), block_input]
