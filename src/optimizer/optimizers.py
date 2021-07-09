@@ -3,9 +3,9 @@ import mesh_tensorflow as mtf
 from .backend import variable
 from .context import OptimizerCtx
 from ..mtf_wrapper import (cast, optimizer_scalar, einsum, greater, minimum,
-                           reduce_mean, reduce_sum, assign, add, multiply, maximum, sqrt_eps, reciprocal, square,
-                           reduce_max, rsqrt, sqrt)
-from ..utils_mtf import weighted_add, get_fan_in
+                           reduce_mean, reduce_sum, assign, add, multiply, maximum, reciprocal, square,
+                           reduce_max, rsqrt, sqrt, add_n)
+from ..utils_mtf import weighted_add
 
 
 def opt_rsqrt(tensor: mtf.Tensor):
@@ -71,6 +71,14 @@ def l2norm_gradient_clipping(ctx: OptimizerCtx, gradient_clip: str) -> mtf.Tenso
                    rsqrt(maximum(einsum([ctx.grad, ctx.grad], []), gradient_clip ** -2))])
 
 
+def global_l2norm_gradient_clipping(ctx: OptimizerCtx, gradient_clip: str) -> mtf.Tensor:
+    gradient_clip = float(gradient_clip)
+    if ctx.global_norm_reciprocal is None:
+        global_sum = add_n([reduce_sum(square(grad)) for grad in ctx.tensor_to_gradient.values()])
+        ctx.global_norm_reciprocal = rsqrt(maximum(global_sum, gradient_clip ** -2))
+    return einsum([ctx.grad, optimizer_scalar(ctx.params, gradient_clip), ctx.global_norm_reciprocal])
+
+
 def value_gradient_clipping(ctx: OptimizerCtx, gradient_clip: str) -> mtf.Tensor:
     gradient_clip = float(gradient_clip)
     return maximum(minimum(ctx.grad, gradient_clip), -gradient_clip)
@@ -97,5 +105,6 @@ OPTIMIZERS = {"adam": adam,
               "value_clip": value_gradient_clipping,
               "gradient_centralisation": gradient_centralisation,
               "weight_centralisation": weight_centralisation,
-              "learning_rate": multiply_learning_rate
+              "learning_rate": multiply_learning_rate,
+              "global_l2norm_gradient_clipping": global_l2norm_gradient_clipping
               }

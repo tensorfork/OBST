@@ -42,6 +42,8 @@ class OptimizerCtx:
         self.grad_buffer: typing.Optional[mtf.Variable] = None
         self.grad: typing.Optional[mtf.Tensor] = None
 
+        self.global_norm_reciprocal: typing.Optional[mtf.Tensor] = None
+
     def __call__(self, var: mtf.Variable, grad: mtf.Tensor):
         self.var, self.grad = var, grad
         return self
