@@ -41,7 +41,7 @@ class OptimizerCtx:
         self.var: typing.Optional[mtf.Variable] = None
         self.grad_buffer: typing.Optional[mtf.Variable] = None
         self.grad: typing.Optional[mtf.Tensor] = None
-        self.variable_to_gradient: typing.Optional[typing.List[typing.Dict[mtf.Variable:mtf.Tensor]]] = None
+        self.variable_to_gradient: typing.Optional[typing.Dict[mtf.Variable:mtf.Tensor]] = None
 
         self.global_norm_reciprocal: typing.Optional[mtf.Tensor] = None
 
