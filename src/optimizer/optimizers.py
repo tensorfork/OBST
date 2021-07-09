@@ -4,7 +4,7 @@ from .backend import variable
 from .context import OptimizerCtx
 from ..mtf_wrapper import (cast, optimizer_scalar, einsum, greater, minimum,
                            reduce_mean, reduce_sum, assign, add, multiply, maximum, reciprocal, square,
-                           reduce_max, rsqrt, sqrt, add_n)
+                           reduce_max, rsqrt, sqrt, add_n, negative)
 from ..utils_mtf import weighted_add
 
 
@@ -37,7 +37,7 @@ def novograd(ctx: OptimizerCtx) -> mtf.Tensor:
     exp_avg_p1 = exp_avg_p1_ptr = variable(ctx.params, ctx.var, "exp_avg_p1", ctx.var.shape)
     exp_avg_p2 = exp_avg_p2_ptr = variable(ctx.params, ctx.var, "exp_avg_p2", [])
 
-    exp_avg_p1 = add(multiply(ctx.beta1, exp_avg_p1_ptr), multiply(ctx.grad, opt_rsqrt(exp_avg_p2)))
+    exp_avg_p1 = add(multiply(ctx.beta1, exp_avg_p1), multiply(ctx.grad, opt_rsqrt(exp_avg_p2)))
     exp_avg_p2 = weighted_add(exp_avg_p2, reduce_sum(square(ctx.grad)), ctx.beta2)
     ctx.update_ops.extend([assign(exp_avg_p1_ptr, exp_avg_p1),
                            assign(exp_avg_p2_ptr, exp_avg_p2)])
