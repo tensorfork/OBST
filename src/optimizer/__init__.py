@@ -74,7 +74,7 @@ def update(ctx: OptimizerCtx):
     update_ops.append(assign(var, val))
 
 
-def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, manual_step: tf.Tensor, fn: str
+def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, manual_step: mtf.Tensor, fn: str
                   ) -> typing.Tuple[typing.Tuple[mtf.Tensor, typing.List[mtf.Assign], typing.List[mtf.Tensor]],
                                     tf.Tensor, typing.Dict]:
     """
@@ -95,9 +95,10 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
     learning_rate_ctx = get_learning_rate(params, loss_list, update_ops)
     learning_rate = import_mtf(params, learning_rate_ctx.learning_rate, "learning_rate")
 
-    step = cast(equal(mod(tf.cast(manual_step + 1, dtype),
-                          import_mtf(params, params.grad_accumulation * 1., "grad_accum")),
-                      import_mtf(params, 0., "zero")), dtype)
+    with tf.name_scope('step'), tf.variable_scope('step'):
+        step = cast(equal(mod(cast(add(manual_step, constant_scalar(params, 1, dtype=tf.int32)), dtype),
+                              import_mtf(params, params.grad_accumulation * 1., "grad_accum")),
+                          import_mtf(params, 0., "zero")), dtype)
     neg_step = negative(step)
     mstep = add(1, neg_step)
     beta1 = add(1, multiply(neg_step, import_mtf(params, 1 - params.opt_beta1, "beta1")))
@@ -172,5 +173,5 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                     if fn == "accumulate" or full_name in params.mesh.graph.name_to_variable:
                         ctx.grad_buffer = variable(params, ctx.var, "grad_accumulation", ctx.var.shape)
                     scoped(fn, gradient_accumulation if fn == "accumulate" else update, ctx)
-    return params.mesh.graph.trainable_variables[0].graph.combine_assignments(update_ops), \
-           learning_rate_ctx.learning_rate, debug_gradients_dict
+
+    return update_ops, learning_rate, debug_gradients_dict

@@ -1,3 +1,5 @@
+import typing
+
 import jsonpickle
 import mesh_tensorflow as mtf
 import tensorflow as tf
@@ -106,3 +108,10 @@ def analyze_model(params: ModelParameter, time_to_build: float, graph: mtf.Graph
         size_dump = jsonpickle.dumps(model_size, indent=4)
         with tf.io.gfile.GFile(f"{params.model_path}/model_size.info", 'w') as f:
             f.write(size_dump)
+
+
+def rep_batch(params: ModelParameter, shape: [mtf.Shape, typing.List[mtf.Dimension]]):
+
+    if params.macro_batching > 1:
+        return mtf.replace_dimensions(shape, params.batch_dim, params.macro_batch_dim)
+    return shape

@@ -410,7 +410,7 @@ def get_fan_in(params: ModelParameter, shape: ALL_SHAPES) -> DIM_LIST:
 class WhileLoopWithControlDependencies(mtf.Operation):
     """While loop, like tf.while_loop."""
 
-    def __init__(self, cond_fn: typing.Callable, body_fn: typing.Callable, inputs: typing.Callable,
+    def __init__(self, cond_fn: typing.Callable, body_fn: typing.Callable, inputs: typing.List[mtf.Tensor],
                  control_dependencies: typing.List[mtf.Operation] = None, tf_kwargs: typing.Dict = None,
                  has_accumulators: bool = False, name: str = "custom_while_loop"):
         """Create a WhileLoopOperation.
@@ -441,8 +441,8 @@ class WhileLoopWithControlDependencies(mtf.Operation):
         self._cond_fn = cond_fn
         self._body_fn = body_fn
         self._tf_kwargs = tf_kwargs or {}
-        self.control_dependencies = control_dependencies
-        self.has_accumulators = has_accumulators
+        self._control_dependencies = control_dependencies
+        self._has_accumulators = has_accumulators
         assert not self._tf_kwargs.get("back_prop", False)
 
         # remove self from the graph's operations
@@ -457,11 +457,18 @@ class WhileLoopWithControlDependencies(mtf.Operation):
         self._cond_ops = self.graph.operations[before:]
         del self.graph.operations[before:]
         self._body_inputs = make_placeholders("body_input")
-        self._body_outputs = self._body_fn(*self._body_inputs)
+        _body_outputs = self._body_fn(*self._body_inputs)
+
+        if type(_body_outputs) is dict:
+            self._body_outputs = _body_outputs['outputs']
+            self._control_dependencies = _body_outputs['control_dependencies']
+            print('control_dependencies', _body_outputs['control_dependencies'])
+        else:
+            self._body_outputs = _body_outputs
 
         if len(self._body_outputs) < len(inputs):
             raise ValueError("body_fn produces fewer outputs than inputs")
-        if len(self._body_outputs) > len(inputs) and not self.has_accumulators:
+        if len(self._body_outputs) > len(inputs) and not self._has_accumulators:
             raise ValueError("body_fn produces more outputs than inputs")
         for (i, (inp, body_out)) in enumerate(zip(inputs, self._body_outputs[:len(inputs)])):
             if inp.shape != body_out.shape:
@@ -519,8 +526,9 @@ class WhileLoopWithControlDependencies(mtf.Operation):
                 with tf.name_scope(op.name):
                     op.lower(lowering)
 
-            if self.control_dependencies is not None:
-                lower_control_dependencies = [lowering.lowered_operation(op) for op in self.control_dependencies]
+            print(self._control_dependencies)
+            if self._control_dependencies is not None:
+                lower_control_dependencies = [lowering.lowered_operation(op) for op in self._control_dependencies]
 
             ret = []
             for i, mtf_out in enumerate(self._body_outputs):
@@ -531,18 +539,19 @@ class WhileLoopWithControlDependencies(mtf.Operation):
                 else:
                     lowered_out = lowered_out.to_laid_out_tensor().tensor_list
 
-                if self.control_dependencies is not None:
+                if self._control_dependencies is not None:
                     with tf.control_dependencies(lower_control_dependencies):
-                        lowered_out = tf.identity(lowered_out)
+                        lowered_out = [tf.identity(low_out) for low_out in lowered_out]
 
                 ret.append(lowered_out)
 
             # accumulators
-            if self.has_accumulators:
+            if self._has_accumulators:
                 for i in range(len(self._inputs), len(self._outputs)):
                     ret[i] = [x + y for x, y in zip(ret[i], tf_inputs[i])]
 
-            return ret
+            with tf1.control_dependencies(lower_control_dependencies):
+                return ret
 
         lowered_inputs = []
 
