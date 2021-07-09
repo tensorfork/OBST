@@ -16,7 +16,6 @@ class OptimizerCtx:
         self.step_count = step_count
         self.op = op
         self.grad_outputs = grad_outputs
-        self.downstream = downstream
         self.tensor_to_gradient = tensor_to_gradient
         self.tensor_to_var = tensor_to_var
         self.params = params
