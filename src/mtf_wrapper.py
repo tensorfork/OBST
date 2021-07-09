@@ -309,7 +309,3 @@ def ones_like(tensor: mtf.Tensor) -> mtf.Tensor:
 def dropout(tensor: mtf.Tensor, is_training: bool, keep_prob: typing.Optional[float] = None,
             rate: typing.Optional[float] = None, noise_shape: OPT_SHAPE = None) -> mtf.Tensor:
     return scoped("dropout", mtf.dropout, tensor, is_training, keep_prob, rate, noise_shape)
-
-
-def gradients(outputs: typing.List[mtf.Tensor], variables: typing.List[mtf.Tensor]):
-    return scoped("gradients", mtf.gradients, outputs, variables)
