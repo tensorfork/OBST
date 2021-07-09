@@ -121,6 +121,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
         loss_2__loss_2 = constant_float(params, 0, shape=[params.head_dim])
 
     tensor_to_gradient = {}
+    tensor_to_var = {}
 
     for loss_idx, loss in enumerate(loss_list):
         if mgda and loss_idx == 2:
@@ -205,9 +206,10 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
 
                     if grad is None:
                         continue
-    tensor_to_gradient = ctx.tensor_to_gradient = {name: cast(grad[2], params.optimizer_calculation_dtype)
-                                                   for name, grad in tensor_to_gradient.items()}
-    for var, grad in tensor_to_gradient.items():
+    variable_to_gradient = {tensor_to_var[name]: cast(grad[2], params.optimizer_calculation_dtype)
+                            for name, grad in tensor_to_gradient.items()}
+    ctx.variable_to_gradient = variable_to_gradient
+    for var, grad in variable_to_gradient.items():
         full_name = f'{tf.get_variable_scope().name}/f"{var.name}/{params.optimizer}/grad_accumulation'
         if fn == "accumulate" or full_name in params.mesh.graph.name_to_variable:
             ctx.grad_buffer = variable(params, var, "grad_accumulation", var.shape)
