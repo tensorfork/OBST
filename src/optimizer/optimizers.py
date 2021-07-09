@@ -106,5 +106,5 @@ OPTIMIZERS = {"adam": adam,
               "gradient_centralisation": gradient_centralisation,
               "weight_centralisation": weight_centralisation,
               "learning_rate": multiply_learning_rate,
-              "global_l2norm_gradient_clipping": global_l2norm_gradient_clipping
+              "global_l2norm_clip": global_l2norm_gradient_clipping
               }
