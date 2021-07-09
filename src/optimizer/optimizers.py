@@ -8,10 +8,18 @@ from ..mtf_wrapper import (cast, optimizer_scalar, einsum, greater, minimum,
 from ..utils_mtf import weighted_add
 
 
-def opt_rsqrt(tensor: mtf.Tensor):
+def opt_rsqrt(tensor: mtf.Tensor) -> mtf.Tensor:
     return reciprocal(maximum(sqrt(tensor), 1e-5))
 
+  
+def debias_momentum(ctx: OptimizerCtx, momentum: mtf.Tensor) -> mtf.Tensor:
+    return reciprocal(add(1, negative(pow(momentum, ctx.step_count))))
 
+  
+def debias(ctx: OptimizerCtx, tensor: mtf.Tensor, momentum: mtf.Tensor) -> mtf.Tensor:
+    return multiply(tensor, debias_momentum(ctx, momentum))
+  
+  
 def adam(ctx: OptimizerCtx) -> mtf.Tensor:
     exp_avg_p2_ptr = variable(ctx.params, ctx.var, 'exp_avg_p2', ctx.var.shape)
     exp_avg_p1_ptr = variable(ctx.params, ctx.var, 'exp_avg_p1', ctx.var.shape)
@@ -21,18 +29,20 @@ def adam(ctx: OptimizerCtx) -> mtf.Tensor:
 
     ctx.update_ops.append(assign(exp_avg_p2_ptr, exp_avg_p2))
     ctx.update_ops.append(assign(exp_avg_p1_ptr, ctx.grad))
-    return einsum([opt_rsqrt(exp_avg_p2), ctx.grad], output_shape=ctx.grad.shape)
+    return einsum([opt_rsqrt(debias(ctx, exp_avg_p2, ctx.beta2)), ctx.grad,
+                   debias_momentum(ctx, ctx.beta1)], output_shape=ctx.grad.shape)
 
 
 def novograd(ctx: OptimizerCtx) -> mtf.Tensor:
     exp_avg_p1 = exp_avg_p1_ptr = variable(ctx.params, ctx.var, "exp_avg_p1", ctx.var.shape)
     exp_avg_p2 = exp_avg_p2_ptr = variable(ctx.params, ctx.var, "exp_avg_p2", [])
 
+    exp_avg_p1 = add(multiply(ctx.beta1, exp_avg_p1_ptr), multiply(ctx.grad, opt_rsqrt(exp_avg_p2)))
     exp_avg_p2 = weighted_add(exp_avg_p2, reduce_sum(square(ctx.grad)), ctx.beta2)
-    ctx.update_ops.extend([assign(exp_avg_p1_ptr, add(multiply(ctx.beta1, exp_avg_p1_ptr),
-                                                      multiply(ctx.grad, opt_rsqrt(exp_avg_p2)))),
+    ctx.update_ops.extend([assign(exp_avg_p1_ptr, exp_avg_p1),
                            assign(exp_avg_p2_ptr, exp_avg_p2)])
-    return add(multiply(ctx.beta1, exp_avg_p1), multiply(ctx.grad, opt_rsqrt(exp_avg_p2)))
+    return add(multiply(ctx.beta1, exp_avg_p1),
+               multiply(ctx.grad, opt_rsqrt(debias(ctx, exp_avg_p2, ctx.beta2))))
 
 
 def sm3(ctx: OptimizerCtx) -> mtf.Tensor:
