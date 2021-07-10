@@ -36,6 +36,7 @@ def block_part_fn(params: ModelParameter, block_part_config: BlockConfig, block_
 def split_path(args: BlockArgs) -> mtf.Tensor:
     base, *name_extras = [[block.split('-') for block in path.split(',')]
                           for path in '-'.join(args.name_extras).split(';')]
+    base = base[0]
     if 'add' in base:
         out = 0
         fn = add
