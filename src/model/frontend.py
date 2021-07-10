@@ -46,9 +46,8 @@ def split_path(args: BlockArgs) -> mtf.Tensor:
     else:
         raise ValueError
 
-    for n in name_extras:
-        name, *extras = n
-        out = fn(scoped(name, LAYER_FUNCTIONS[name], args(extras)), out)
+    for idx, conf in enumerate(name_extras):
+        out = fn(out, _get_block_part(BlockConfig({'skip': False, 'layer': conf}, ''), args.params, args.tensor))
 
     return out
 
