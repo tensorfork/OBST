@@ -1,11 +1,25 @@
 import multiprocessing
+import typing
 
 import uvicorn
 from fastapi import FastAPI
+from pydantic import BaseModel
 from transformers import GPT2TokenizerFast
 
 from .dataclass import ModelParameter
 from .interface import InterfaceWrapper
+
+
+class Tokens(BaseModel):
+    tokens: typing.List[int]
+
+
+class TokenCompletion(BaseModel):
+    token_completion: typing.List[int]
+
+
+class Completion(BaseModel):
+    completion: str
 
 
 class RestAPI:
@@ -15,14 +29,17 @@ class RestAPI:
         self._params = params
         self._tokenizer = GPT2TokenizerFast.from_pretrained('gpt2')
 
-    async def tokenize(self, prompt: str):
-        return {"out": list(prompt.encode()) if self._params.vocab_size == 256 else self._tokenizer.encode(prompt)}
+    async def tokenize(self, prompt: str) -> Tokens:
+        return Tokens(list(prompt.encode()) if self._params.vocab_size == 256 else self._tokenizer.encode(prompt))
 
-    async def token_completion(self, prompt: str = "", max_tokens: int = 16, temperature: float = 1.):
-        return {'out': self._interface.complete((await self.tokenize(prompt))['out'], temperature, max_tokens).tolist()}
+    async def token_completion(self, prompt: str = "", max_tokens: int = 16,
+                               temperature: float = 1.) -> TokenCompletion:
+        out = self._interface.complete((await self.tokenize(prompt)).tokens, temperature, max_tokens).tolist()
+        return TokenCompletion(out)
 
-    async def completion(self, prompt: str = "", max_tokens: int = 16, temperature: float = 1.):
-        return {'out': self._tokenizer.decode((await self.token_completion(prompt, max_tokens, temperature))['out'])}
+    async def completion(self, prompt: str = "", max_tokens: int = 16, temperature: float = 1.) -> Completion:
+        out = self._tokenizer.decode((await self.token_completion(prompt, max_tokens, temperature)).token_completion)
+        return Completion(out)
 
 
 def get_api_input_and_output_fn(params: ModelParameter):
