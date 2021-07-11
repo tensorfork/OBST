@@ -1,0 +1,67 @@
+{
+    "embedding_stddev": 0.004,
+    "calc_accuracy": true,
+    "scale_by_depth": true,
+    "block_config": [
+        {
+            "layer": [
+                "norm-shift-scale-features-group",
+                "feed_forward-in:relu-in:norm-in:shift-in:scale-in:features-in:glu_add"
+            ]
+        },
+        {
+            "layer": [
+                "norm-shift-scale-features-group",
+                "split_path-multiply;group_linear,activation-gelu,norm-shift-scale-group,attention-biased_attention_map-absolute-input_as_value;group_linear,activation-gelu",
+                "group_linear"
+            ]
+        }
+    ],
+    "group_linear_factor": 4,
+    "intermediate_feed_forward_multiplier": 0.03125,
+    "n_blocks": 64,
+    "use_initial_position_embedding": true,
+    "n_ctx": 128,
+    "n_embd_per_head": 128,
+    "n_head": 64,
+    "use_random_dataloader": false,
+    "shuffle_buffer": 1048576,
+    "buffer_size": 64,
+    "train_batch_size": 4096,
+    "interleaved_datasets": 64,
+    "data_seed": 134567,
+    "dataset_configs": [
+        {
+            "path": "gs://obst-euw4a-aa/the-char-pile/*",
+            "type": "text",
+            "weight": 1
+        }
+    ],
+    "vocab_size": 256,
+    "model_mode": "gpt",
+    "use_language": true,
+    "batch_splits": 4,
+    "head_splits": 8,
+    "adaptive_gradient_clipping": false,
+    "gradient_clip": 1,
+    "learning_rate": 0.001,
+    "opt_beta1": 0.9,
+    "memory_reduction_strategy": "revnet",
+    "opt_beta2": 0.99,
+    "optimizer": "adaptive_clip:0.003-adam-learning_rate",
+    "weight_decay": 0.01,
+    "weight_centralisation": false,
+    "weight_standardisation": false,
+    "macro_batching": 1,
+    "macro_batch_loss_smoothing": true,
+    "model_path": "gs://obst-euw4a-aa/runs/aa/activation/char-blocks=64-lr=1e-3-agc=3e-3-gmlp-with_ff-no_glu-no_tanh-input_as_value",
+    "steps_per_checkpoint": 512,
+    "use_checkpointing": true,
+    "calculation_dtype": "bfloat16",
+    "storage_dtype": "bfloat16",
+    "optimizer_slice_dtype": "float32",
+    "slice_dtype": "float32",
+    "sampling_temperature": 0.75,
+    "use_autoregressive_sampling": true,
+    "initial_autoregressive_position": 64
+}
