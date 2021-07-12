@@ -218,7 +218,4 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
         scoped(fn, gradient_accumulation if fn == "accumulate" else update,
                ctx(var, cast(grad, params.optimizer_calculation_dtype)))
 
-    #return params.mesh.graph.trainable_variables[0].graph.combine_assignments(ctx.update_ops), \
-    #       learning_rate, debug_gradients_dict
-
-    return ctx.update_ops, learning_rate, debug_gradients_dict
+    return ctx.update_ops, learning_rate, params.mesh.graph.combine_assignments(debug_gradients_dict)
