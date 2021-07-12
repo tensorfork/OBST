@@ -112,6 +112,6 @@ def analyze_model(params: ModelParameter, time_to_build: float, graph: mtf.Graph
 
 def rep_batch(params: ModelParameter, shape: [mtf.Shape, typing.List[mtf.Dimension]]):
 
-    if params.macro_batching > 1:
+    if params.macro_batching > 1 and params.train:
         return mtf.replace_dimensions(shape, params.batch_dim, params.macro_batch_dim)
     return shape
