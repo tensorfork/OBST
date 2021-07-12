@@ -30,16 +30,17 @@ class RestAPI:
         self._tokenizer = GPT2TokenizerFast.from_pretrained('gpt2')
 
     async def tokenize(self, prompt: str) -> Tokens:
-        return Tokens(list(prompt.encode()) if self._params.vocab_size == 256 else self._tokenizer.encode(prompt))
+        out = list(prompt.encode()) if self._params.vocab_size == 256 else self._tokenizer.encode(prompt)
+        return Tokens(tokens=out)
 
     async def token_completion(self, prompt: str = "", max_tokens: int = 16,
                                temperature: float = 1.) -> TokenCompletion:
         out = self._interface.complete((await self.tokenize(prompt)).tokens, temperature, max_tokens).tolist()
-        return TokenCompletion(out)
+        return TokenCompletion(token_completion=out)
 
     async def completion(self, prompt: str = "", max_tokens: int = 16, temperature: float = 1.) -> Completion:
         out = self._tokenizer.decode((await self.token_completion(prompt, max_tokens, temperature)).token_completion)
-        return Completion(out)
+        return Completion(completion=out)
 
 
 def get_api_input_and_output_fn(params: ModelParameter):
