@@ -102,7 +102,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
     learning_rate = import_mtf(params, learning_rate_ctx.learning_rate, "learning_rate")
 
     with tf.name_scope('step'), tf.variable_scope('step'):
-        step = cast(equal(mod(cast(add(manual_step, constant_scalar(params, 1, dtype=tf.int32)), dtype),
+        step = cast(equal(mod(cast(add(manual_step, constant_scalar(params, 1, dtype=tf.int64)), dtype),
                               import_mtf(params, params.grad_accumulation * 1., "grad_accum")),
                           import_mtf(params, 0., "zero")), dtype)
     neg_step = negative(step)
@@ -218,5 +218,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
         scoped(fn, gradient_accumulation if fn == "accumulate" else update,
                ctx(var, cast(grad, params.optimizer_calculation_dtype)))
 
-    return params.mesh.graph.trainable_variables[0].graph.combine_assignments(ctx.update_ops), \
-           learning_rate_ctx.learning_rate, debug_gradients_dict
+    #return params.mesh.graph.trainable_variables[0].graph.combine_assignments(ctx.update_ops), \
+    #       learning_rate, debug_gradients_dict
+
+    return ctx.update_ops, learning_rate, debug_gradients_dict

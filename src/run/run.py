@@ -18,6 +18,7 @@ from .. import tf_wrapper as tfw
 from ..dataclass import ModelParameter
 from ..mtf_wrapper import reduce_sum
 from ..utils_core import color_print
+from ..optimizer.backend import import_mtf
 
 tf1 = tf.compat.v1
 Dataset = tf1.data.Dataset
@@ -95,7 +96,9 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                                                              frame_mask_src,
                                                                                              frame_mask_tag,
                                                                                              token_mask,
-                                                                                             manual_global_step)
+                                                                                             import_mtf(params,
+                                                                                             manual_global_step,
+                                                                                             "manual_global_step"))
         else:
             token_out, frame_out = get_infrence_model(params)(frame_input,
                                                               cat_mask_src,
@@ -112,7 +115,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         analyze_model(params, time_to_build=(time.time() - start_time), graph=graph)
         color_print(params, "Lowering graph to TensorFlow...")
         start_time = time.time()
-        lowering = mtf.Lowering(graph, {params.mesh: params.mesh_impl})
+        lowering = mtf.Lowering(graph, {params.mesh: params.mesh_impl}, autostack=(params.macro_batching > 1))
         color_print(params, f"Lowered in {time.time() - start_time:.1f}s")
 
         if params.train:

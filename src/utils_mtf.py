@@ -462,7 +462,6 @@ class WhileLoopWithControlDependencies(mtf.Operation):
         if type(_body_outputs) is dict:
             self._body_outputs = _body_outputs['outputs']
             self._control_dependencies = _body_outputs['control_dependencies']
-            print('control_dependencies', _body_outputs['control_dependencies'])
         else:
             self._body_outputs = _body_outputs
 
@@ -526,7 +525,6 @@ class WhileLoopWithControlDependencies(mtf.Operation):
                 with tf.name_scope(op.name):
                     op.lower(lowering)
 
-            print(self._control_dependencies)
             if self._control_dependencies is not None:
                 lower_control_dependencies = [lowering.lowered_operation(op) for op in self._control_dependencies]
 
@@ -550,8 +548,7 @@ class WhileLoopWithControlDependencies(mtf.Operation):
                 for i in range(len(self._inputs), len(self._outputs)):
                     ret[i] = [x + y for x, y in zip(ret[i], tf_inputs[i])]
 
-            with tf1.control_dependencies(lower_control_dependencies):
-                return ret
+            return ret
 
         lowered_inputs = []
 
