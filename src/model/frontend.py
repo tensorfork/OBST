@@ -19,6 +19,7 @@ tf1 = tf.compat.v1
 
 def _get_block_part(block_part_config: BlockConfig, params: ModelParameter, block_input: mtf.Tensor) -> mtf.Tensor:
     out = block_input
+
     for layer in block_part_config.layer:
         name, *extras = layer.split('-')
         out = scoped(name + '_', LAYER_FUNCTIONS[name], BlockArgs(params, out, extras))
@@ -34,8 +35,8 @@ def block_part_fn(params: ModelParameter, block_part_config: BlockConfig, block_
 
 
 def split_path(args: BlockArgs) -> mtf.Tensor:
-    base, *name_extras = [[block.split('-') for block in path.split(',')]
-                          for path in '-'.join(args.name_extras).split(';')]
+    base, *name_extras = [path for path in '-'.join(args.name_extras).split(';')]
+    base = base.split('-')
     if 'add' in base:
         out = 0
         fn = add
@@ -45,9 +46,9 @@ def split_path(args: BlockArgs) -> mtf.Tensor:
     else:
         raise ValueError
 
-    for n in name_extras:
-        name, *extras = n
-        out = fn(scoped(name, LAYER_FUNCTIONS[name], args(extras)), out)
+    for idx, conf in enumerate(name_extras):
+        out = fn(out, _get_block_part(BlockConfig({'skip': False, 'layer': conf.split(',')}, ''),
+                                      args.params, args.tensor))
 
     return out
 
@@ -62,3 +63,4 @@ LAYER_FUNCTIONS = {'feed_forward': feed_forward,
                    'group_linear': group_linear,
                    'split_path': split_path
                    }
+
