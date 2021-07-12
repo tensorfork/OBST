@@ -11,15 +11,15 @@ from ..utils_mtf import weighted_add
 def opt_rsqrt(tensor: mtf.Tensor) -> mtf.Tensor:
     return reciprocal(maximum(sqrt(tensor), 1e-5))
 
-  
+
 def debias_momentum(ctx: OptimizerCtx, momentum: mtf.Tensor) -> mtf.Tensor:
     return reciprocal(add(1, negative(mtf_pow(momentum, ctx.step_count))))
 
-  
+
 def debias(ctx: OptimizerCtx, tensor: mtf.Tensor, momentum: mtf.Tensor) -> mtf.Tensor:
     return multiply(tensor, debias_momentum(ctx, momentum))
-  
-  
+
+
 def adam(ctx: OptimizerCtx) -> mtf.Tensor:
     exp_avg_p2_ptr = variable(ctx.params, ctx.var, 'exp_avg_p2', ctx.var.shape)
     exp_avg_p1_ptr = variable(ctx.params, ctx.var, 'exp_avg_p1', ctx.var.shape)
@@ -27,8 +27,8 @@ def adam(ctx: OptimizerCtx) -> mtf.Tensor:
     exp_avg_p2 = weighted_add(exp_avg_p2_ptr, square(ctx.grad), ctx.beta2)
     ctx.grad = weighted_add(exp_avg_p1_ptr, ctx.grad, ctx.beta1)
 
-    ctx.update_ops.append(assign(exp_avg_p2_ptr, exp_avg_p2))
-    ctx.update_ops.append(assign(exp_avg_p1_ptr, ctx.grad))
+    ctx.update_ops[exp_avg_p2_ptr.name] = exp_avg_p2
+    ctx.update_ops[exp_avg_p1_ptr.name] = ctx.grad
     return einsum([opt_rsqrt(debias(ctx, exp_avg_p2, ctx.beta2)), ctx.grad,
                    debias_momentum(ctx, ctx.beta1)], output_shape=ctx.grad.shape)
 
@@ -54,9 +54,8 @@ def sm3(ctx: OptimizerCtx) -> mtf.Tensor:
         weight_update = minimum(weight_update, buffer[-1])
 
     weight_update = add(weight_update, square(ctx.grad))
-
-    ctx.update_ops.extend([assign(buf_ptr, reduce_max(weight_update, output_shape=[dim]))
-                           for buf_ptr, dim in zip(buffer, weight_update.shape.dims)])
+    for buf_ptr, dim in zip(buffer, weight_update.shape.dims):
+        ctx.update_ops[buf_ptr.name] = reduce_max(weight_update, output_shape=[dim])
     return multiply(ctx.grad, opt_rsqrt(weight_update))
 
 
