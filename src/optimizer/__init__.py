@@ -82,7 +82,8 @@ def update(ctx: OptimizerCtx):
 
 
 def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, manual_step: mtf.Tensor, fn: str
-                  ) -> typing.Tuple[typing.List[mtf.Assign], tf.Tensor, typing.Dict[str:mtf.Tensor]]:
+                  ) -> typing.Tuple[typing.Tuple[mtf.Tensor, typing.List[mtf.Assign], typing.List[mtf.Tensor]],
+                                    tf.Tensor, typing.Dict]:
     """
     Creates optimizing and update/training operations.
     :param loss_list: Final scalar loss of the model
