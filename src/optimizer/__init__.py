@@ -81,8 +81,7 @@ def update(ctx: OptimizerCtx):
 
 
 def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, manual_step: mtf.Tensor, fn: str
-                  ) -> typing.Tuple[typing.Tuple[mtf.Tensor, typing.List[mtf.Assign], typing.List[mtf.Tensor]],
-                                    tf.Tensor, typing.Dict]:
+                  ) -> typing.Tuple[typing.List[mtf.Assign], tf.Tensor, typing.Dict[str:mtf.Tensor]]:
     """
     Creates optimizing and update/training operations.
     :param loss_list: Final scalar loss of the model
@@ -218,4 +217,4 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
         scoped(fn, gradient_accumulation if fn == "accumulate" else update,
                ctx(var, cast(grad, params.optimizer_calculation_dtype)))
 
-    return ctx.update_ops, learning_rate, params.mesh.graph.combine_assignments(debug_gradients_dict)
+    return params.mesh.graph.combine_assignments(ctx.update_ops), learning_rate, debug_gradients_dict
