@@ -20,7 +20,7 @@ from ..model.revnet import RevGradOp
 from ..mtf_wrapper import (cast, constant_float, constant_scalar, einsum, equal, greater_equal, mod,
                            reduce_sum, assign, assign_sub,
                            add, multiply, scoped, assign_add, identity, zeros_like, negative, rsqrt_eps,
-                           optimizer_scalar, reciprocal)
+                           optimizer_scalar, reciprocal, reduce_mean, broadcast)
 from ..mtf_wrapper import reshape
 from ..utils_mtf import feature_dims_used, to_fp32, get_fan_in
 
@@ -39,7 +39,8 @@ def update(ctx: OptimizerCtx):
 
     var = ctx.var
     if ctx.grad_buffer is not None:
-        ctx.grad = identity(ctx.grad_buffer.value)
+        ctx.grad = reduce_mean(broadcast(identity(ctx.grad_buffer.value), [params.batch_dim] + ctx.grad.shape.dims),
+                               params.batch_dim)
         ctx.update_ops.append(assign(ctx.grad_buffer, zeros_like(ctx.grad)))
 
     for opt in params.optimizer.split('-'):
