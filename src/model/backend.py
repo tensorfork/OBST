@@ -51,7 +51,7 @@ def get_var(args: BlockArgs, shape: SHAPE, initializer: Initializer) -> mtf.Tens
 
     name = tf1.get_variable_scope().name
     scope = name.split('/')
-    body_idx = scope.index("body") + 1
+    body_idx = scope.index("body0v") + 1
     block, full_fn_name = scope[body_idx:body_idx + 2]
     block, config = block.split('_')
     first_block = block == '0'
