@@ -102,10 +102,9 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
     learning_rate_ctx = get_learning_rate(params, loss_list, update_ops)
     learning_rate = import_mtf(params, learning_rate_ctx.learning_rate, "learning_rate")
 
-    with tf.name_scope('step'), tf.variable_scope('step'):
-        step = cast(equal(mod(cast(add(manual_step, constant_scalar(params, 1, dtype=tf.int64)), dtype),
-                              import_mtf(params, params.grad_accumulation * 1., "grad_accum")),
-                          import_mtf(params, 0., "zero")), dtype)
+    step = cast(equal(mod(cast(add(manual_step, constant_scalar(params, 1)), dtype),
+                          import_mtf(params, params.grad_accumulation * 1., "grad_accum")),
+                      import_mtf(params, 0., "zero")), dtype)
     neg_step = negative(step)
     mstep = add(1, neg_step)
     beta1 = add(1, multiply(neg_step, import_mtf(params, 1 - params.opt_beta1, "beta1")))
