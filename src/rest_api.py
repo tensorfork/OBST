@@ -39,7 +39,9 @@ class RestAPI:
 
     async def token_completion(self, prompt: str = "", max_tokens: int = 16,
                                temperature: float = 1.) -> TokenCompletion:
-        out = self._interface.complete((await self.encode(prompt)).tokens, temperature, max_tokens).tolist()
+
+        out = self._interface.complete((await self.encode(prompt)).tokens, temperature, len(prompt) + max_tokens)
+        out = out.tolist()[:max_tokens]
         return TokenCompletion(token_completion=out)
 
     async def completion(self, prompt: str = "", max_tokens: int = 16, temperature: float = 1.) -> Completion:
