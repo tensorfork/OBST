@@ -248,10 +248,6 @@ def square(tensor: mtf.Tensor) -> mtf.Tensor:
     return scoped("square", mtf.square, tensor)
 
 
-def broadcast(tensor: mtf.Tensor, new_shape: SHAPE) -> mtf.Tensor:
-    return scoped("broadcast", mtf.broadcast, tensor, new_shape)
-
-
 def sign(tensor: mtf.Tensor) -> mtf.Tensor:
     return scoped("sign", mtf.sign, tensor)
 
