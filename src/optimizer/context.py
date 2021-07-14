@@ -7,8 +7,7 @@ from ..dataclass import ModelParameter
 
 class OptimizerCtx:
     def __init__(self, op: mtf.Operation, grad_outputs: typing.List[mtf.Tensor], downstream: typing.Set[mtf.Operation],
-                 tensor_to_gradient: dict, tensor_to_var: dict, params: ModelParameter, loss_idx: int,
-                 update_ops: typing.Dict[str:mtf.Tensor],
+                 tensor_to_gradient: dict, tensor_to_var: dict, params: ModelParameter, loss_idx: int, update_ops: list,
                  debug_gradients_dict: dict, loss_list: list, first_grad: dict,
                  loss_1__loss_1: typing.Optional[mtf.Tensor], loss_1__loss_2: typing.Optional[mtf.Tensor],
                  loss_2__loss_2: typing.Optional[mtf.Tensor], mstep: mtf.Tensor, step: mtf.Tensor, neg_step,

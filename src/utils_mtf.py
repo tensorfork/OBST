@@ -6,8 +6,7 @@ import tensorflow as tf
 from tensorflow.python.ops.init_ops import Initializer
 
 from .dataclass import BlockArgs, ModelParameter
-from .mtf_wrapper import cast, mtf_range, reshape, concat as mtf_concat, pad as mtf_pad, mtf_slice, add, multiply, \
-    negative
+from .mtf_wrapper import cast, mtf_range, reshape, concat as mtf_concat, pad as mtf_pad, mtf_slice, add, multiply, negative
 from .utils_core import default, random_name
 
 tf1 = tf.compat.v1
@@ -244,18 +243,14 @@ def non_replicated_broadcast(x, shape):
 
 
 def get_variable(params: ModelParameter, name: str, shape: SHAPE, initializer: Initializer, trainable: bool,
-                 dtype: mtf.VariableDType) -> mtf.Tensor:
+                 dtype: mtf.VariableDType):
     full_name = f'{tf1.get_variable_scope().name}/{name}'
-    if full_name in params.variable_cache:
-        return params.variable_cache[full_name]
     if full_name in params.mesh.graph.name_to_variable:
-        params.variable_cache[full_name] = params.mesh.graph.name_to_variable[full_name].outputs[0]
-        return params.variable_cache[full_name]
+        return params.mesh.graph.name_to_variable[full_name].outputs[0]
     shape = deduplicate(mtf.Shape(shape))
     var = mtf.Variable(params.mesh, name, shape, dtype, initializer, trainable)
     params.mesh.graph.name_to_variable[full_name] = var
-    params.variable_cache[full_name] = var.outputs[0]
-    return params.variable_cache[full_name]
+    return var.outputs[0]
 
 
 def non_replicated_variable(params: ModelParameter, name: str, shape: SHAPE, initializer: Initializer, trainable: bool,

@@ -236,10 +236,6 @@ def rsqrt_eps(tensor: mtf.Tensor, epsilon: float = 1e-6) -> mtf.Tensor:
     return scoped("rsqrt_eps", lambda x: rsqrt(add(x, epsilon)), tensor)
 
 
-def broadcast(tensor: mtf.Tensor, new_shape: SHAPE) -> mtf.Tensor:
-    return scoped("broadcast", mtf.broadcast, tensor, new_shape)
-
-
 def softplus(tensor: mtf.Tensor) -> mtf.Tensor:
     return scoped("softplus", mtf.softplus, tensor)
 
