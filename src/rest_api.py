@@ -54,7 +54,8 @@ def get_api_input_and_output_fn(params: ModelParameter):
     for key in dir(rest_api):
         if key.startswith('_') or key.endswith('_'):
             continue
-        fast_api.post('/' + key)(getattr(rest_api, key))
+        fn = getattr(rest_api, key)
+        fast_api.post('/' + key, response_model=typing.get_type_hints(fn)["return"])(fn)
 
     run = multiprocessing.Process(target=uvicorn.run, daemon=True, args=(fast_api,),
                                   kwargs={'host': '0.0.0.0', 'port': 62220, 'log_level': 'info',

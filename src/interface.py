@@ -246,7 +246,7 @@ class InterfaceWrapper:
     def complete(self, query: typing.List[int], temperature: float, response_len: int, debug: bool = False,
                  asynchronous: bool = False) -> typing.Union[typing.Callable, typing.Tuple[np.array, np.array],
                                                              np.array]:
-        iter_pos = len(query) + 1
+        iter_pos = len(query)
 
         if iter_pos >= self.params.n_ctx or max(query) >= self.params.vocab_size:
             return None
