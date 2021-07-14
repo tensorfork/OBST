@@ -17,9 +17,10 @@ from .learning_rate import get_learning_rate
 from .optimizers import OPTIMIZERS
 from ..dataclass import ModelParameter
 from ..model.revnet import RevGradOp
-from ..mtf_wrapper import (reduce_mean, cast, constant_float, constant_scalar, einsum, equal, greater_equal, mod,
-                           reduce_sum, add, multiply, scoped, identity, zeros_like, negative, rsqrt_eps,
-                           optimizer_scalar, reciprocal, subtract, broadcast, assign_add, assign, assign_sub)
+from ..mtf_wrapper import (cast, constant_float, constant_scalar, einsum, equal, greater_equal, mod,
+                           reduce_sum, assign, assign_sub,
+                           add, multiply, scoped, assign_add, identity, zeros_like, negative, rsqrt_eps,
+                           optimizer_scalar, reciprocal, reduce_mean, broadcast)
 from ..mtf_wrapper import reshape
 from ..utils_mtf import feature_dims_used, to_fp32, get_fan_in
 
@@ -80,7 +81,7 @@ def update(ctx: OptimizerCtx):
     update_ops.append(assign(var, val))
 
 
-def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, manual_step: tf.Tensor, fn: str
+def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, manual_step: mtf.Tensor, fn: str
                   ) -> typing.Tuple[typing.Tuple[mtf.Tensor, typing.List[mtf.Assign], typing.List[mtf.Tensor]],
                                     tf.Tensor, typing.Dict]:
     """
@@ -211,7 +212,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                             for tensor, var in tensor_to_var.items()}
     ctx.variable_to_gradient = variable_to_gradient
     for var, grad in variable_to_gradient.items():
-        full_name = f'{tf.get_variable_scope().name}/f"{var.name}/{params.optimizer}/grad_accumulation'
+        full_name = f'{var.name}/{params.optimizer}/grad_accumulation'
         if fn == "accumulate" or full_name in params.mesh.graph.name_to_variable:
             ctx.grad_buffer = variable(params, var, "grad_accumulation", var.shape)
         scoped(fn, gradient_accumulation if fn == "accumulate" else update,
