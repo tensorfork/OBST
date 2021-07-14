@@ -2,7 +2,7 @@ import multiprocessing
 import typing
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from transformers import GPT2TokenizerFast
 
@@ -22,12 +22,35 @@ class Completion(BaseModel):
     completion: str
 
 
+class SanitizedTokens(BaseModel):
+    tokens: typing.List[int]
+
+
+class CompletionInput(BaseModel):
+    prompt: str = ""
+    max_tokens: int = 16
+    temperature: float = 1.
+    error: bool = True
+
+
 class RestAPI:
     def __init__(self, params: ModelParameter):
-        self._functions = {}
         self._interface = InterfaceWrapper(params)
         self._params = params
         self._tokenizer = GPT2TokenizerFast.from_pretrained('gpt2')
+
+    async def check_tokens(self, tokens: typing.List[int], error: bool = True) -> SanitizedTokens:
+        if tokens and max(tokens) > self._params.vocab_size:
+            if error:
+                raise HTTPException(status_code=400, detail=f"Invalid tokens sent. Tokens go up to "
+                                                            f"{self._params.vocab_size} but received {max(tokens)}.")
+            tokens = [t for t in tokens if t < self._params.vocab_size]
+        if len(tokens) > self._params.n_ctx:
+            if error:
+                raise HTTPException(status_code=400, detail=f"Context too big. The model supports up to "
+                                                            f"{self._params.n_ctx} tokens but received {len(tokens)}.")
+            tokens = tokens[:self._params.n_ctx]
+        return SanitizedTokens(tokens=tokens)
 
     async def encode(self, prompt: str) -> Tokens:
         out = list(prompt.encode()) if self._params.vocab_size == 256 else self._tokenizer.encode(prompt)
@@ -37,14 +60,15 @@ class RestAPI:
         out = ''.join(chr(c) for c in prompt) if self._params.vocab_size == 256 else self._tokenizer.encode(prompt)
         return Completion(completion=out)
 
-    async def token_completion(self, prompt: str = "", max_tokens: int = 16,
-                               temperature: float = 1.) -> TokenCompletion:
-        out = self._interface.complete((await self.encode(prompt)).tokens, temperature, len(prompt) + max_tokens)
-        out = out.tolist()[:max_tokens]
+    async def token_completion(self, params: CompletionInput) -> TokenCompletion:
+        tokens = (await self.encode(params.prompt)).tokens
+        tokens = (await self.check_tokens(tokens, params.error)).tokens
+        out = self._interface.complete(tokens, params.temperature, len(tokens) + params.max_tokens)
+        out = out.tolist()[:params.max_tokens]
         return TokenCompletion(token_completion=out)
 
-    async def completion(self, prompt: str = "", max_tokens: int = 16, temperature: float = 1.) -> Completion:
-        return await self.decode((await self.token_completion(prompt, max_tokens, temperature)).token_completion)
+    async def completion(self, params: CompletionInput) -> Completion:
+        return await self.decode((await self.token_completion(params)).token_completion)
 
 
 def get_api_input_and_output_fn(params: ModelParameter):

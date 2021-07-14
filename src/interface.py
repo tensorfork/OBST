@@ -223,6 +223,14 @@ def get_command_line_input_and_output_fn(params: ModelParameter):
     return input_fns, output_fn
 
 
+class ContextExhaustedError(ValueError):
+    pass
+
+
+class InvalidTokenError(ValueError):
+    pass
+
+
 class InterfaceWrapper:
     def __init__(self, params: ModelParameter):
         self.params = params
@@ -248,8 +256,10 @@ class InterfaceWrapper:
                                                              np.array]:
         iter_pos = len(query)
 
-        if iter_pos >= self.params.n_ctx or max(query) >= self.params.vocab_size:
-            return None
+        if iter_pos >= self.params.n_ctx:
+            raise ContextExhaustedError
+        if max(query) >= self.params.vocab_size:
+            raise InvalidTokenError
 
         prompt_id = self.increment(self.input_prompt_id)
 
