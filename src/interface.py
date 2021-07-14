@@ -258,7 +258,7 @@ class InterfaceWrapper:
 
         if iter_pos >= self.params.n_ctx:
             raise ContextExhaustedError
-        if max(query) >= self.params.vocab_size:
+        if query and max(query) >= self.params.vocab_size:
             raise InvalidTokenError
 
         prompt_id = self.increment(self.input_prompt_id)
