@@ -134,3 +134,12 @@ OPTIMIZERS = {"adam": adam,
               "global_l2norm_clip": global_l2norm_gradient_clipping,
               "momentum": momentum
               }
+
+
+def graft(ctx: OptimizerCtx, optimizer: str, *params: str) -> mtf.Tensor:
+    return einsum([ctx.grad, rsqrt(reduce_sum(square(ctx.grad))),
+                   sqrt(reduce_sum(square(OPTIMIZERS[optimizer](ctx, *params))))],
+                  output_shape=ctx.grad.shape)
+
+
+OPTIMIZERS['graft'] = graft
