@@ -20,9 +20,8 @@ from ..model.revnet import RevGradOp
 from ..mtf_wrapper import (cast, constant_float, constant_scalar, einsum, equal, greater_equal, mod,
                            reduce_sum, assign, assign_sub,
                            add, multiply, scoped, assign_add, identity, zeros_like, negative, rsqrt_eps,
-                           optimizer_scalar, reciprocal, reduce_mean, broadcast)
-from ..mtf_wrapper import reshape
-from ..utils_mtf import feature_dims_used, to_fp32, get_fan_in
+                           optimizer_scalar, reciprocal, reduce_mean, broadcast, reshape, logical_and)
+from ..utils_mtf import feature_dims_used, to_fp32, get_fan_in, weighted_add
 
 tf = tf2.compat.v1
 zeros = tf.zeros_initializer()
@@ -65,19 +64,29 @@ def update(ctx: OptimizerCtx):
                                          cast(var.value, params.optimizer_calculation_dtype), learning_rate],
                                         output_shape=var.shape))
 
-    if not large_tensor or not params.weight_standardisation:
+    if not large_tensor or not params.weight_standardisation or not params.lookahead_steps:
         update_ops.append(assign_sub(var, ctx.grad))
         return
 
     val: mtf.Tensor = var.value - ctx.grad
-    fan_in_size = np.prod([d.size for d in get_fan_in(params, var)])
-    size = np.prod([d.size for d in var.shape.dims])
-    max_fan = max(fan_in_size, size // fan_in_size)
-    variance = ((1 - 1 / max_fan) / size ** 2 + 1 / max_fan - 2 / size + 1 / max_fan)
-    if params.scale_by_depth:
-        variance *= params.n_blocks
-    val = einsum([val, rsqrt_eps(einsum([val, val, optimizer_scalar(params, 1 / val.size)], output_shape=[])),
-                  optimizer_scalar(params, variance ** 0.5)], output_shape=var.shape)
+
+    if params.lookahead_steps:
+        slow_weight = variable(ctx.params, ctx.var, "slow_weight", ctx.var.shape)
+        var_grad = var.value - ctx.grad
+        val = weighted_add(slow_weight + (var_grad - slow_weight) * params.lookahead_alpha, var_grad,
+                           logical_and(equal(mod(ctx.step_count, params.lookahead_steps), 0), cast(ctx.step, tf.bool)))
+        ctx.update_ops.extend([assign(slow_weight, val)])
+
+    if params.weight_standardisation:
+        fan_in_size = np.prod([d.size for d in get_fan_in(params, var)])
+        size = np.prod([d.size for d in var.shape.dims])
+        max_fan = max(fan_in_size, size // fan_in_size)
+        variance = ((1 - 1 / max_fan) / size ** 2 + 1 / max_fan - 2 / size + 1 / max_fan)
+        if params.scale_by_depth:
+            variance *= params.n_blocks
+        val = einsum([val, rsqrt_eps(einsum([val, val, optimizer_scalar(params, 1 / val.size)], output_shape=[])),
+                      optimizer_scalar(params, variance ** 0.5)], output_shape=var.shape)
+
     update_ops.append(assign(var, val))
 
 
