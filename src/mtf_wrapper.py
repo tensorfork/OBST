@@ -79,8 +79,8 @@ def logical_not(tensor: mtf.Tensor):
     return scoped("logical_not", mtf.logical_not, tensor)
 
 
-def logical_and(tensor: mtf.Tensor):
-    return scoped("logical_and", mtf.logical_and, tensor)
+def logical_and(x1: mtf.Tensor, x2: mtf.Tensor):
+    return scoped("logical_and", mtf.logical_and, x1, x2)
 
 
 def identity(tensor: mtf.Tensor):
