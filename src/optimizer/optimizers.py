@@ -107,6 +107,20 @@ def multiply_learning_rate(ctx: OptimizerCtx) -> mtf.Tensor:
     return multiply(ctx.grad, ctx.learning_rate)
 
 
+def momentum(ctx: OptimizerCtx, momentum_multiplier: str, gradient_multiplier: str,
+             nesterov: str) -> mtf.Tensor:
+    nesterov = bool(int(nesterov))
+    momentum_multiplier = float(momentum_multiplier)
+    gradient_multiplier = float(gradient_multiplier)
+
+    state = variable(ctx.params, ctx.var, 'momentum', ctx.var.shape)
+    new_state = momentum_multiplier * state + ctx.grad * gradient_multiplier
+    ctx.update_ops.append(assign(state, new_state))
+    if not nesterov:
+        return new_state
+    return ctx.grad + momentum_multiplier * new_state
+
+
 OPTIMIZERS = {"adam": adam,
               "sm3": sm3,
               "novograd": novograd,
@@ -117,5 +131,6 @@ OPTIMIZERS = {"adam": adam,
               "gradient_centralisation": gradient_centralisation,
               "weight_centralisation": weight_centralisation,
               "learning_rate": multiply_learning_rate,
-              "global_l2norm_clip": global_l2norm_gradient_clipping
+              "global_l2norm_clip": global_l2norm_gradient_clipping,
+              "momentum": momentum
               }
