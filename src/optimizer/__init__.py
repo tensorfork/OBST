@@ -37,10 +37,6 @@ def update(ctx: OptimizerCtx):
     learning_rate = ctx.learning_rate
 
     var = ctx.var
-    #if ctx.grad_buffer is not None:
-    #    ctx.grad = reduce_mean(broadcast(identity(ctx.grad_buffer.value), [params.batch_dim] + ctx.grad.shape.dims),
-    #                           params.batch_dim)
-    #    ctx.update_ops.append(assign(ctx.grad_buffer, zeros_like(ctx.grad)))
 
     for opt in params.optimizer.split('-'):
         opt, *args = opt.split(':')
@@ -229,16 +225,12 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor],
 
     for var, grad in variable_to_gradient.items():
 
-        #debug_gradients_dict[var.name] = mtf.reshape(grad, new_shape=[mtf.Dimension('flat_dim', grad.size)])
-
         full_name = f'{tf.get_variable_scope().name}/f"{var.name}/{params.optimizer}/grad_accumulation'
 
         if fn == "accumulate" or full_name in params.mesh.graph.name_to_variable:
             ctx.grad_buffer = variable(params, var, "grad_accumulation", var.shape)
 
-        update(ctx(var, cast(grad, params.optimizer_calculation_dtype)))
-
-        #scoped(fn, gradient_accumulation if fn == "accumulate" else update,
-        #       ctx(var, cast(grad, params.optimizer_calculation_dtype)))
+        scoped(fn, gradient_accumulation if fn == "accumulate" else update,
+               ctx(var, cast(grad, params.optimizer_calculation_dtype)))
 
     return params.mesh.graph.combine_assignments(ctx.update_ops), learning_rate, debug_gradients_dict

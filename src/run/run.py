@@ -137,7 +137,6 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     comput_ops.append(add_histogram(tf_loss=tf_loss, value=debug_gradients_dict,
                                                     global_step=global_step))
 
-                #comput_ops.append(tfw.assign_add(global_step, step * tfw.constant(params.macro_batching, tf.int64)))
                 comput_ops.append(tfw.assign_add(global_step, tfw.constant(params.macro_batching, tf.int64)))
 
             hooks.append(mtf.MtfRestoreHook(lowering))
@@ -228,15 +227,13 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
 
             current_step = params.current_step
             color_print(params, f"Starting training loop. Start step: {current_step}")
-            first_print_threshold = (5 + current_step) * params.grad_accumulation
-            first_print_threshold *= np.maximum(1, (params.macro_batching // params.grad_accumulation))
-            current_step = current_step * params.grad_accumulation
+            first_print_threshold = (5 + current_step)
+            first_print_threshold *= np.maximum(1, (params.macro_batching))
             for i in range(current_step, params.train_steps, params.macro_batching):
 
                 sess.run(computation)
                 if params.debug_train_step or i < first_print_threshold:
-                    color_print(params, f"Current global step: {i // params.grad_accumulation}"
-                                        f"   accumulation step: {i % params.grad_accumulation}")
+                    color_print(params, f"Current global step: {i}")
 
                 sess.run(enqueue_ops)
                 if params.debug_train_step:
