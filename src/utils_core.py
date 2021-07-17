@@ -13,9 +13,13 @@ _NAME_INDICES = {}
 tf1 = tf.compat.v1
 
 
+def reset_scope():
+    _NAME_INDICES.clear()
+
+
 def scoped(name: str, fn: typing.Callable, *args, **kwargs):
     name = random_name(name)
-    with tf1.variable_scope(f'{name}v'), tf1.name_scope(f'{name}n'):
+    with tf1.variable_scope(f'{name}v', reuse=tf.compat.v1.AUTO_REUSE), tf1.name_scope(f'{name}n'):
         return fn(*args, **kwargs)
 
 

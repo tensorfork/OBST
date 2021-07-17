@@ -34,9 +34,6 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
     tf.config.optimizer.set_experimental_options(params.tensorflow_optimization_settings)
 
     def _model_fn(*args):
-        manual_global_step = tf1.get_variable("manual_global_step", [], tf.int64, initializer=tf.zeros_initializer(),
-                                              trainable=False,
-                                              aggregation=variables.VariableAggregation.ONLY_FIRST_REPLICA)
         # Construct mtf graph + mesh from params
         graph = mtf.Graph()
 
@@ -95,10 +92,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                                                                                              token_y_input,
                                                                                              frame_mask_src,
                                                                                              frame_mask_tag,
-                                                                                             token_mask,
-                                                                                             import_mtf(params,
-                                                                                             manual_global_step,
-                                                                                             "manual_global_step"))
+                                                                                             token_mask)
         else:
             token_out, frame_out = get_infrence_model(params)(frame_input,
                                                               cat_mask_src,
@@ -115,7 +109,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         analyze_model(params, time_to_build=(time.time() - start_time), graph=graph)
         color_print(params, "Lowering graph to TensorFlow...")
         start_time = time.time()
-        lowering = mtf.Lowering(graph, {params.mesh: params.mesh_impl}, autostack=(params.macro_batching > 1))
+        lowering = mtf.Lowering(graph, {params.mesh: params.mesh_impl}, autostack=(params.grad_accumulation <= 1))
         color_print(params, f"Lowered in {time.time() - start_time:.1f}s")
 
         if params.train:
@@ -132,11 +126,6 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             with tf.control_dependencies(comput_ops):
                 global_step = tf1.train.get_or_create_global_step()
 
-                step = tfw.mod(tfw.add(manual_global_step, 1),
-                               tfw.constant(params.grad_accumulation, dtype=tf.int64))
-                step = tfw.equal(step, tfw.constant(0, dtype=tf.int64))
-                step = tfw.cast(step, tf.int64)
-
                 tf_loss = tfw.cast(lowering.export_to_tf_tensor(loss), tf.float32)
                 comput_ops.append(add_summary(tf_loss=tf_loss, value=log_dict, global_step=global_step))
 
@@ -148,8 +137,8 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
                     comput_ops.append(add_histogram(tf_loss=tf_loss, value=debug_gradients_dict,
                                                     global_step=global_step))
 
-                comput_ops.append(tfw.assign_add(global_step, step * tfw.constant(params.macro_batching, tf.int64)))
-                comput_ops.append(tfw.assign_add(manual_global_step, tfw.constant(params.macro_batching, tf.int64)))
+                #comput_ops.append(tfw.assign_add(global_step, step * tfw.constant(params.macro_batching, tf.int64)))
+                comput_ops.append(tfw.assign_add(global_step, tfw.constant(params.macro_batching, tf.int64)))
 
             hooks.append(mtf.MtfRestoreHook(lowering))
             with mtf.utils.outside_all_rewrites():
@@ -242,7 +231,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
             first_print_threshold = (5 + current_step) * params.grad_accumulation
             first_print_threshold *= np.maximum(1, (params.macro_batching // params.grad_accumulation))
             current_step = current_step * params.grad_accumulation
-            for i in range(current_step, params.train_steps * params.grad_accumulation, params.macro_batching):
+            for i in range(current_step, params.train_steps, params.macro_batching):
 
                 sess.run(computation)
                 if params.debug_train_step or i < first_print_threshold:

@@ -7,7 +7,7 @@ from tensorflow.python.ops.init_ops import Initializer
 
 from .dataclass import BlockArgs, ModelParameter
 from .mtf_wrapper import cast, mtf_range, reshape, concat as mtf_concat, pad as mtf_pad, mtf_slice, add, multiply, \
-    negative
+    negative, identity
 from .utils_core import default, random_name
 
 tf1 = tf.compat.v1
@@ -246,15 +246,19 @@ def non_replicated_broadcast(x, shape):
 def get_variable(params: ModelParameter, name: str, shape: SHAPE, initializer: Initializer, trainable: bool,
                  dtype: mtf.VariableDType) -> mtf.Tensor:
     full_name = f'{tf1.get_variable_scope().name}/{name}'
+
     if full_name in params.variable_cache:
         return params.variable_cache[full_name]
+
     if full_name in params.mesh.graph.name_to_variable:
         params.variable_cache[full_name] = params.mesh.graph.name_to_variable[full_name].outputs[0]
         return params.variable_cache[full_name]
+
     shape = deduplicate(mtf.Shape(shape))
     var = mtf.Variable(params.mesh, name, shape, dtype, initializer, trainable)
     params.mesh.graph.name_to_variable[full_name] = var
     params.variable_cache[full_name] = var.outputs[0]
+
     return params.variable_cache[full_name]
 
 
@@ -409,6 +413,13 @@ def get_fan_in(params: ModelParameter, shape: ALL_SHAPES) -> DIM_LIST:
         return shape[:2]
     return shape[:1]
 
+
+def cast_dtype(dtype):
+    if type(dtype) is mtf.VariableDType:
+        return dtype.master_dtype
+    return dtype
+
+
 # The majority of this Function was copied from:
 # 'https://github.com/tensorflow/mesh/blob/8931eb9025f833b09d8425404ebd5801acbb0cac/mesh_tensorflow/ops.py#L5956-L6104'
 # Copyright 2021 The Mesh TensorFlow Authors.
@@ -454,14 +465,15 @@ class WhileLoopWithControlDependencies(mtf.Operation):
         self.graph.operations.pop()
         before = len(self.graph.operations)
 
-        def make_placeholders(name):
-            return [mtf.Tensor(self, t.shape, t.dtype, name="%s:%d" % (name, i)) for i, t in enumerate(inputs)]
+        def make_placeholders(name, _inputs, offset=0):
+            return [mtf.Tensor(self, t.shape, t.dtype, name="%s:%d" %
+                                                            (name, i + offset)) for i, t in enumerate(_inputs)]
 
-        self._cond_inputs = make_placeholders("cond_input")
+        self._cond_inputs = make_placeholders("cond_input", inputs)
         self._cond_output = self._cond_fn(*self._cond_inputs)
         self._cond_ops = self.graph.operations[before:]
         del self.graph.operations[before:]
-        self._body_inputs = make_placeholders("body_input")
+        self._body_inputs = make_placeholders("body_input", inputs)
         _body_outputs = self._body_fn(*self._body_inputs)
 
         if type(_body_outputs) is dict:
@@ -490,7 +502,8 @@ class WhileLoopWithControlDependencies(mtf.Operation):
 
         # re-add self to graph's operations
         self.graph.operations.append(self)
-        self._outputs = [mtf.Tensor(self, t.shape, t.dtype, name="output:%d" % i)
+
+        self._outputs = [mtf.Tensor(self, t.shape, cast_dtype(t.dtype), name="output:%d" % i)
                          for i, t in enumerate(self._body_outputs)]
 
         # Rerun to take the new output into account.
@@ -535,13 +548,15 @@ class WhileLoopWithControlDependencies(mtf.Operation):
 
             ret = []
             for i, mtf_out in enumerate(self._body_outputs):
+                if type(mtf_out) is mtf.Variable:
+                    mtf_out = mtf_out.value
+
                 lowered_out = lowering.tensors[mtf_out]
                 if isinstance(lowered_out, mtf.LazyAllreduceSum):
                     is_lazyallreducesum[i] = lowered_out
                     lowered_out = lowered_out.laid_out_input.tensor_list
                 else:
                     lowered_out = lowered_out.to_laid_out_tensor().tensor_list
-
                 if self._control_dependencies is not None:
                     with tf.control_dependencies(lower_control_dependencies):
                         lowered_out = [tf.identity(low_out) for low_out in lowered_out]
@@ -563,7 +578,7 @@ class WhileLoopWithControlDependencies(mtf.Operation):
         # accumulators get initial value 0
         for t in self._body_outputs[len(self.inputs):]:
             def slice_fn():
-                return tf.zeros(mesh_impl.slice_shape(t.shape), dtype=t.dtype)
+                return tf.zeros(mesh_impl.slice_shape(t.shape), dtype=cast_dtype(t.dtype))
 
             lowered_inputs.append(mesh_impl.slicewise(slice_fn).tensor_list)
 

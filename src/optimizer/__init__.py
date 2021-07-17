@@ -19,7 +19,7 @@ from ..dataclass import ModelParameter
 from ..model.revnet import RevGradOp
 from ..mtf_wrapper import (reduce_mean, cast, constant_float, constant_scalar, einsum, equal, greater_equal, mod,
                            reduce_sum, add, multiply, scoped, identity, zeros_like, negative, rsqrt_eps,
-                           optimizer_scalar, reciprocal, subtract, broadcast, assign_add, assign, assign_sub)
+                           optimizer_scalar, reciprocal, broadcast, assign_add, assign, assign_sub)
 from ..mtf_wrapper import reshape
 from ..utils_mtf import feature_dims_used, to_fp32, get_fan_in
 
@@ -37,10 +37,10 @@ def update(ctx: OptimizerCtx):
     learning_rate = ctx.learning_rate
 
     var = ctx.var
-    if ctx.grad_buffer is not None:
-        ctx.grad = reduce_mean(broadcast(identity(ctx.grad_buffer.value), [params.batch_dim] + ctx.grad.shape.dims),
-                               params.batch_dim)
-        ctx.update_ops.append(assign(ctx.grad_buffer, zeros_like(ctx.grad)))
+    #if ctx.grad_buffer is not None:
+    #    ctx.grad = reduce_mean(broadcast(identity(ctx.grad_buffer.value), [params.batch_dim] + ctx.grad.shape.dims),
+    #                           params.batch_dim)
+    #    ctx.update_ops.append(assign(ctx.grad_buffer, zeros_like(ctx.grad)))
 
     for opt in params.optimizer.split('-'):
         opt, *args = opt.split(':')
@@ -75,14 +75,18 @@ def update(ctx: OptimizerCtx):
     variance = ((1 - 1 / max_fan) / size ** 2 + 1 / max_fan - 2 / size + 1 / max_fan)
     if params.scale_by_depth:
         variance *= params.n_blocks
+
     val = einsum([val, rsqrt_eps(einsum([val, val, optimizer_scalar(params, 1 / val.size)], output_shape=[])),
                   optimizer_scalar(params, variance ** 0.5)], output_shape=var.shape)
+
     update_ops.append(assign(var, val))
 
 
-def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, manual_step: tf.Tensor, fn: str
-                  ) -> typing.Tuple[typing.Tuple[mtf.Tensor, typing.List[mtf.Assign], typing.List[mtf.Tensor]],
-                                    tf.Tensor, typing.Dict]:
+def get_optimizer(loss_list: typing.List[mtf.Tensor],
+                  params: ModelParameter,
+                  fn: str, variable_to_gradient=None) -> [typing.Tuple[typing.Tuple[mtf.Tensor, typing.List[mtf.Assign],
+                              typing.List[mtf.Tensor]],
+                              tf.Tensor, typing.Dict], dict]:
     """
     Creates optimizing and update/training operations.
     :param loss_list: Final scalar loss of the model
@@ -97,13 +101,13 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
 
     dtype = params.optimizer_calculation_dtype
     update_ops = []
+    debug_gradients_dict = {}
 
     learning_rate_ctx = get_learning_rate(params, loss_list, update_ops)
     learning_rate = import_mtf(params, learning_rate_ctx.learning_rate, "learning_rate")
 
-    step = cast(equal(mod(cast(add(manual_step, optimizer_scalar(params, 1)), dtype),
-                          import_mtf(params, params.grad_accumulation * 1., "grad_accum")),
-                      import_mtf(params, 0., "zero")), dtype)
+    step = constant_scalar(params, 1, dtype)
+
     neg_step = negative(step)
     mstep = add(1, neg_step)
     beta1 = add(1, multiply(neg_step, import_mtf(params, 1 - params.opt_beta1, "beta1")))
@@ -111,110 +115,130 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
     step_count = add(add(multiply(cast(learning_rate_ctx.global_steps_mtf, step.dtype), step),
                          multiply(mstep, 10 ** 9)), 1)
 
-    debug_gradients_dict = {}
-    first_grad = {}
-    loss_1__loss_1 = loss_1__loss_2 = loss_2__loss_2 = 0
-    mgda = params.multi_loss_strategy == "mgda"
+    if not fn == "apply_grad":
 
-    if mgda:
-        loss_1__loss_1 = constant_float(params, 0, shape=[params.head_dim])
-        loss_1__loss_2 = constant_float(params, 0, shape=[params.head_dim])
-        loss_2__loss_2 = constant_float(params, 0, shape=[params.head_dim])
+        first_grad = {}
+        loss_1__loss_1 = loss_1__loss_2 = loss_2__loss_2 = 0
+        mgda = params.multi_loss_strategy == "mgda"
 
-    tensor_to_gradient = {}
-    tensor_to_var = {}
+        if mgda:
+            loss_1__loss_1 = constant_float(params, 0, shape=[params.head_dim])
+            loss_1__loss_2 = constant_float(params, 0, shape=[params.head_dim])
+            loss_2__loss_2 = constant_float(params, 0, shape=[params.head_dim])
 
-    for loss_idx, loss in enumerate(loss_list):
-        if mgda and loss_idx == 2:
-            v1v1 = reduce_sum(loss_1__loss_1, output_shape=[])
-            v1v2 = reduce_sum(loss_1__loss_2, output_shape=[])
-            v2v2 = reduce_sum(loss_2__loss_2, output_shape=[])
-            min_gamma = 0.001
-            gamma = multiply(constant_float(params, value=(1 - min_gamma), shape=[]),
-                             to_fp32(greater_equal(v1v2, v1v1)))
-            gamma = add(gamma,
-                        einsum([constant_float(params, value=min_gamma, shape=[]), to_fp32(greater_equal(v1v2, v2v2)),
-                                to_fp32(equal(gamma, 0))], output_shape=[]))
-            gamma = add(gamma,
-                        einsum([optimizer_scalar(params, -1),
-                                to_fp32(equal(gamma, 0)),
-                                add(v1v2, negative(v2v2)),
-                                reciprocal(add(v1v1, v2v2) - multiply(-2, v1v2))],
-                               output_shape=[]))
+        tensor_to_gradient = {}
+        tensor_to_var = {}
 
-            loss = add(multiply(loss_list[0], gamma), multiply(loss_list[1], (1 - gamma)))
+        for loss_idx, loss in enumerate(loss_list):
+            if mgda and loss_idx == 2:
+                v1v1 = reduce_sum(loss_1__loss_1, output_shape=[])
+                v1v2 = reduce_sum(loss_1__loss_2, output_shape=[])
+                v2v2 = reduce_sum(loss_2__loss_2, output_shape=[])
+                min_gamma = 0.001
+                gamma = multiply(constant_float(params, value=(1 - min_gamma), shape=[]),
+                                 to_fp32(greater_equal(v1v2, v1v1)))
+                gamma = add(gamma,
+                            einsum([constant_float(params, value=min_gamma, shape=[]), to_fp32(greater_equal(v1v2, v2v2)),
+                                    to_fp32(equal(gamma, 0))], output_shape=[]))
+                gamma = add(gamma,
+                            einsum([optimizer_scalar(params, -1),
+                                    to_fp32(equal(gamma, 0)),
+                                    add(v1v2, negative(v2v2)),
+                                    reciprocal(add(v1v1, v2v2) - multiply(-2, v1v2))],
+                                   output_shape=[]))
 
-        operations = loss.graph.operations
-        xs = [x.outputs[0] for x in params.mesh.graph.trainable_variables]
-        tensor_to_var = dict(zip(xs, params.mesh.graph.trainable_variables))
-        loss_grad = constant_scalar(params, 1.0)
-        downstream = set(xs)
+                loss = add(multiply(loss_list[0], gamma), multiply(loss_list[1], (1 - gamma)))
 
-        for op in operations:
-            if op.has_gradient and (set(op.inputs) & downstream):
-                downstream |= set(op.outputs)
+            operations = loss.graph.operations
+            xs = [x.outputs[0] for x in params.mesh.graph.trainable_variables]
+            tensor_to_var = dict(zip(xs, params.mesh.graph.trainable_variables))
+            loss_grad = constant_scalar(params, 1.0)
+            downstream = set(xs)
 
-        tensor_to_gradient: typing.Dict[mtf.Tensor, typing.List[int, int, mtf.Tensor]] = {loss: [0, 0, loss_grad]}
+            for op in operations:
+                if op.has_gradient and (set(op.inputs) & downstream):
+                    downstream |= set(op.outputs)
 
-        with tf.variable_scope(loss.graph.captured_variable_scope):
-            for op in operations[::-1]:
-                grad_outputs = []
-                for out in op.outputs:
-                    if out not in tensor_to_gradient:
-                        grad_outputs.append(None)
+            tensor_to_gradient: typing.Dict[mtf.Tensor, typing.List[int, int, mtf.Tensor]] = {loss: [0, 0, loss_grad]}
+
+            with tf.variable_scope(loss.graph.captured_variable_scope):
+                for op in operations[::-1]:
+                    grad_outputs = []
+                    for out in op.outputs:
+                        if out not in tensor_to_gradient:
+                            grad_outputs.append(None)
+                            continue
+
+                        grad_list: typing.Tuple[int, int, mtf.Tensor] = tensor_to_gradient[out]
+                        grad_outputs.append(grad_list[2])
+                        grad_list[0] += 1
+
+                    if not op.has_gradient or not any(grad_outputs) or not (set(op.inputs) & downstream):
                         continue
-
-                    grad_list: typing.Tuple[int, int, mtf.Tensor] = tensor_to_gradient[out]
-                    grad_outputs.append(grad_list[2])
-                    grad_list[0] += 1
-
-                if not op.has_gradient or not any(grad_outputs) or not (set(op.inputs) & downstream):
-                    continue
-                if isinstance(op, RevGradOp):
-                    itr = op.gradient(grad_outputs, params=op.inputs)
-                else:
-                    itr = zip(op.inputs, op.gradient(grad_outputs))
-                for inp, grad in itr:
-                    if inp not in downstream or grad is None:
-                        continue
-
-                    if inp in tensor_to_gradient:
-                        grad_list = tensor_to_gradient[inp]
-                        grad_list[1] += 1
-                        grad_list[2] = add(grad, grad_list[2])
+                    if isinstance(op, RevGradOp):
+                        itr = op.gradient(grad_outputs, params=op.inputs)
                     else:
-                        tensor_to_gradient[inp] = grad_list = [0, 1, grad]
+                        itr = zip(op.inputs, op.gradient(grad_outputs))
+                    for inp, grad in itr:
+                        if inp not in downstream or grad is None:
+                            continue
 
-                    if len(inp.operation.outputs) != grad_list[1] or inp not in tensor_to_var:
-                        continue
+                        if inp in tensor_to_gradient:
+                            grad_list = tensor_to_gradient[inp]
+                            grad_list[1] += 1
+                            grad_list[2] = add(grad, grad_list[2])
+                        else:
+                            tensor_to_gradient[inp] = grad_list = [0, 1, grad]
 
-                    grad: mtf.Tensor = cast(grad_list[2], params.optimizer_calculation_dtype)
-                    var: mtf.Variable = tensor_to_var[inp]
+                        if len(inp.operation.outputs) != grad_list[1] or inp not in tensor_to_var:
+                            continue
 
-                    ctx = OptimizerCtx(op, grad_outputs, downstream, tensor_to_gradient, tensor_to_var, params,
-                                       loss_idx, update_ops, debug_gradients_dict, loss_list, first_grad,
-                                       loss_1__loss_1, loss_1__loss_2, loss_2__loss_2, mstep, step, neg_step, dtype,
-                                       beta1, beta2, learning_rate, step_count)
+                        grad: mtf.Tensor = cast(grad_list[2], params.optimizer_calculation_dtype)
+                        var: mtf.Variable = tensor_to_var[inp]
 
-                    if params.debug_gradients:
-                        flat_shape = mtf.Shape([mtf.Dimension('flat_dim', var.size)])
-                        flat_grad = variable(params, var, f"loss_{loss_idx}", flat_shape)
-                        update_ops.append(assign(flat_grad, reshape(grad, new_shape=flat_shape)))
-                        debug_gradients_dict[f"loss_{loss_idx}/{var.name}"] = flat_grad
+                        ctx = OptimizerCtx(op, grad_outputs, downstream, tensor_to_gradient, tensor_to_var, params,
+                                           loss_idx, update_ops, debug_gradients_dict, loss_list, first_grad,
+                                           loss_1__loss_1, loss_1__loss_2, loss_2__loss_2, mstep, step, neg_step, dtype,
+                                           beta1, beta2, learning_rate, step_count)
 
-                    if len(loss_list) > 1:
-                        grad = MULTI_LOSS_GRADIENTS[params.multi_loss_strategy](ctx, grad)
+                        if params.debug_gradients:
+                            flat_shape = mtf.Shape([mtf.Dimension('flat_dim', var.size)])
+                            flat_grad = variable(params, var, f"loss_{loss_idx}", flat_shape)
+                            update_ops.append(assign(flat_grad, reshape(grad, new_shape=flat_shape)))
+                            debug_gradients_dict[f"loss_{loss_idx}/{var.name}"] = flat_grad
 
-                    if grad is None:
-                        continue
-    variable_to_gradient = {var: cast(tensor_to_gradient[tensor][2], params.optimizer_calculation_dtype)
-                            for tensor, var in tensor_to_var.items()}
+                        if len(loss_list) > 1:
+                            grad = MULTI_LOSS_GRADIENTS[params.multi_loss_strategy](ctx, grad)
+
+                        if grad is None:
+                            continue
+
+        variable_to_gradient = {var: cast(tensor_to_gradient[tensor][2], params.optimizer_calculation_dtype)
+                                for tensor, var in tensor_to_var.items()}
+
+    else:
+        ctx = OptimizerCtx(None, [], None, None, None, params,
+                           0, update_ops, debug_gradients_dict, loss_list, None,
+                           None, None, None, mstep, step, neg_step, dtype,
+                           beta1, beta2, learning_rate, step_count)
+
+    if fn == "grad_return":
+        return variable_to_gradient
+
     ctx.variable_to_gradient = variable_to_gradient
+
     for var, grad in variable_to_gradient.items():
+
+        #debug_gradients_dict[var.name] = mtf.reshape(grad, new_shape=[mtf.Dimension('flat_dim', grad.size)])
+
         full_name = f'{tf.get_variable_scope().name}/f"{var.name}/{params.optimizer}/grad_accumulation'
+
         if fn == "accumulate" or full_name in params.mesh.graph.name_to_variable:
             ctx.grad_buffer = variable(params, var, "grad_accumulation", var.shape)
-        scoped(fn, gradient_accumulation if fn == "accumulate" else update,
-               ctx(var, cast(grad, params.optimizer_calculation_dtype)))
+
+        update(ctx(var, cast(grad, params.optimizer_calculation_dtype)))
+
+        #scoped(fn, gradient_accumulation if fn == "accumulate" else update,
+        #       ctx(var, cast(grad, params.optimizer_calculation_dtype)))
 
     return params.mesh.graph.combine_assignments(ctx.update_ops), learning_rate, debug_gradients_dict

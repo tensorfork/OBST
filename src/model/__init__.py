@@ -249,7 +249,7 @@ def _build(params: ModelParameter,
     loss_list, token_loss, accuracy, video_loss = scoped("loss", _loss, params, frame_out, token_out, txt_tgt,
                                                          loss_list, vid_msk_tgt, cat_msk_tgt, vid_tgt)
 
-    params.layer_idx = 0
+    params.attention_idx = 0
 
     return add_n(loss_list), loss_list, video_loss, accuracy, token_loss, frame_out, token_out
 

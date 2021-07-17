@@ -88,6 +88,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.batch_splits = 1
         self.default_sleep_duration = 0.1
         self.head_splits = 32.
+        self.gradient_clipping = 1
         self.prefix = "datasets/full_hd_video"
         self.model_path = "gs://text-datasets/video-transformer/ctx=32-layer=64-heads=8-feat=256"
         self.tensorflow_optimization_settings = {"layout_optimizer": True,
@@ -175,9 +176,9 @@ class ModelParameter(typing.Dict[str, typing.Any]):
                 print(f"WARNING: Unknown ModelParameter {k}={v!r}")
             self.__dict__[k] = v
 
-        if self.grad_accumulation > 1:
-            raise ValueError("Gradient accumulation is not supported right now. The optimizer was split into two "
-                             "different 'sections' where the 'accumulation' section still has to be integrated")
+        #if self.grad_accumulation > 1:
+        #    raise ValueError("Gradient accumulation is not supported right now. The optimizer was split into two "
+        #                     "different 'sections' where the 'accumulation' section still has to be integrated")
 
         if isinstance(self.position_embedding, str):
             self.position_embedding = self.position_embedding.split('-')
