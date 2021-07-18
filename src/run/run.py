@@ -115,7 +115,7 @@ def computation_func(params: ModelParameter, input_fn: typing.Callable,
         analyze_model(params, time_to_build=(time.time() - start_time), graph=graph)
         color_print(params, "Lowering graph to TensorFlow...")
         start_time = time.time()
-        lowering = mtf.Lowering(graph, {params.mesh: params.mesh_impl}, autostack=(params.macro_batching > 1))
+        lowering = mtf.Lowering(graph, {params.mesh: params.mesh_impl}, autostack=True)
         color_print(params, f"Lowered in {time.time() - start_time:.1f}s")
 
         if params.train:
