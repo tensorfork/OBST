@@ -26,7 +26,7 @@ parser.add_argument("--int64", type=bool, default=True, help="Whether to encode 
 parser.add_argument("--service_account_json_path", type=str, default="a.json", help="Service account json from gcp")
 parser.add_argument("--buffer_size", type=int, default=2 ** 25, help="This is a minimum size, not a maximum size. "
                                                                      "tfrecords will have this minimum size as well.")
-parser.add_argument("--separator", type=str, default="\04",
+parser.add_argument("--separator", type=str, default=4,
                     help="separator to place between files in chunk mode."
                          "Default is 0 (Null) in case of byte encodings, "
                          "50256 for tokenized texts")
@@ -39,10 +39,7 @@ def file_generator(args, pid, procs):
     tmp_name = f".tmp.download.{pid}"
 
     def _json_parser(x):
-        try:
-            return parse_fn(x).as_dict()
-        except ValueError:
-            return x
+        return parse_fn(x.encode()).as_dict()
 
     for i in range(pid, splits, procs):
         with requests.get(base_url.replace("%s", str(i).zfill(2)), stream=True) as r, open(tmp_name, 'wb') as f:
