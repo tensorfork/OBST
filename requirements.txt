@@ -1,7 +1,7 @@
 
 numpy
 mesh-tensorflow
-tensorflow==2.4.2
+tensorflow==2.6.0
 tokenizers
 transformers
 
