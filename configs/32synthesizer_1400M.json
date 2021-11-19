@@ -31,7 +31,7 @@
     "data_seed": 134567,
     "dataset_configs": [
         {
-            "path": "gs://obst-euw4a-aa/the-char-pile/*",
+            "path": "gs://ggpt4/the-char-pile/*",
             "type": "text",
             "weight": 1
         }
@@ -53,7 +53,7 @@
     "weight_standardisation": false,
     "macro_batching": 1,
     "macro_batch_loss_smoothing": true,
-    "model_path": "gs://obst-euw4a-aa/runs/aa/activation/char-blocks=64-lr=1e-3-agc=3e-3-synthesizer",
+    "model_path": "gs://ggpt4/runs/aa/activation/char-blocks=64-lr=1e-3-agc=3e-3-synthesizer",
     "steps_per_checkpoint": 512,
     "use_checkpointing": true,
     "calculation_dtype": "bfloat16",
