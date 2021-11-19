@@ -168,10 +168,9 @@ def place_dataloader(params: ModelParameter, input_fn):
             options.experimental_optimization.noop_elimination = True
             options.experimental_optimization.parallel_batch = True
             options.experimental_optimization.shuffle_and_repeat_fusion = True
-            options.experimental_threading.max_intra_op_parallelism = 1
-            options.experimental_threading.private_threadpool_size = 48
             options.experimental_slack = True
-            options.threading.private_threadpool_size = 0
+            options.threading.private_threadpool_size = 96
+            options.threading.max_intra_op_parallelism = 1
             dataset: Dataset = dataset.with_options(options)
             _ds_iterator = tf1.data.make_initializable_iterator(dataset)
             ds_iterator.append(_ds_iterator)
