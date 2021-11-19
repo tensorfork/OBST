@@ -6,9 +6,6 @@ import tensorflow as tf
 from tensorflow.python.ops.init_ops import Initializer
 
 from .dataclass import BlockArgs, ModelParameter
-from .model.embedding import Gather
-from .model.momentumnet import MomentumOperation
-from .model.revnet import RevGradOp
 from .mtf_wrapper import cast, mtf_range, reshape, concat as mtf_concat, pad as mtf_pad, mtf_slice, add, multiply, \
     negative
 from .utils_core import default, random_name
@@ -184,6 +181,10 @@ def deduplicate(inp: SHAPE) -> SHAPE:
 
 def gradient_iterator(op: mtf.Operation, grad_outputs: typing.List[mtf.Tensor]
                       ) -> typing.Iterable[typing.Tuple[mtf.Tensor, mtf.Tensor]]:
+    from .model.embedding import Gather
+    from .model.momentumnet import MomentumOperation
+    from .model.revnet import RevGradOp
+
     if isinstance(op, Gather):
         return (op.inputs[1], grad_outputs[0]),
     if isinstance(op, (RevGradOp, MomentumOperation)):
