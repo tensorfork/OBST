@@ -65,7 +65,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.heads = 8
         self.features: typing.Optional[int] = None
         self.features_per_head: typing.Optional[int] = None
-        self.factorized_product_key_value = self.features_per_head
+        self.factorized_product_key_value: typing.Optional[int] = None
         self.depth = 16
         self.buffer_size = 4
         self.shuffle_buffer = 256
@@ -213,6 +213,8 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             self.features = self.features_per_head * self.heads
         if self.features_per_head is None:
             self.features_per_head = self.features // self.heads
+        if self.factorized_product_key_value is None:
+            self.factorized_product_key_value = self.features_per_head
         if self.use_video and (self.frame_width * self.frame_height // self.patch_size) % self.experts:
             raise ValueError("Frame size has to be divisible by number of experts. Set \"experts\" to 1 if you're not "
                              "using MoE")
