@@ -23,7 +23,6 @@ def _multi_dim_range_tf(params: ModelParameter, dims: DIM_LIST) -> mtf.Tensor:
 
 class Gather(mtf.Operation):
     def __init__(self, args: BlockArgs, embedding: mtf.Tensor):
-        assert all(dim in embedding.shape and dim not in args.tensor.shape for dim in args.tensor.shape)
         super().__init__([args.tensor, embedding], args.params.mesh, name=random_name("gather"))
         self.args = args
         self._outputs = [mtf.Tensor(self, args.tensor.shape + embedding.shape.dims[1:],
