@@ -29,7 +29,7 @@ class Linear(OperationTest):
         self.tolerance *= self.args.params.train_steps
         target_std = self._target_std()
         if self.args.params.scale_by_depth:
-            target_std /= self.args.params.n_blocks ** 0.5
+            target_std /= self.args.params.depth ** 0.5
         self._is_close(np.mean(np.std(out, -1)), target_std, 0.2)
 
 
@@ -53,5 +53,5 @@ class ReLULinear(Linear):
 def square_matmul_std_test(test: typing.Type, calculation_dtype: str, storage_dtype: str, slice_dtype: str,
                            embd_per_head: int, heads: int, scale_by_depth: bool, train_steps: int):
     test(calculation_dtype=calculation_dtype, storage_dtype=storage_dtype, slice_dtype=slice_dtype,
-         n_embd_per_head=embd_per_head, n_head=heads, batch_size=1, n_ctx=1, group_linear_factor=heads,
+         features_per_head=embd_per_head, heads=heads, batch_size=1, sequence_length=1, group_linear_factor=heads,
          scale_by_depth=scale_by_depth, train_steps=train_steps)()

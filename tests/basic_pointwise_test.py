@@ -60,4 +60,4 @@ class ReLU(Activate):
 def pointwise_test(test: typing.Type, calculation_dtype: str, storage_dtype: str, slice_dtype: str, embd_per_head: int,
                    batch_size: int):
     test(calculation_dtype=calculation_dtype, storage_dtype=storage_dtype, slice_dtype=slice_dtype,
-         n_embd_per_head=embd_per_head, n_head=1, batch_size=batch_size, n_ctx=1)()
+         features_per_head=embd_per_head, heads=1, batch_size=batch_size, sequence_length=1)()

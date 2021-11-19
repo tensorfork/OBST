@@ -382,7 +382,7 @@ def dataset_video(path: str, params: ModelParameter, sub_batch_size: int, slice_
     time_patch = params.time_patch
     color_channels = params.color_channels
     patch_size = params.patch_size
-    n_ctx = params.sequence_length
+    sequence_length = params.sequence_length
     token_patch_size = params.token_patch_size
     language_token_patch = params.language_token_patch
     language_token_per_frame = params.language_token_per_frame
@@ -399,7 +399,7 @@ def dataset_video(path: str, params: ModelParameter, sub_batch_size: int, slice_
         data = tf.data.TFRecordDataset(filenames=tf.convert_to_tensor(name), buffer_size=2 ** 26, num_parallel_reads=1)
         data = data.map(frame_decoder, num_parallel_calls=1)
 
-        data = data.window(size=n_ctx + time_patch, stride=1, shift=n_ctx, drop_remainder=True)
+        data = data.window(size=sequence_length + time_patch, stride=1, shift=sequence_length, drop_remainder=True)
         data = data.interleave(interleave_func, cycle_length=1, num_parallel_calls=1, block_length=1)
 
         return data
@@ -458,9 +458,9 @@ def dataset_video(path: str, params: ModelParameter, sub_batch_size: int, slice_
 
     if language_token_per_frame > 0:
         interleave_func = lambda x, y, z, a, b: tf.data.Dataset.zip((x, y, z, a, b)) \
-            .batch(n_ctx + time_patch, drop_remainder=True)
+            .batch(sequence_length + time_patch, drop_remainder=True)
     else:
-        interleave_func = lambda x, y: tf.data.Dataset.zip((x, y)).batch(n_ctx + time_patch, drop_remainder=True)
+        interleave_func = lambda x, y: tf.data.Dataset.zip((x, y)).batch(sequence_length + time_patch, drop_remainder=True)
 
     frame_decoder = get_video_decoder(params,
                                       language_token_num_per_frame=language_token_per_frame,

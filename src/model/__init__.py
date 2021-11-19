@@ -129,7 +129,7 @@ def _body(params: ModelParameter, src: mtf.Tensor) -> mtf.Tensor:
 
         def _layer_builder(block_input: mtf.Tensor, block_config: BlockConfig, index: int):
             return block_part_fn(params, block_config, block_input, str(index))
-    for i in range(params.n_blocks):
+    for i in range(params.depth):
         for block_part in params.block_config:
             out = _layer_builder(out, block_part, i)
 

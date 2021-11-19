@@ -66,7 +66,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.features: typing.Optional[int] = None
         self.features_per_head: typing.Optional[int] = None
         self.factorized_product_key_value = self.features_per_head
-        self.n_blocks = 16
+        self.depth = 16
         self.buffer_size = 4
         self.shuffle_buffer = 256
         self.interleaved_datasets = 256
@@ -220,7 +220,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             self.intermediate_feed_forward_multiplier = self.group_linear_factor / self.heads
         if not self.use_video and self.language_token_per_frame != self.sequence_length:
             print(
-                f"language_token_per_frame is unused in language-only mode. Overwriting with n_ctx={self.sequence_length}")
+                f"language_token_per_frame is unused in language-only mode. Overwriting with sequence_length={self.sequence_length}")
             self.language_token_per_frame = self.sequence_length
         if self.macro_batching > 1 and self.grad_accumulation > 1 and self.macro_batching % self.grad_accumulation != 0:
             raise ValueError(f'"macro_batching" needs do be divisible by "grad_accumulation", '

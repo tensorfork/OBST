@@ -127,7 +127,7 @@ linear projection, followed by an activation and another linear project. The twi
 adds custom communication. For every head, we shift the activated input to the target head, perform our linear operation
 as in the input, and finally sum all intermediate tensors. While this launches many small matrix multiplications and 
 performs very suboptimal communication, it also reduces the memory consumption significantly and allows much more sparse 
-connections. By only connecting each head to its left `sqrt(n_heads)` neighbors (rolling, of course), the communication 
+connections. By only connecting each head to its left `sqrt(headss)` neighbors (rolling, of course), the communication 
 overhead can be further reduced.\
 As a next step against costly communication operations, we implemented group-feed-forward, group-instance-normalization,
 and increased the number of group-feed-forward layers per attention. While this change doesn't impact model performance

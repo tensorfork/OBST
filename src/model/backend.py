@@ -36,7 +36,7 @@ class OrthogonalInit(Initializer):
             q = array_ops.matrix_transpose(q)
         out = array_ops.reshape(q, self.sizes)
         if self.scale_by_depth:
-            out /= self.params.n_blocks ** 0.5
+            out /= self.params.depth ** 0.5
         return tf.cast(out, dtype)
 
 

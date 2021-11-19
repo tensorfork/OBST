@@ -66,7 +66,7 @@
 - [x] implement MLP Mixer, gMLP
 - [x] clean ThePile
 - [x] train new tokenizer on TheCleanedPile (vocab=65536, split_at=string.puctionation + string.digits + string.whitespace)
-- [x] Split vocab-dim by heads in input, output, and eval -> 15% faster with n_heads times less memory
+- [x] Split vocab-dim by heads in input, output, and eval -> 15% faster with headss times less memory
 - [x] Split video target by heads in input, output, and eval
 - [x] Custom op to calculate softmax logits in one einsum -> not worth it
 - [x] Custom op for group-linear with same output shape (-> not necessary)

@@ -85,7 +85,7 @@ class OrthogonalCheck(VariableCheck):
         std = ((min_fan * (1 - min_fan / size) ** 2 + (size - min_fan) * (min_fan / size) ** 2) / size) ** 0.5
         if not self.args.params.scale_by_depth:
             return std
-        return std / self.args.params.n_blocks ** 0.5
+        return std / self.args.params.depth ** 0.5
 
 
 class AllSumFeedForwardIn(OrthogonalCheck):
@@ -133,13 +133,13 @@ class SharedOrthogonalVariable(GroupFeedForwardIn):
 
 class SingleSharedVariable(SharedOrthogonalVariable):
     def _build(self, inp: mtf.Tensor) -> mtf.Tensor:
-        return mtf.stack([self._get_shared_var(0) for _ in range(self.args.params.n_blocks)], "items")
+        return mtf.stack([self._get_shared_var(0) for _ in range(self.args.params.depth)], "items")
 
 
 class DoubleSharedVariable(SharedOrthogonalVariable):
     def _build(self, inp: mtf.Tensor) -> mtf.Tensor:
         return mtf.stack([mtf.stack([self._get_shared_var(0), self._get_shared_var(1)], "non_shared")
-                          for _ in range(self.args.params.n_blocks)], "items")
+                          for _ in range(self.args.params.depth)], "items")
 
 
 @pytest.mark.parametrize("test",
@@ -158,6 +158,6 @@ class DoubleSharedVariable(SharedOrthogonalVariable):
 @pytest.mark.parametrize("embd_per_head", [1, 16, 256])
 @pytest.mark.parametrize("heads", [1, 4])
 def op_test(test: typing.Type, calculation_dtype: str, storage_dtype: str, slice_dtype: str, embd_per_head: int,
-            n_head: int):
+            heads: int):
     test(calculation_dtype=calculation_dtype, storage_dtype=storage_dtype, slice_dtype=slice_dtype,
-         n_embd_per_head=embd_per_head, n_head=n_head, batch_size=1, n_ctx=1)()
+         features_per_head=embd_per_head, heads=heads, batch_size=1, sequence_length=1)()
