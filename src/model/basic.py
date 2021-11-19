@@ -72,7 +72,7 @@ def group_linear(args: BlockArgs):
                           anonymize_shape(args.params.feature_dims, args.params.key_dim)), args.tensor.shape)
 
 
-def product_key_value(args: BlockArgs):
+def product_key_memory(args: BlockArgs):
     old, new = linear_shapes(args)
     two = mtf.Dimension("two", 2)
     features = [two, args.params.factorized_product_key_value_dim]
@@ -80,6 +80,6 @@ def product_key_value(args: BlockArgs):
     normalizer = mtf.reduce_sum(assignment, output_shape=assignment.shape - features)
     val, idx = mtf.top_1(assignment, args.params.product_key_value_dim)
     idx = mtf.slice(idx, 0, 1, two) * args.params.factorized_product_key_value + mtf.slice(idx, 1, 1, two)
-    val = (mtf.slice(idx, 0, 1, two) + mtf.slice(idx, 1, 1, two)) / normalizer
+    val = (mtf.slice(val, 0, 1, two) + mtf.slice(val, 1, 1, two)) / normalizer
     val = mtf.reshape(val, val.shape - get_dim(val, two))
     return gather_embed(args(idx), [args.params.product_key_value_dim, args.params.feature_dims]) * val
