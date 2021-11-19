@@ -607,13 +607,16 @@ class SparseAssign(mtf.Assign):
         def get_slices(tensor: mtf.Tensor):
             return lowering.tensors[tensor].to_laid_out_tenor().all_slices
 
-        def assign_fn(var: tf.Tensor, indices: tf.Tensor, gradient: tf.Tensor) -> tf.Tensor:
+        def assign_fn(var: tf.Tensor, val:tf.Tensor, indices: tf.Tensor, gradient: tf.Tensor) -> tf.Tensor:
             indices = indices.reshape(indices, indices.shape.as_list() + [1])
-            return tf1.assign(var, tf.cast(self.assign_fn(var, indices, gradient), self.var.slice_dtype))
+            new_value = self.assign_fn(val, indices, gradient)
+            new_value = tf.cast(new_value, self.var.slice_dtype)
+            return tf1.assign(var, new_value)
 
         lowering.operations[self] = tf.group(mtf.parallel(mesh_impl.devices,
                                                           assign_fn,
                                                           lowering.variables[self.var].all_slices,
+                                                          get_slices(self.var.value),
                                                           get_slices(self._inputs[0]),
                                                           get_slices(self._inputs[1])))
 
