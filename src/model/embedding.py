@@ -22,12 +22,11 @@ def _multi_dim_range_tf(params: ModelParameter, dims: DIM_LIST) -> mtf.Tensor:
 
 
 class Embedding(mtf.Operation):
-    def __init__(self, args: BlockArgs, indices: mtf.Tensor, embedding: mtf.Tensor, gather_dim: mtf.Dimension):
+    def __init__(self, args: BlockArgs, indices: mtf.Tensor, embedding: mtf.Tensor):
         assert all(dim in embedding.shape and dim not in indices.shape for dim in indices.shape)
-        assert embedding.shape.dims.index(gather_dim) == 0
         super().__init__([indices, embedding], args.params.mesh, name=random_name("embedding"))
         self.args = args
-        self._outputs = [mtf.Tensor(self, indices.shape + embedding.shape - gather_dim,
+        self._outputs = [mtf.Tensor(self, indices.shape + embedding.shape.dims[1:],
                                     args.params.variable_dtype.activation_dtype)]
 
     def gradient(self, grad_ys):
@@ -143,5 +142,9 @@ def _embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
     return out
 
 
-def embed(args: BlockArgs, shape: SHAPE):
+def embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
     return scoped('embed', _embed, args, shape)
+
+
+def gather_embed(args: BlockArgs, indices: mtf.Tensor, shape: SHAPE) -> mtf.Tensor:
+    return Embedding(args, indices, embed(args, shape)).outputs[0]

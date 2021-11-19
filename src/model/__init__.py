@@ -6,17 +6,17 @@ import tensorflow as tf
 from .activation import activate
 from .backend import linear, linear_from_features, linear_to_features
 from .basic import activated_linear
-from .embedding import embed
+from .embedding import embed, gather_embed
 from .frontend import block_part_fn
 from .momentumnet import MomentumOperation
 from .normalization import norm
 from .revnet import RevGradOp
 from ..dataclass import BlockArgs, BlockConfig, ModelParameter
-from ..mtf_wrapper import (add_n, cast, constant_scalar, dropout, einsum, one_hot, ones, reciprocal, reduce_logsumexp,
-                           reduce_mean, reduce_sum, sigmoid, sign, zeros_like, mod, floordiv, reshape, equal, argmax,
-                           softmax_cross_entropy_with_logits, recompute_grad, add, negative, divide)
-from ..utils_mtf import concat, utils_slice, weighted_add, anonymize, anonymize_shape
+from ..mtf_wrapper import (add_n, cast, constant_scalar, dropout, einsum, ones, reciprocal, reduce_sum, sigmoid, sign,
+                           zeros_like, mod, floordiv, reshape, equal, argmax, softmax_cross_entropy_with_logits,
+                           recompute_grad, add, negative, divide)
 from ..utils_core import scoped
+from ..utils_mtf import concat, utils_slice, weighted_add, anonymize, anonymize_shape
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -85,12 +85,8 @@ def _input(params: ModelParameter,
         base_args = BlockArgs(params, txt_src, [''])
         intermediate = params.intermediate[0]
         intermediate = mtf.Dimension(intermediate.name, int(intermediate.size * params.vocab_weight_factorization))
-        txt_embd = embed(base_args(params.token_embedding), [params.vocab_dim, intermediate])
-        txt = einsum([txt_embd, one_hot(txt_src, params.vocab_dim, dtype=params.variable_dtype.activation_dtype)],
-                     reduced_dims=[params.vocab_dim])
-
+        txt = gather_embed(base_args, txt_src, [params.vocab_dim, intermediate])
         txt = dropout(txt, params.train, rate=params.input_dropout)
-
         txt = linear_to_features(base_args(txt), [params.token_patch_dim, intermediate])
 
         for config_idx, config in enumerate(params.input_block_config):
@@ -196,26 +192,9 @@ def _loss(params: ModelParameter, frame_out: typing.Optional[mtf.Tensor], token_
                                               params.variable_dtype.activation_dtype), []), txt_tgt.size)
 
     if params.use_video:
-
-        if params.use_discrete_video_loss:
-
-            mak_per_head_shape = mtf.Shape([params.batch_dim, params.sequence_per_head_dim, params.head_dim])
-            _vid_msk_tgt = reshape(vid_msk_tgt, new_shape=mak_per_head_shape)
-            _cat_msk_tgt = reshape(cat_msk_tgt, new_shape=mak_per_head_shape)
-
-            video_size = constant_scalar(params, 1 / vid_tgt.size)
-            video_target = one_hot(vid_tgt, params.discrete_color_dim, dtype=params.variable_dtype.activation_dtype)
-            video_loss = einsum([reduce_logsumexp(frame_out, reduced_dim=params.discrete_color_dim), video_size,
-                                 _vid_msk_tgt, _cat_msk_tgt], output_shape=[params.head_dim])
-            video_loss = add(video_loss,
-                             einsum([frame_out, video_target, video_size, constant_scalar(params, -1),
-                                     _vid_msk_tgt, _cat_msk_tgt], output_shape=[params.head_dim]))
-            video_loss = reduce_sum(video_loss, output_shape=[])
-
-        else:
-            size = constant_scalar(params, 1 / frame_out.size)
-            out = add(frame_out, negative(vid_tgt))
-            video_loss: mtf.Tensor = einsum([out, vid_msk_tgt, cat_msk_tgt, size, sign(out)], output_shape=[])
+        size = constant_scalar(params, 1 / frame_out.size)
+        out = add(frame_out, negative(vid_tgt))
+        video_loss: mtf.Tensor = einsum([out, vid_msk_tgt, cat_msk_tgt, size, sign(out)], output_shape=[])
 
         loss_list.append(video_loss)
 
