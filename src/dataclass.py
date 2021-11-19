@@ -61,10 +61,11 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.debug_sample = False
         self.padding_token = 0
         self.concat_token = 4
-        self.n_ctx = 32
-        self.n_head = 8
-        self.n_embd: typing.Optional[int] = None
-        self.n_embd_per_head: typing.Optional[int] = None
+        self.sequence_length = 32
+        self.heads = 8
+        self.features: typing.Optional[int] = None
+        self.features_per_head: typing.Optional[int] = None
+        self.factorized_product_key_value = self.features_per_head
         self.n_blocks = 16
         self.buffer_size = 4
         self.shuffle_buffer = 256
@@ -206,20 +207,21 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         if self.weight_standardisation and not self.weight_centralisation:
             print("Can't standardise weights without centralizing them first. Enabling it.")
             self.weight_centralisation = True
-        if self.n_embd is None and self.n_embd_per_head is None:
-            raise ValueError("Either n_embd or n_embd_per_head has to be specified")
-        if self.n_embd is None:
-            self.n_embd = self.n_embd_per_head * self.n_head
-        if self.n_embd_per_head is None:
-            self.n_embd_per_head = self.n_embd // self.n_head
+        if self.features is None and self.features_per_head is None:
+            raise ValueError("Either features or features_per_head has to be specified")
+        if self.features is None:
+            self.features = self.features_per_head * self.heads
+        if self.features_per_head is None:
+            self.features_per_head = self.features // self.heads
         if self.use_video and (self.frame_width * self.frame_height // self.patch_size) % self.experts:
             raise ValueError("Frame size has to be divisible by number of experts. Set \"experts\" to 1 if you're not "
                              "using MoE")
         if self.intermediate_feed_forward_multiplier is None:
-            self.intermediate_feed_forward_multiplier = self.group_linear_factor / self.n_head
-        if not self.use_video and self.language_token_per_frame != self.n_ctx:
-            print(f"language_token_per_frame is unused in language-only mode. Overwriting with n_ctx={self.n_ctx}")
-            self.language_token_per_frame = self.n_ctx
+            self.intermediate_feed_forward_multiplier = self.group_linear_factor / self.heads
+        if not self.use_video and self.language_token_per_frame != self.sequence_length:
+            print(
+                f"language_token_per_frame is unused in language-only mode. Overwriting with n_ctx={self.sequence_length}")
+            self.language_token_per_frame = self.sequence_length
         if self.macro_batching > 1 and self.grad_accumulation > 1 and self.macro_batching % self.grad_accumulation != 0:
             raise ValueError(f'"macro_batching" needs do be divisible by "grad_accumulation", '
                              f'{self.macro_batching} is not divisible by {self.grad_accumulation}')
@@ -251,7 +253,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
                                    self.input_block_config]
         self.output_block_config = [BlockConfig(conf, memory_reduction_strategy="checkpoint") for conf in
                                     self.output_block_config]
-        self.time_patch_size = self.n_ctx // self.time_patch
+        self.time_patch_size = self.sequence_length // self.time_patch
         self.frame_height_patch = self.frame_height // self.patch_size
         self.frame_width_patch = self.frame_width // self.patch_size
         self.channel_color_size = self.color_channels * self.time_patch * self.patch_size ** 2
@@ -262,15 +264,19 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         if self.use_bit_fold_input_pipeline:
             self.channel_color_size = self.channel_color_size // self.fold_count
 
-        self.head_dim = mtf.Dimension("heads", self.n_head)
+        self.product_key_value_vectors = self.factorized_product_key_value ** 2
+        self.product_key_value_dim = mtf.Dimension("product_key_value_dim", self.product_key_value_vectors)
+        self.factorized_product_key_value_dim = mtf.Dimension("factorized_product_key_value",
+                                                              self.factorized_product_key_value)
+        self.head_dim = mtf.Dimension("heads", self.heads)
         self.head_dimensions = [self.head_dim]
-        self.key_dim = mtf.Dimension("features_per_head", self.n_embd // self.n_head)
-        self.sequence_per_head_dim = mtf.Dimension("sequence_per_head", self.time_patch_size // self.n_head)
+        self.key_dim = mtf.Dimension("features_per_head", self.features // self.heads)
+        self.sequence_per_head_dim = mtf.Dimension("sequence_per_head", self.time_patch_size // self.heads)
 
         self.feature_dims = self.head_dimensions + [self.key_dim]
 
         self.intermediate = [mtf.Dimension("intermediate",
-                                           int(self.n_head * self.key_dim.size *
+                                           int(self.heads * self.key_dim.size *
                                                self.intermediate_feed_forward_multiplier))]
         self.expert_dim = mtf.Dimension("experts", self.experts)
 

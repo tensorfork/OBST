@@ -112,7 +112,7 @@ def autoregressive_model(params: ModelParameter,
             sampling_temperature = constant_scalar(params, params.sampling_temperature, dtype=tf.float32)
 
         if end_iterations is None:
-            end_iterations = constant(params, value=params.n_ctx, dtype=tf.int32)
+            end_iterations = constant(params, value=params.sequence_length, dtype=tf.int32)
 
         while_loop_inputs = [initial_pos, token_x_input, token_y_input, sampling_temperature]
 

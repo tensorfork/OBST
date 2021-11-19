@@ -5,11 +5,12 @@ import tensorflow as tf
 
 from .activation import activate
 from .backend import get_var, linear, orthogonal_var
+from .embedding import gather_embed
 from .normalization import norm
 from ..dataclass import BlockArgs
 from ..mtf_wrapper import (dropout as utils_dropout, sigmoid, exp, reduce_max, reduce_sum, einsum, reciprocal, reshape,
                            multiply, add)
-from ..utils_mtf import linear_shapes, anonymize_shape
+from ..utils_mtf import linear_shapes, anonymize_shape, get_dim
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -69,3 +70,16 @@ def feed_forward(args: BlockArgs) -> mtf.Tensor:
 def group_linear(args: BlockArgs):
     return reshape(linear(args('group'), args.params.feature_dims,
                           anonymize_shape(args.params.feature_dims, args.params.key_dim)), args.tensor.shape)
+
+
+def product_key_value(args: BlockArgs):
+    old, new = linear_shapes(args)
+    two = mtf.Dimension("two", 2)
+    features = [two, args.params.factorized_product_key_value_dim]
+    assignment = mtf.exp(linear(args, old, features))
+    normalizer = mtf.reduce_sum(assignment, output_shape=assignment.shape - features)
+    val, idx = mtf.top_1(assignment, args.params.product_key_value_dim)
+    idx = mtf.slice(idx, 0, 1, two) * args.params.factorized_product_key_value + mtf.slice(idx, 1, 1, two)
+    val = (mtf.slice(idx, 0, 1, two) + mtf.slice(idx, 1, 1, two)) / normalizer
+    val = mtf.reshape(val, val.shape - get_dim(val, two))
+    return gather_embed(args(idx), [args.params.product_key_value_dim, args.params.feature_dims]) * val

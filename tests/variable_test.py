@@ -156,7 +156,7 @@ class DoubleSharedVariable(SharedOrthogonalVariable):
 @pytest.mark.parametrize("storage_dtype", ["bfloat16", "float32"])
 @pytest.mark.parametrize("slice_dtype", ["bfloat16", "float32"])
 @pytest.mark.parametrize("embd_per_head", [1, 16, 256])
-@pytest.mark.parametrize("n_head", [1, 4])
+@pytest.mark.parametrize("heads", [1, 4])
 def op_test(test: typing.Type, calculation_dtype: str, storage_dtype: str, slice_dtype: str, embd_per_head: int,
             n_head: int):
     test(calculation_dtype=calculation_dtype, storage_dtype=storage_dtype, slice_dtype=slice_dtype,

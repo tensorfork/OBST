@@ -96,7 +96,7 @@ def process_video_output(out_frame: np.ndarray, params: ModelParameter) -> np.nd
                                        params.time_patch, params.patch_size, params.patch_size, params.color_channels))
 
     out_frame = np.transpose(out_frame, [0, 3, 1, 4, 2, 5, 6])
-    out_frame = np.reshape(out_frame, (params.n_ctx, params.frame_height, params.frame_width, 3))
+    out_frame = np.reshape(out_frame, (params.sequence_length, params.frame_height, params.frame_width, 3))
 
     return out_frame
 
@@ -182,7 +182,7 @@ def get_command_line_input_and_output_fn(params: ModelParameter):
                                                                  params.vocab_size > 256 else None
 
     samp_temp = params.sampling_temperature
-    end_iter = params.n_ctx
+    end_iter = params.sequence_length
     _iter_pos = [0]
     _end_iter = [0]
 
@@ -197,9 +197,9 @@ def get_command_line_input_and_output_fn(params: ModelParameter):
             else:
                 query = bpe_tokenizer.encode(query)
 
-            if len(query) >= params.n_ctx:
+            if len(query) >= params.sequence_length:
                 color_print(params, f'Query is to long, the maximum number tokens is '
-                                    f'{params.n_ctx}, but you have {len(query)} tokens.')
+                                    f'{params.sequence_length}, but you have {len(query)} tokens.')
                 continue
 
             iter_pos = len(query) + 1
@@ -207,8 +207,8 @@ def get_command_line_input_and_output_fn(params: ModelParameter):
 
             _end_iter[0] = end_iter
 
-            query = query + [0] * (params.n_ctx - len(query))
-            query = np.reshape(np.array(query, np.int32), newshape=(1, params.n_ctx, 1))
+            query = query + [0] * (params.sequence_length - len(query))
+            query = np.reshape(np.array(query, np.int32), newshape=(1, params.sequence_length, 1))
             break
 
         return query, np.array([iter_pos], np.int32), \
@@ -256,18 +256,18 @@ class InterfaceWrapper:
                                                              np.array]:
         iter_pos = len(query)
 
-        if iter_pos >= self.params.n_ctx:
+        if iter_pos >= self.params.sequence_length:
             raise ContextExhaustedError
         if query and max(query) >= self.params.vocab_size:
             raise InvalidTokenError
 
         prompt_id = self.increment(self.input_prompt_id)
 
-        query = query + [random.randint(0, self.params.vocab_size - 1) for _ in range((self.params.n_ctx - len(query)))]
-        query = np.reshape(np.array(query, np.int32), newshape=(1, self.params.n_ctx, 1))
+        query = query + [random.randint(0, self.params.vocab_size - 1) for _ in range((self.params.sequence_length - len(query)))]
+        query = np.reshape(np.array(query, np.int32), newshape=(1, self.params.sequence_length, 1))
 
         self.input[prompt_id] = (query, np.array([iter_pos], np.int32), np.array([temperature], np.float32),
-                                 np.array([min(response_len + len(query), self.params.n_ctx)], np.int32))
+                                 np.array([min(response_len + len(query), self.params.sequence_length)], np.int32))
 
         def _result():
             response = self.blocked_get(self.output, prompt_id)[0].astype(np.int64)
@@ -290,9 +290,9 @@ def get_similarity_input_and_output_fn(params: ModelParameter):
         time.sleep(10)
 
         for idx in range(params.num_of_sample):
-            query = [random.randint(0, params.vocab_size - 1) for _ in range(min(32, params.n_ctx - 8))]
+            query = [random.randint(0, params.vocab_size - 1) for _ in range(min(32, params.sequence_length - 8))]
 
-            out = [interface.complete(query=query, temperature=0.0, response_len=params.n_ctx, debug=True,
+            out = [interface.complete(query=query, temperature=0.0, response_len=params.sequence_length, debug=True,
                                       asynchronous=True) for _ in range(params.equal_debugging_items_per_check)]
             base, *out = [f() for f in out]
 

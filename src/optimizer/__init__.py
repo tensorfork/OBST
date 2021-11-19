@@ -15,7 +15,7 @@ from .gradients import MULTI_LOSS_GRADIENTS
 from .learning_rate import get_learning_rate
 from .optimizers import OPTIMIZERS
 from ..dataclass import ModelParameter
-from ..model.embedding import Embedding
+from ..model.embedding import Gather
 from ..model.revnet import RevGradOp
 from ..mtf_wrapper import (cast, constant_float, constant_scalar, einsum, equal, greater_equal, mod,
                            reduce_sum, assign, assign_sub,
@@ -94,7 +94,7 @@ def update(ctx: OptimizerCtx):
                                          cast(var.value, params.optimizer_calculation_dtype), learning_rate],
                                         output_shape=var.shape))
     op = ctx.tensor_to_gradient[ctx.tensor][3]
-    if isinstance(op, Embedding):
+    if isinstance(op, Gather):
         update_ops.append(SparseAssignSub(ctx.var, op.inputs[0], ctx.grad))
     else:
         update_ops.append(assign_sub(var, ctx.grad))
@@ -193,7 +193,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                     continue
                 if isinstance(op, RevGradOp):
                     itr = op.gradient(grad_outputs, params=op.inputs)
-                elif isinstance(op, Embedding):
+                elif isinstance(op, Gather):
                     itr = (op.inputs[1], op.gradient(grad_outputs)[0])
                 else:
                     itr = zip(op.inputs, op.gradient(grad_outputs))

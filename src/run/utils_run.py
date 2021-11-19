@@ -75,7 +75,7 @@ def analyze_model(params: ModelParameter, time_to_build: float, graph: mtf.Graph
 
     constant = '  variables: '
     variable_mapping = [('Model', param_count - embed_param_count),
-                        ('Embedding', embed_param_count),
+                        ('Gather', embed_param_count),
                         ('Body with Embed', body_param_count),
                         ('Untrainable', var_count - param_count),
                         ('', 0),

@@ -382,7 +382,7 @@ def dataset_video(path: str, params: ModelParameter, sub_batch_size: int, slice_
     time_patch = params.time_patch
     color_channels = params.color_channels
     patch_size = params.patch_size
-    n_ctx = params.n_ctx
+    n_ctx = params.sequence_length
     token_patch_size = params.token_patch_size
     language_token_patch = params.language_token_patch
     language_token_per_frame = params.language_token_per_frame
@@ -545,17 +545,17 @@ def gpt_neo_input(params: ModelParameter, sub_batch_size: int, slice_index: int,
         dset = dset.repeat()
 
     def _memory_func(x):
-        shp = (sub_batch_size, params.n_ctx // params.token_patch_size + params.output_offset, params.token_patch_size)
+        shp = (sub_batch_size, params.sequence_length // params.token_patch_size + params.output_offset, params.token_patch_size)
         x = tf.cast(tf.reshape(x, shp), tf.int32)
         if params.output_offset > 0:
-            vals1 = x[:, :params.n_ctx]
-            vals2 = x[:, params.output_offset:params.n_ctx + params.output_offset]
+            vals1 = x[:, :params.sequence_length]
+            vals2 = x[:, params.output_offset:params.sequence_length + params.output_offset]
         else:
             vals1 = vals2 = x
         return {'token_x': vals1, 'token_y': vals2}
 
     decoder = decode_intstring if 'int64' in filenames[0] else decode_bytestring
-    dset = dset.interleave(lambda x, _skip: _text_decoder(decoder, x, params.n_ctx,
+    dset = dset.interleave(lambda x, _skip: _text_decoder(decoder, x, params.sequence_length,
                                                           params.token_patch_size * params.output_offset, -1,
                                                           params.shuffle_buffer * int(params.use_random_dataloader),
                                                           _skip),

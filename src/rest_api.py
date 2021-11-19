@@ -45,11 +45,11 @@ class RestAPI:
                 raise HTTPException(status_code=400, detail=f"Invalid tokens sent. Tokens go up to "
                                                             f"{self._params.vocab_size} but received {max(tokens)}.")
             tokens = [t for t in tokens if t < self._params.vocab_size]
-        if len(tokens) > self._params.n_ctx:
+        if len(tokens) > self._params.sequence_length:
             if error:
                 raise HTTPException(status_code=400, detail=f"Context too big. The model supports up to "
-                                                            f"{self._params.n_ctx} tokens but received {len(tokens)}.")
-            tokens = tokens[:self._params.n_ctx]
+                                                            f"{self._params.sequence_length} tokens but received {len(tokens)}.")
+            tokens = tokens[:self._params.sequence_length]
         return SanitizedTokens(tokens=tokens)
 
     async def encode(self, prompt: str) -> Tokens:

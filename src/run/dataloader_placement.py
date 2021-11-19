@@ -108,7 +108,7 @@ def place_dataloader(params: ModelParameter, input_fn):
         if tf.io.gfile.exists(log_path):
             _run_log = json.load(tf.io.gfile.GFile(log_path, 'r'))
 
-        curran_stats = {'steps': params.current_step, 'ctx': params.n_ctx,
+        curran_stats = {'steps': params.current_step, 'ctx': params.sequence_length,
                         'slice_count': len(hosts_to_hold_ds),
                         'interleave_size': params.interleaved_datasets,
                         'batch_size': params.train_batch_size,

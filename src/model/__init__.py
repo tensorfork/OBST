@@ -85,7 +85,7 @@ def _input(params: ModelParameter,
         base_args = BlockArgs(params, txt_src, [''])
         intermediate = params.intermediate[0]
         intermediate = mtf.Dimension(intermediate.name, int(intermediate.size * params.vocab_weight_factorization))
-        txt = gather_embed(base_args, txt_src, [params.vocab_dim, intermediate])
+        txt = gather_embed(base_args(txt_src), [params.vocab_dim, intermediate])
         txt = dropout(txt, params.train, rate=params.input_dropout)
         txt = linear_to_features(base_args(txt), [params.token_patch_dim, intermediate])
 
