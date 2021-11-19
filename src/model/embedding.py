@@ -2,6 +2,7 @@ import math
 
 import mesh_tensorflow as mtf
 import numpy as np
+import tensorflow as tf
 
 from .backend import normal_var, orthogonal_var
 from .. import tf_wrapper as tfw
@@ -18,6 +19,30 @@ def _multi_dim_range_tf(params: ModelParameter, dims: DIM_LIST) -> mtf.Tensor:
     for i in items:
         out = tfw.add(out, i)
     return tfw.cast(out, params.variable_dtype.activation_dtype)
+
+
+class Embedding(mtf.Operation):
+    def __init__(self, args: BlockArgs, indices: mtf.Tensor, embedding: mtf.Tensor, gather_dim: mtf.Dimension):
+        assert all(dim in embedding.shape and dim not in indices.shape for dim in indices.shape)
+        assert embedding.shape.dims.index(gather_dim) == 0
+        super().__init__([indices, embedding], args.params.mesh, name=random_name("embedding"))
+        self.args = args
+        self._outputs = [mtf.Tensor(self, indices.shape + embedding.shape - gather_dim,
+                                    args.params.variable_dtype.activation_dtype)]
+
+    def gradient(self, grad_ys):
+        return grad_ys
+
+    def lower(self, lowering: mtf.Lowering):
+        mesh_impl: mtf.simd_mesh_impl.SimdMeshImpl = lowering.mesh_impl(self)
+
+        indices, embeddings = self.inputs
+
+        def slicewise_fn(idx: tf.Tensor, embd: tf.Tensor) -> tf.Tensor:
+            return tf.gather(embd, idx, axis=0)
+
+        y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[indices], lowering.tensors[embeddings])
+        lowering.set_tensor_lowering(self.outputs[0], y)
 
 
 class RelativeEmbeddingForward(mtf.Operation):

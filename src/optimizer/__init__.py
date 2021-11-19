@@ -5,7 +5,6 @@ b"""
 import typing
 
 import mesh_tensorflow as mtf
-import numpy as np
 import tensorflow as tf2
 
 from .backend import import_mtf, import_float, get_var, variable
@@ -16,15 +15,46 @@ from .gradients import MULTI_LOSS_GRADIENTS
 from .learning_rate import get_learning_rate
 from .optimizers import OPTIMIZERS
 from ..dataclass import ModelParameter
+from ..model.embedding import Embedding
 from ..model.revnet import RevGradOp
 from ..mtf_wrapper import (cast, constant_float, constant_scalar, einsum, equal, greater_equal, mod,
                            reduce_sum, assign, assign_sub,
-                           add, multiply, scoped, assign_add, identity, zeros_like, negative, rsqrt_eps,
-                           optimizer_scalar, reciprocal, reduce_mean, broadcast, reshape, logical_and)
-from ..utils_mtf import feature_dims_used, to_fp32, get_fan_in, weighted_add
+                           add, multiply, scoped, assign_add, identity, zeros_like, negative, optimizer_scalar,
+                           reciprocal, reduce_mean, broadcast, reshape)
+from ..utils_mtf import feature_dims_used, to_fp32, random_name
 
 tf = tf2.compat.v1
 zeros = tf.zeros_initializer()
+
+
+class SparseAssignSub(mtf.Assign):
+    """Assign to one or more variables."""
+    assign_fn = "sparse assign sub"
+
+    def __init__(self, variable: mtf.Variable, indices: mtf.Tensor, gradient: mtf.Tensor):
+        super(SparseAssignSub, self).__init__([indices, gradient], variable.mesh, name=random_name("assign"))
+        self.var = variable
+        self._outputs = []
+
+    def lower(self, lowering):
+        mesh_impl: mtf.simd_mesh_impl.SimdMeshImpl = lowering.mesh_impl(self)
+
+        def get_slices(tensor: mtf.Tensor):
+            return lowering.tensors[tensor].to_laid_out_tenor().all_slices
+
+        def assign_fn(var: tf2.Tensor, indices: tf2.Tensor, gradient: tf2.Tensor) -> tf2.Tensor:
+            indices = indices.reshape(indices, indices.shape.as_list() + [1])
+            return tf.assign(var, tf2.cast(tf2.tensor_scatter_nd_sub(var, indices, gradient), self.var.slice_dtype))
+
+        lowering.operations[self] = tf.group(mtf.parallel(mesh_impl.devices,
+                                                          assign_fn,
+                                                          lowering.variables[self.var].all_slices,
+                                                          get_slices(self._inputs[0]),
+                                                          get_slices(self._inputs[1])))
+
+    @property
+    def variables(self):
+        return [self.var]
 
 
 def gradient_accumulation(ctx: OptimizerCtx):
@@ -63,31 +93,11 @@ def update(ctx: OptimizerCtx):
         ctx.grad = add(ctx.grad, einsum([optimizer_scalar(params, params.weight_decay),
                                          cast(var.value, params.optimizer_calculation_dtype), learning_rate],
                                         output_shape=var.shape))
-
-    if not large_tensor or not params.weight_standardisation or not params.lookahead_steps:
+    op = ctx.tensor_to_gradient[ctx.tensor][3]
+    if isinstance(op, Embedding):
+        update_ops.append(SparseAssignSub(ctx.var, op.inputs[0], ctx.grad))
+    else:
         update_ops.append(assign_sub(var, ctx.grad))
-        return
-
-    val: mtf.Tensor = var.value - ctx.grad
-
-    if params.lookahead_steps:
-        slow_weight = variable(ctx.params, ctx.var, "slow_weight", ctx.var.shape)
-        var_grad = var.value - ctx.grad
-        val = weighted_add(slow_weight + (var_grad - slow_weight) * params.lookahead_alpha, var_grad,
-                           logical_and(equal(mod(ctx.step_count, params.lookahead_steps), 0), cast(ctx.step, tf.bool)))
-        ctx.update_ops.extend([assign(slow_weight, val)])
-
-    if params.weight_standardisation:
-        fan_in_size = np.prod([d.size for d in get_fan_in(params, var)])
-        size = np.prod([d.size for d in var.shape.dims])
-        max_fan = max(fan_in_size, size // fan_in_size)
-        variance = ((1 - 1 / max_fan) / size ** 2 + 1 / max_fan - 2 / size + 1 / max_fan)
-        if params.scale_by_depth:
-            variance *= params.n_blocks
-        val = einsum([val, rsqrt_eps(einsum([val, val, optimizer_scalar(params, 1 / val.size)], output_shape=[])),
-                      optimizer_scalar(params, variance ** 0.5)], output_shape=var.shape)
-
-    update_ops.append(assign(var, val))
 
 
 def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, manual_step: mtf.Tensor, fn: str
@@ -164,7 +174,8 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
             if op.has_gradient and (set(op.inputs) & downstream):
                 downstream |= set(op.outputs)
 
-        tensor_to_gradient: typing.Dict[mtf.Tensor, typing.List[int, int, mtf.Tensor]] = {loss: [0, 0, loss_grad]}
+        tensor_to_gradient: typing.Dict[mtf.Tensor, typing.List[int, int, mtf.Tensor,
+                                                                mtf.Operation]] = {loss: [0, 0, loss_grad, None]}
 
         with tf.variable_scope(loss.graph.captured_variable_scope):
             for op in operations[::-1]:
@@ -174,7 +185,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                         grad_outputs.append(None)
                         continue
 
-                    grad_list: typing.Tuple[int, int, mtf.Tensor] = tensor_to_gradient[out]
+                    grad_list: typing.Tuple[int, int, mtf.Tensor, mtf.Operation] = tensor_to_gradient[out]
                     grad_outputs.append(grad_list[2])
                     grad_list[0] += 1
 
@@ -182,6 +193,8 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                     continue
                 if isinstance(op, RevGradOp):
                     itr = op.gradient(grad_outputs, params=op.inputs)
+                elif isinstance(op, Embedding):
+                    itr = (op.inputs[1], op.gradient(grad_outputs)[0])
                 else:
                     itr = zip(op.inputs, op.gradient(grad_outputs))
                 for inp, grad in itr:
@@ -191,9 +204,10 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                     if inp in tensor_to_gradient:
                         grad_list = tensor_to_gradient[inp]
                         grad_list[1] += 1
-                        grad_list[2] = add(grad, grad_list[2])
+                        grad_list[2] += grad
+                        grad_list[3] = op
                     else:
-                        tensor_to_gradient[inp] = grad_list = [0, 1, grad]
+                        tensor_to_gradient[inp] = grad_list = [0, 1, grad, op]
 
                     if len(inp.operation.outputs) != grad_list[1] or inp not in tensor_to_var:
                         continue
@@ -217,14 +231,13 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
 
                     if grad is None:
                         continue
-    variable_to_gradient = {var: cast(tensor_to_gradient[tensor][2], params.optimizer_calculation_dtype)
-                            for tensor, var in tensor_to_var.items()}
-    ctx.variable_to_gradient = variable_to_gradient
-    for var, grad in variable_to_gradient.items():
+    ctx.variable_to_gradient = {var: cast(tensor_to_gradient[tensor][2], params.optimizer_calculation_dtype)
+                                for tensor, var in tensor_to_var.items()}
+    for tensor, var in tensor_to_var.items():
         full_name = f'{var.name}/{params.optimizer}/grad_accumulation'
         if fn == "accumulate" or full_name in params.mesh.graph.name_to_variable:
             ctx.grad_buffer = variable(params, var, "grad_accumulation", var.shape)
         scoped(fn, gradient_accumulation if fn == "accumulate" else update,
-               ctx(var, cast(grad, params.optimizer_calculation_dtype)))
+               ctx(tensor, var, cast(tensor_to_gradient[tensor][2], params.optimizer_calculation_dtype)))
 
     return params.mesh.graph.combine_assignments(ctx.update_ops), learning_rate, debug_gradients_dict
