@@ -141,7 +141,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
         loss_1__loss_2 = constant_float(params, 0, shape=[params.head_dim])
         loss_2__loss_2 = constant_float(params, 0, shape=[params.head_dim])
 
-    tensor_to_gradient = {}
+    tensor_to_gradient: typing.Dict[mtf.Tensor, typing.List[int, int, mtf.Tensor, mtf.Operation]] = {}
     tensor_to_var = {}
 
     for loss_idx, loss in enumerate(loss_list):
@@ -194,7 +194,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                 if isinstance(op, RevGradOp):
                     itr = op.gradient(grad_outputs, params=op.inputs)
                 elif isinstance(op, Gather):
-                    itr = ((op.inputs[1], op.gradient(grad_outputs)[0]),)
+                    itr = ((op.inputs[1], grad_outputs[0]),)
                 else:
                     itr = zip(op.inputs, op.gradient(grad_outputs))
                 for inp, grad in itr:
@@ -226,11 +226,6 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                         update_ops.append(assign(flat_grad, reshape(grad, new_shape=flat_shape)))
                         debug_gradients_dict[f"loss_{loss_idx}/{var.name}"] = flat_grad
 
-                    if len(loss_list) > 1:
-                        grad = MULTI_LOSS_GRADIENTS[params.multi_loss_strategy](ctx, grad)
-
-                    if grad is None:
-                        continue
     ctx.variable_to_gradient = {var: cast(tensor_to_gradient[tensor][2], params.optimizer_calculation_dtype)
                                 for tensor, var in tensor_to_var.items()}
     for tensor, var in tensor_to_var.items():
@@ -238,6 +233,6 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
         if fn == "accumulate" or full_name in params.mesh.graph.name_to_variable:
             ctx.grad_buffer = variable(params, var, "grad_accumulation", var.shape)
         scoped(fn, gradient_accumulation if fn == "accumulate" else update,
-               ctx(tensor, var, cast(tensor_to_gradient[tensor][2], params.optimizer_calculation_dtype)))
+               ctx(tensor, var, ctx.variable_to_gradient[var]))
 
     return params.mesh.graph.combine_assignments(ctx.update_ops), learning_rate, debug_gradients_dict

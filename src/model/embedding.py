@@ -28,9 +28,6 @@ class Gather(mtf.Operation):
         self._outputs = [mtf.Tensor(self, args.tensor.shape + embedding.shape.dims[1:],
                                     args.params.variable_dtype.activation_dtype)]
 
-    def gradient(self, grad_ys):
-        return grad_ys
-
     def lower(self, lowering: mtf.Lowering):
         mesh_impl: mtf.simd_mesh_impl.SimdMeshImpl = lowering.mesh_impl(self)
 
