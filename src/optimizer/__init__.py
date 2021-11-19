@@ -194,7 +194,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                 if isinstance(op, RevGradOp):
                     itr = op.gradient(grad_outputs, params=op.inputs)
                 elif isinstance(op, Gather):
-                    itr = (op.inputs[1], op.gradient(grad_outputs)[0])
+                    itr = ((op.inputs[1], op.gradient(grad_outputs)[0]),)
                 else:
                     itr = zip(op.inputs, op.gradient(grad_outputs))
                 for inp, grad in itr:
