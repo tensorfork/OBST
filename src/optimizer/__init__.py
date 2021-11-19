@@ -193,4 +193,20 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
         scoped(fn, gradient_accumulation if fn == "accumulate" else update,
                ctx(tensor, var, ctx.variable_to_gradient[var]))
 
-    return params.mesh.graph.combine_assignments(ctx.update_ops), learning_rate, debug_gradients_dict
+    group_by_fn = {}
+    for a in ctx.update_ops:
+        if a.assign_fn not in group_by_fn:
+            group_by_fn[a.assign_fn] = []
+        group_by_fn[a.assign_fn].append(a)
+    ops = [op for op in params.mesh.graph.operations if op not in set(ctx.update_ops)]
+    params.mesh.graph.operations.clear()
+    params.mesh.graph.operations.extend(ops)
+    ret = []
+    for fn, ops in group_by_fn.items():
+        variables = []
+        values = []
+        for a in ops:
+            variables.extend(a.variables)
+            values.extend(a.inputs)
+        ret.append(ops[0].__class__(variables, values, fn))
+    return ret, learning_rate, debug_gradients_dict
