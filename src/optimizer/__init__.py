@@ -15,48 +15,17 @@ from .gradients import MULTI_LOSS_GRADIENTS
 from .learning_rate import get_learning_rate
 from .optimizers import OPTIMIZERS
 from ..dataclass import ModelParameter
-from ..model.embedding import Gather
 from ..mtf_wrapper import (cast, constant_float, constant_scalar, einsum, equal, greater_equal, mod, reduce_sum, assign,
-                           assign_sub, add, multiply, scoped, assign_add, identity, zeros_like, negative,
-                           optimizer_scalar, reciprocal, reduce_mean, broadcast, reshape)
-from ..utils_mtf import feature_dims_used, to_fp32, random_name, gradient_iterator
+                           add, multiply, scoped, identity, zeros_like, negative, optimizer_scalar, reciprocal,
+                           reduce_mean, broadcast, reshape)
+from ..utils_mtf import feature_dims_used, to_fp32, gradient_iterator, assign_sub, assign_add
 
 tf = tf2.compat.v1
 zeros = tf.zeros_initializer()
 
 
-class SparseAssignSub(mtf.Assign):
-    """Assign to one or more variables."""
-    assign_fn = "sparse assign sub"
-
-    def __init__(self, variable: mtf.Variable, indices: mtf.Tensor, gradient: mtf.Tensor):
-        mtf.Operation.__init__(self, [indices, gradient], variable.mesh, name=random_name("assign"))
-        self.var = variable
-        self._outputs = []
-
-    def lower(self, lowering):
-        mesh_impl: mtf.simd_mesh_impl.SimdMeshImpl = lowering.mesh_impl(self)
-
-        def get_slices(tensor: mtf.Tensor):
-            return lowering.tensors[tensor].to_laid_out_tenor().all_slices
-
-        def assign_fn(var: tf2.Tensor, indices: tf2.Tensor, gradient: tf2.Tensor) -> tf2.Tensor:
-            indices = indices.reshape(indices, indices.shape.as_list() + [1])
-            return tf.assign(var, tf2.cast(tf2.tensor_scatter_nd_sub(var, indices, gradient), self.var.slice_dtype))
-
-        lowering.operations[self] = tf.group(mtf.parallel(mesh_impl.devices,
-                                                          assign_fn,
-                                                          lowering.variables[self.var].all_slices,
-                                                          get_slices(self._inputs[0]),
-                                                          get_slices(self._inputs[1])))
-
-    @property
-    def variables(self):
-        return [self.var]
-
-
 def gradient_accumulation(ctx: OptimizerCtx):
-    ctx.update_ops.append(assign_add(ctx.grad_buffer, add(ctx.grad, identity(ctx.grad_buffer))))
+    ctx.update_ops.append(assign_add(ctx.op, ctx.grad_buffer, add(ctx.grad, identity(ctx.grad_buffer))))
 
 
 def update(ctx: OptimizerCtx):
@@ -91,11 +60,8 @@ def update(ctx: OptimizerCtx):
         ctx.grad = add(ctx.grad, einsum([optimizer_scalar(params, params.weight_decay),
                                          cast(var.value, params.optimizer_calculation_dtype), learning_rate],
                                         output_shape=var.shape))
-    op = ctx.tensor_to_gradient[ctx.tensor][3]
-    if isinstance(op, Gather):
-        update_ops.append(SparseAssignSub(ctx.var, op.inputs[0], ctx.grad))
-    else:
-        update_ops.append(assign_sub(var, ctx.grad))
+
+    update_ops.append(assign_sub(ctx.op, ctx.var, ctx.grad))
 
 
 def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, manual_step: mtf.Tensor, fn: str

@@ -5,7 +5,8 @@ from .context import OptimizerCtx
 from ..mtf_wrapper import (cast, optimizer_scalar, einsum, greater, minimum,
                            reduce_mean, reduce_sum, assign, add, multiply, maximum, reciprocal, square,
                            reduce_max, rsqrt, sqrt, add_n, negative, pow as mtf_pow)
-from ..utils_mtf import weighted_add
+from ..utils_mtf import assign_sub, assign_add, weighted_add
+from ..model.embedding import Gather
 
 
 def opt_rsqrt(tensor: mtf.Tensor) -> mtf.Tensor:
@@ -21,31 +22,35 @@ def debias(ctx: OptimizerCtx, tensor: mtf.Tensor, momentum: mtf.Tensor) -> mtf.T
 
 
 def adam(ctx: OptimizerCtx) -> mtf.Tensor:
+    if isinstance(ctx.op, Gather):
+        return ctx.grad
     exp_avg_p2_ptr = variable(ctx.params, ctx.var, 'exp_avg_p2', ctx.var.shape)
     exp_avg_p1_ptr = variable(ctx.params, ctx.var, 'exp_avg_p1', ctx.var.shape)
 
     exp_avg_p2 = weighted_add(exp_avg_p2_ptr, square(ctx.grad), ctx.beta2)
     grad = weighted_add(exp_avg_p1_ptr, ctx.grad, ctx.beta1)
 
-    ctx.update_ops.append(assign(exp_avg_p2_ptr, exp_avg_p2))
-    ctx.update_ops.append(assign(exp_avg_p1_ptr, grad))
-    return einsum([opt_rsqrt(debias(ctx, exp_avg_p2, ctx.beta2)), grad,
-                   debias_momentum(ctx, ctx.beta1)], output_shape=grad.shape)
+    ctx.update_ops.extend([assign(exp_avg_p2_ptr, exp_avg_p2), assign(exp_avg_p1_ptr, grad)])
+    return einsum([opt_rsqrt(debias(ctx, exp_avg_p2, ctx.beta2)), grad, debias_momentum(ctx, ctx.beta1)],
+                  output_shape=grad.shape)
 
 
 def novograd(ctx: OptimizerCtx) -> mtf.Tensor:
+    if isinstance(ctx.op, Gather):
+        return ctx.grad
     exp_avg_p1 = exp_avg_p1_ptr = variable(ctx.params, ctx.var, "exp_avg_p1", ctx.var.shape)
     exp_avg_p2 = exp_avg_p2_ptr = variable(ctx.params, ctx.var, "exp_avg_p2", [])
 
     exp_avg_p1 = add(multiply(ctx.beta1, exp_avg_p1), multiply(ctx.grad, opt_rsqrt(exp_avg_p2)))
     exp_avg_p2 = weighted_add(exp_avg_p2, reduce_sum(square(ctx.grad)), ctx.beta2)
-    ctx.update_ops.extend([assign(exp_avg_p1_ptr, exp_avg_p1),
-                           assign(exp_avg_p2_ptr, exp_avg_p2)])
+    ctx.update_ops.extend([assign(exp_avg_p1_ptr, exp_avg_p1), assign(exp_avg_p2_ptr, exp_avg_p2)])
     return add(multiply(ctx.beta1, exp_avg_p1),
                multiply(ctx.grad, opt_rsqrt(debias(ctx, exp_avg_p2, ctx.beta2))))
 
 
 def sm3(ctx: OptimizerCtx) -> mtf.Tensor:
+    if isinstance(ctx.op, Gather):
+        return ctx.grad
     weight_update = variable(ctx.params, ctx.var, "dim0", [ctx.var.shape.dims[0]])
     buffer = [weight_update]
 
@@ -109,6 +114,8 @@ def multiply_learning_rate(ctx: OptimizerCtx) -> mtf.Tensor:
 
 def momentum(ctx: OptimizerCtx, momentum_multiplier: str, gradient_multiplier: str,
              nesterov: str) -> mtf.Tensor:
+    if isinstance(ctx.op, Gather):
+        return ctx.grad
     nesterov = bool(int(nesterov))
     momentum_multiplier = float(momentum_multiplier)
     gradient_multiplier = float(gradient_multiplier)

@@ -589,3 +589,48 @@ class WhileLoopWithControlDependencies(mtf.Operation):
                 out = mtf.LazyAllreduceSum(
                     mesh_impl, out, lazy.mesh_axes, lazy.add_counter_fn)
             lowering.set_tensor_lowering(mtf_out, out)
+
+
+class SparseAssign(mtf.Assign):
+    """Assign to one or more variables."""
+
+    def __init__(self, variable: mtf.Variable, indices: mtf.Tensor, gradient: mtf.Tensor,
+                 assign_fn: typing.Union[tf.tensor_scatter_nd_sub, tf.tensor_scatter_nd_add]):
+        mtf.Operation.__init__(self, [indices, gradient], variable.mesh, name=random_name("assign"))
+        self.var = variable
+        self._assign_fn = assign_fn
+        self._outputs = []
+
+    def lower(self, lowering):
+        mesh_impl: mtf.simd_mesh_impl.SimdMeshImpl = lowering.mesh_impl(self)
+
+        def get_slices(tensor: mtf.Tensor):
+            return lowering.tensors[tensor].to_laid_out_tenor().all_slices
+
+        def assign_fn(var: tf.Tensor, indices: tf.Tensor, gradient: tf.Tensor) -> tf.Tensor:
+            indices = indices.reshape(indices, indices.shape.as_list() + [1])
+            return tf1.assign(var, tf.cast(self.assign_fn(var, indices, gradient), self.var.slice_dtype))
+
+        lowering.operations[self] = tf.group(mtf.parallel(mesh_impl.devices,
+                                                          assign_fn,
+                                                          lowering.variables[self.var].all_slices,
+                                                          get_slices(self._inputs[0]),
+                                                          get_slices(self._inputs[1])))
+
+    @property
+    def variables(self):
+        return [self.var]
+
+
+def assign_sub(op: mtf.Operation, variable: mtf.Variable, gradient: mtf.Tensor):
+    from .model.embedding import Gather
+    if isinstance(op, Gather):
+        return SparseAssign(variable, op.inputs[0], gradient, tf.tensor_scatter_nd_sub)
+    return mtf.assign_sub(variable, gradient)
+
+
+def assign_add(op: mtf.Operation, variable: mtf.Variable, gradient: mtf.Tensor):
+    from .model.embedding import Gather
+    if isinstance(op, Gather):
+        return SparseAssign(variable, op.inputs[0], gradient, tf.tensor_scatter_nd_add)
+    return mtf.assign_add(variable, gradient)
