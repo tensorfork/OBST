@@ -16,7 +16,7 @@ tf1 = tf.compat.v1
 
 
 class OrthogonalInit(Initializer):
-    def __init__(self, params: ModelParameter, shape: SHAPE, fan_in_dims: OPT_DIMS = None):
+    def __init__(self, params: ModelParameter, shape: SHAPE, is_last: bool, fan_in_dims: OPT_DIMS = None):
         if fan_in_dims is None:
             fan_in_dims = []
         self.params = params
@@ -27,6 +27,7 @@ class OrthogonalInit(Initializer):
         fan_out = np.prod(sizes) // fan_in
         self.transpose = transpose = fan_out > fan_in
         self.shape = (fan_out, fan_in) if transpose else (fan_in, fan_out)
+        self.scale_by_depth = self.params.scale_by_depth and is_last
 
     def __call__(self, shape, dtype=None, partition_info=None):
         q, r = gen_linalg_ops.qr(random_ops.random_normal(self.shape, dtype=tf.float32, seed=self.seed))
@@ -34,7 +35,7 @@ class OrthogonalInit(Initializer):
         if self.transpose:
             q = array_ops.matrix_transpose(q)
         out = array_ops.reshape(q, self.sizes)
-        if self.params.scale_by_depth:
+        if self.scale_by_depth:
             out /= self.params.n_blocks ** 0.5
         return tf.cast(out, dtype)
 
@@ -96,7 +97,7 @@ def get_var(args: BlockArgs, shape: SHAPE, initializer: Initializer) -> mtf.Tens
 def orthogonal_var(args: BlockArgs, shape: typing.Union[typing.List[mtf.Dimension], mtf.Shape],
                    fan_in_dims: OPT_DIMS = None) -> mtf.Tensor:
     shape = deduplicate(shape)
-    return scoped("orthogonal_var", get_var, args, shape, OrthogonalInit(args.params, shape, fan_in_dims))
+    return scoped("orthogonal_var", get_var, args, shape, OrthogonalInit(args.params, shape, args.is_last, fan_in_dims))
 
 
 def normal_var(args: BlockArgs, shape: SHAPE, stddev: float = 0.02, mean: float = 0.) -> mtf.Tensor:

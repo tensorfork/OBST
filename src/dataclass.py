@@ -380,10 +380,12 @@ def align_tensor_op(x):
 
 
 class BlockArgs:
-    def __init__(self, params: ModelParameter, tensor: typing.Optional[mtf.Tensor], name_extras: typing.List[str]):
+    def __init__(self, params: ModelParameter, tensor: typing.Optional[mtf.Tensor], name_extras: typing.List[str],
+                 is_last: bool = False):
         self.params = params
         self.tensor = tensor
         self.name_extras = name_extras
+        self.is_last = is_last
 
     def __call__(self, *args: typing.Union[ModelParameter, mtf.Tensor, typing.List[str], str]):
         new = BlockArgs(self.params, self.tensor, self.name_extras[:])

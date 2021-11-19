@@ -20,9 +20,10 @@ tf1 = tf.compat.v1
 def _get_block_part(block_part_config: BlockConfig, params: ModelParameter, block_input: mtf.Tensor) -> mtf.Tensor:
     out = block_input
 
-    for layer in block_part_config.layer:
+    for idx, layer in enumerate(block_part_config.layer, 1):
         name, *extras = layer.split('-')
-        out = scoped(name + '_', LAYER_FUNCTIONS[name], BlockArgs(params, out, extras))
+        args = BlockArgs(params, out, extras, idx == len(block_part_config.layer))
+        out = scoped(name + '_', LAYER_FUNCTIONS[name], args)
 
     if block_part_config.skip and block_part_config.memory_reduction_strategy in ("none", "checkpoint"):
         out = add(out, block_input)
@@ -64,4 +65,3 @@ LAYER_FUNCTIONS = {'feed_forward': feed_forward,
                    'split_path': split_path,
                    'product_key_memory': product_key_memory
                    }
-
