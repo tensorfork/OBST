@@ -602,7 +602,7 @@ class SparseAssign(mtf.Assign):
             indices = [indices]
             variable = [variable]
             gradient = [gradient]
-        mtf.Operation.__init__(self, indices + gradient, variable.mesh, name=random_name("assign"))
+        mtf.Operation.__init__(self, indices + gradient, variable[0].mesh, name=random_name("sparse_assign"))
         self.var = variable
         self.indices = indices
         self.grad = gradient
