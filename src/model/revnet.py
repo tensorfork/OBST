@@ -6,7 +6,7 @@ import tensorflow as tf
 from .frontend import block_part_fn
 from ..utils_core import random_name
 from ..mtf_wrapper import add
-
+from ..utils_mtf import gradient_iterator
 tf1 = tf.compat.v1
 
 
@@ -70,7 +70,7 @@ class RevGradOp(mtf.Operation):
                     if not op.has_gradient or not any(grad_outputs) or not set(op.inputs) & downstream:
                         continue
                     with tf1.variable_scope(op.name + "/revnet/gradients"):
-                        for inp, grad in zip(op.inputs, op.gradient(grad_outputs)):
+                        for inp, grad in gradient_iterator(op, grad_outputs):
                             if inp not in downstream or grad is None:
                                 continue
                             if inp in tensor_to_gradient:
@@ -99,7 +99,7 @@ class RevGradOp(mtf.Operation):
                         del tensor_to_gradient[out]
                 if not op.has_gradient or not any(grad_outputs) or not set(op.inputs) & downstream:
                     continue
-                for inp, grad in zip(op.inputs, op.gradient(grad_outputs)):
+                for inp, grad in gradient_iterator(op, grad_outputs):
                     if inp not in downstream or grad is None:
                         continue
                     if inp in tensor_to_gradient:

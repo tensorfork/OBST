@@ -6,6 +6,7 @@ import tensorflow as tf
 from .frontend import block_part_fn
 from ..dataclass import ModelParameter
 from ..utils_core import random_name
+from ..utils_mtf import gradient_iterator
 
 tf1 = tf.compat.v1
 
@@ -74,8 +75,8 @@ class MomentumOperation(mtf.Operation):
                     grad_outputs = [tensor_to_gradient.get(out) for out in op.outputs]
                     if not op.has_gradient or not any(grad_outputs) or not set(op.inputs) & downstream:
                         continue
-                    with tf1.variable_scope(op.name + "/revnet/gradients"):
-                        for inp, grad in zip(op.inputs, op.gradient(grad_outputs)):
+                    with tf1.variable_scope(op.name + "/momentumnet/gradients"):
+                        for inp, grad in gradient_iterator(op, grad_outputs):
                             if inp not in downstream or grad is None:
                                 continue
                             if inp in tensor_to_gradient:
@@ -106,13 +107,13 @@ class MomentumOperation(mtf.Operation):
                         del tensor_to_gradient[out]
                 if not op.has_gradient or not any(grad_outputs) or not set(op.inputs) & downstream:
                     continue
-                for inp, grad in zip(op.inputs, op.gradient(grad_outputs)):
+                for inp, grad in gradient_iterator(op, grad_outputs):
                     if inp not in downstream or grad is None:
                         continue
                     if inp in tensor_to_gradient:
                         grad_list = tensor_to_gradient[inp]
                         grad_list[1] += 1
-                        with tf1.variable_scope(op.name + "/revnet/gradients"):
+                        with tf1.variable_scope(op.name + "/momentumnet/gradients"):
                             grad_list[2] += grad
                     else:
                         tensor_to_gradient[inp] = grad_list = [0, 1, grad]

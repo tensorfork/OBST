@@ -16,12 +16,10 @@ from .learning_rate import get_learning_rate
 from .optimizers import OPTIMIZERS
 from ..dataclass import ModelParameter
 from ..model.embedding import Gather
-from ..model.revnet import RevGradOp
-from ..mtf_wrapper import (cast, constant_float, constant_scalar, einsum, equal, greater_equal, mod,
-                           reduce_sum, assign, assign_sub,
-                           add, multiply, scoped, assign_add, identity, zeros_like, negative, optimizer_scalar,
-                           reciprocal, reduce_mean, broadcast, reshape)
-from ..utils_mtf import feature_dims_used, to_fp32, random_name
+from ..mtf_wrapper import (cast, constant_float, constant_scalar, einsum, equal, greater_equal, mod, reduce_sum, assign,
+                           assign_sub, add, multiply, scoped, assign_add, identity, zeros_like, negative,
+                           optimizer_scalar, reciprocal, reduce_mean, broadcast, reshape)
+from ..utils_mtf import feature_dims_used, to_fp32, random_name, gradient_iterator
 
 tf = tf2.compat.v1
 zeros = tf.zeros_initializer()
@@ -191,13 +189,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
 
                 if not op.has_gradient or not any(grad_outputs) or not (set(op.inputs) & downstream):
                     continue
-                if isinstance(op, RevGradOp):
-                    itr = op.gradient(grad_outputs, params=op.inputs)
-                elif isinstance(op, Gather):
-                    itr = ((op.inputs[1], grad_outputs[0]),)
-                else:
-                    itr = zip(op.inputs, op.gradient(grad_outputs))
-                for inp, grad in itr:
+                for inp, grad in gradient_iterator(op, grad_outputs):
                     if inp not in downstream or grad is None:
                         continue
 

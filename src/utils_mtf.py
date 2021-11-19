@@ -5,8 +5,12 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.python.ops.init_ops import Initializer
 
+from model.embedding import Gather
+from model.momentumnet import MomentumOperation
+from model.revnet import RevGradOp
 from .dataclass import BlockArgs, ModelParameter
-from .mtf_wrapper import cast, mtf_range, reshape, concat as mtf_concat, pad as mtf_pad, mtf_slice, add, multiply, negative
+from .mtf_wrapper import cast, mtf_range, reshape, concat as mtf_concat, pad as mtf_pad, mtf_slice, add, multiply, \
+    negative
 from .utils_core import default, random_name
 
 tf1 = tf.compat.v1
@@ -176,6 +180,15 @@ def deduplicate(inp: SHAPE) -> SHAPE:
     :return: new, unique iterable of same type as input
     """
     return type(inp)(dict.fromkeys(list(inp)))
+
+
+def gradient_iterator(op: mtf.Operation, grad_outputs: typing.List[mtf.Tensor]
+                      ) -> typing.Iterable[typing.Tuple[mtf.Tensor, mtf.Tensor]]:
+    if isinstance(op, Gather):
+        return (op.inputs[1], grad_outputs[0]),
+    if isinstance(op, (RevGradOp, MomentumOperation)):
+        return op.gradient(grad_outputs, params=op.inputs)
+    return zip(op.inputs, op.gradient(grad_outputs))
 
 
 def anonymize(inp: mtf.Tensor,
@@ -403,6 +416,7 @@ def get_fan_in(params: ModelParameter, shape: ALL_SHAPES) -> DIM_LIST:
     if features_used:
         return shape[:2]
     return shape[:1]
+
 
 # The majority of this Function was copied from:
 # 'https://github.com/tensorflow/mesh/blob/8931eb9025f833b09d8425404ebd5801acbb0cac/mesh_tensorflow/ops.py#L5956-L6104'
