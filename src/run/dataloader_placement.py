@@ -5,9 +5,9 @@ import jsonpickle
 import numpy as np
 import tensorflow as tf
 from tensorflow.python.framework import ops
-from .. import tf_wrapper as tfw
-from tensorflow.python.tpu import tpu, tpu_feed
+from tensorflow.python.tpu import tpu_feed
 
+from .. import tf_wrapper as tfw
 from ..dataclass import ModelParameter
 
 tf1 = tf.compat.v1
@@ -15,7 +15,6 @@ Dataset = tf1.data.Dataset
 
 
 def place_dataloader(params: ModelParameter, input_fn):
-
     num_cores = params.mesh_impl.device_assignment.num_replicas
 
     ordered_ordinals = []
@@ -157,24 +156,22 @@ def place_dataloader(params: ModelParameter, input_fn):
                 dataset = dataset.skip(params.current_step // params.macro_batching)
             dataset = dataset.prefetch(params.buffer_size)
             options = tf.data.Options()
-            options.experimental_deterministic = not params.train
-            options.experimental_optimization.autotune = True
-            options.experimental_optimization.autotune_buffers = True
+            options.autotune.enabled = True
+            options.deterministic = not params.train
+            options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.AUTO
             options.experimental_optimization.filter_fusion = True
-            # options.experimental_optimization.hoist_random_uniform = True
+            options.experimental_optimization.apply_default_optimizations = True
             options.experimental_optimization.map_and_batch_fusion = True
-            options.experimental_optimization.map_and_filter_fusion = False
+            options.experimental_optimization.map_and_filter_fusion = True
             options.experimental_optimization.map_fusion = True
             options.experimental_optimization.map_parallelization = True
-            # options.experimental_optimization.map_vectorization.enabled = True
-            # options.experimental_optimization.map_vectorization.use_choose_fastest = True
             options.experimental_optimization.noop_elimination = True
             options.experimental_optimization.parallel_batch = True
             options.experimental_optimization.shuffle_and_repeat_fusion = True
-            options.experimental_optimization.apply_default_optimizations = False
             options.experimental_threading.max_intra_op_parallelism = 1
             options.experimental_threading.private_threadpool_size = 48
-            options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.AUTO
+            options.experimental_slack = True
+            options.threading.private_threadpool_size = 0
             dataset: Dataset = dataset.with_options(options)
             _ds_iterator = tf1.data.make_initializable_iterator(dataset)
             ds_iterator.append(_ds_iterator)
@@ -236,7 +233,6 @@ def place_dataloader(params: ModelParameter, input_fn):
 
 
 def infeed_from_session(params: ModelParameter):
-
     num_cores = params.mesh_impl.device_assignment.num_replicas
     d_assignment = params.mesh_impl.device_assignment
     ordered_ordinals = []
