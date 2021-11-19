@@ -4,7 +4,6 @@ import json
 import jsonpickle
 import numpy as np
 import tensorflow as tf
-from tensorflow.python.data.experimental.ops.distribute_options import AutoShardPolicy
 from tensorflow.python.framework import ops
 from .. import tf_wrapper as tfw
 from tensorflow.python.tpu import tpu, tpu_feed
@@ -175,7 +174,7 @@ def place_dataloader(params: ModelParameter, input_fn):
             options.experimental_optimization.apply_default_optimizations = False
             options.experimental_threading.max_intra_op_parallelism = 1
             options.experimental_threading.private_threadpool_size = 48
-            options.experimental_distribute.auto_shard_policy = AutoShardPolicy.AUTO
+            options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.AUTO
             dataset: Dataset = dataset.with_options(options)
             _ds_iterator = tf1.data.make_initializable_iterator(dataset)
             ds_iterator.append(_ds_iterator)
