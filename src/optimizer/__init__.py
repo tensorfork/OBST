@@ -30,7 +30,7 @@ class SparseAssignSub(mtf.Assign):
     assign_fn = "sparse assign sub"
 
     def __init__(self, variable: mtf.Variable, indices: mtf.Tensor, gradient: mtf.Tensor):
-        super(SparseAssignSub, self).__init__([indices, gradient], variable.mesh, name=random_name("assign"))
+        mtf.Operation.__init__(self, [indices, gradient], variable.mesh, name=random_name("assign"))
         self.var = variable
         self._outputs = []
 
