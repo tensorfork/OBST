@@ -4,7 +4,7 @@ import mesh_tensorflow as mtf
 import tensorflow as tf
 
 from .activation import activate
-from .basic import dropout, feed_forward, rezero, group_linear
+from .basic import dropout, feed_forward, rezero, group_linear, product_key_memory
 from .convolution import convolution
 from .normalization import norm
 from .spatial import attention
@@ -61,6 +61,7 @@ LAYER_FUNCTIONS = {'feed_forward': feed_forward,
                    'convolution': convolution,
                    'dropout': dropout,
                    'group_linear': group_linear,
-                   'split_path': split_path
+                   'split_path': split_path,
+                   'product_key_memory': product_key_memory
                    }
 
