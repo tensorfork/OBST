@@ -78,7 +78,7 @@ def product_key_memory(args: BlockArgs):
     features = [two, args.params.factorized_product_key_value_dim]
     assignment = mtf.exp(linear(args, old, features))
     normalizer = mtf.reduce_sum(assignment, output_shape=assignment.shape - features)
-    val, idx = mtf.top_1(assignment, args.params.factorized_product_key_value)
+    val, idx = mtf.top_1(assignment, args.params.factorized_product_key_value_dim)
     idx = mtf.slice(idx, 0, 1, two) * args.params.factorized_product_key_value + mtf.slice(idx, 1, 1, two)
     val = (mtf.slice(val, 0, 1, two) + mtf.slice(val, 1, 1, two)) / normalizer
     val = mtf.reshape(val, val.shape - get_dim(val, two))
