@@ -6,7 +6,7 @@
         {
             "layer": [
                 "norm-shift-scale-features-group",
-                "product_key_memory"
+                "product_key_memory-absolute"
             ]
         },
         {
