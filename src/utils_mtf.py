@@ -5,10 +5,10 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.python.ops.init_ops import Initializer
 
-from model.embedding import Gather
-from model.momentumnet import MomentumOperation
-from model.revnet import RevGradOp
 from .dataclass import BlockArgs, ModelParameter
+from .model.embedding import Gather
+from .model.momentumnet import MomentumOperation
+from .model.revnet import RevGradOp
 from .mtf_wrapper import cast, mtf_range, reshape, concat as mtf_concat, pad as mtf_pad, mtf_slice, add, multiply, \
     negative
 from .utils_core import default, random_name
