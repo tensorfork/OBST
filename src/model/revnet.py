@@ -73,7 +73,7 @@ class RevGradOp(mtf.Operation):
                     if not op.has_gradient or not any(grad_outputs) or not set(op.inputs) & downstream:
                         continue
                     with tf1.variable_scope(op.name + "/revnet/gradients"):
-                        for inp, grad in gradient_iterator(self.params, op, grad_outputs):
+                        for inner_op, inp, grad in gradient_iterator(self.params, op, grad_outputs):
                             if inp not in downstream or grad is None:
                                 continue
                             if inp in tensor_to_gradient:
@@ -102,7 +102,7 @@ class RevGradOp(mtf.Operation):
                         del tensor_to_gradient[out]
                 if not op.has_gradient or not any(grad_outputs) or not set(op.inputs) & downstream:
                     continue
-                for inp, grad in gradient_iterator(self.params, op, grad_outputs):
+                for inner_op, inp, grad in gradient_iterator(self.params, op, grad_outputs):
                     if inp not in downstream or grad is None:
                         continue
                     if inp in tensor_to_gradient:
@@ -116,5 +116,5 @@ class RevGradOp(mtf.Operation):
                         continue
                     if inp not in self._variables:
                         continue
-                    yield op, params[4 + self._variables.index(inp)], grad_list[2]
+                    yield inner_op, params[4 + self._variables.index(inp)], grad_list[2]
         yield self, params[2], add(dy2, tensor_to_gradient[x2][2])
