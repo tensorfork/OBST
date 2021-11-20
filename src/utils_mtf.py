@@ -595,8 +595,8 @@ class SparseAssign(mtf.Assign):
     """Assign to one or more variables."""
 
     def __init__(self, variable: typing.Union[mtf.Variable, typing.List[mtf.Variable]],
-                 indices: typing.Union[mtf.Variable, typing.List[mtf.Tensor]],
-                 gradient: typing.Union[mtf.Variable, typing.List[mtf.Tensor]],
+                 indices: typing.Union[mtf.Tensor, typing.List[mtf.Tensor]],
+                 gradient: typing.Union[mtf.Tensor, typing.List[mtf.Tensor]],
                  assign_fn: typing.Union[tf.tensor_scatter_nd_sub, tf.tensor_scatter_nd_add]):
         if not isinstance(indices, list):
             indices = [indices]
