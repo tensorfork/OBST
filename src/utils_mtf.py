@@ -610,8 +610,6 @@ class SparseAssign(mtf.Assign):
         self._outputs = []
 
     def lower(self, lowering):
-        mesh_impl: mtf.simd_mesh_impl.SimdMeshImpl = lowering.mesh_impl(self)
-
         def assign_fn(var: tf.Tensor, val: tf.Tensor, indices: tf.Tensor, gradient: tf.Tensor) -> tf.Tensor:
             indices = indices.reshape(indices, indices.shape.as_list() + [1])
             new_value = self.assign_fn(val, indices, gradient)
@@ -620,12 +618,12 @@ class SparseAssign(mtf.Assign):
 
         ops = []
         for var, grad, ind in zip(self._variables, self.grad, self.indices):
-            ops.extend(mtf.parallel(mesh_impl.devices,
-                                    assign_fn,
-                                    lowering.variables[var].all_slices,
-                                    lowering.tensors[var.value],
-                                    lowering.tensors[ind],
-                                    lowering.tensors[grad]))
+            var = lowering.variables[var].all_slices
+            val = lowering.tensors[var.value].all_slices
+            ind = lowering.tensors[ind].all_slices
+            grad = lowering.tensors[grad].all_slices
+            devices = [""] * min(len(var), len(val), len(ind), len(grad))
+            ops.extend(mtf.parallel(devices, assign_fn, var, val, ind, grad))
         lowering.operations[self] = tf.group(ops)
 
     @property
