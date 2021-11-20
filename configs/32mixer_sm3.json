@@ -50,7 +50,7 @@
     "opt_beta1": 0.9,
     "memory_reduction_strategy": "revnet",
     "opt_beta2": 0.99,
-    "optimizer": "adaptive_clip:0.003-sm3-momentum:0.9:1:1-learning_rate",
+    "optimizer": "adaptive_clip:0.003-momentum:0.9:1:1-learning_rate",
     "weight_decay": 0.01,
     "weight_centralisation": false,
     "weight_standardisation": false,
