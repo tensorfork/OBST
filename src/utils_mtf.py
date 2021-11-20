@@ -618,7 +618,7 @@ class SparseAssign(mtf.Assign):
 
         ops = []
         for var, grad, ind in zip(self._variables, self.grad, self.indices):
-            var = lowering.variables[var].laid_out_tensor().all_slices
+            var = lowering.variables[var].laid_out_tensor.all_slices
             val = lowering.tensors[var.value].all_slices
             ind = lowering.tensors[ind].all_slices
             grad = lowering.tensors[grad].all_slices
