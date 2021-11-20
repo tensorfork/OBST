@@ -39,6 +39,7 @@ class RevGradOp(mtf.Operation):
             t.usable = False
 
         self._graph: mtf.Graph = x1.graph
+        self.params = params
         self._x2: mtf.Tensor = x2
         self._y1: mtf.Tensor = y1
         self._variables: typing.List[mtf.Variable] = variables
