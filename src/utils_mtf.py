@@ -180,16 +180,16 @@ def deduplicate(inp: SHAPE) -> SHAPE:
 
 
 def gradient_iterator(params: ModelParameter, op: mtf.Operation, grad_outputs: typing.List[mtf.Tensor]
-                      ) -> typing.Iterable[typing.Tuple[mtf.Tensor, mtf.Tensor]]:
+                      ) -> typing.Iterable[typing.Tuple[mtf.Operation, mtf.Tensor, mtf.Tensor]]:
     from .model.embedding import Gather
     from .model.momentumnet import MomentumOperation
     from .model.revnet import RevGradOp
 
     if isinstance(op, Gather):
-        return (op.inputs[1], grad_outputs[0] * params.embedding_lr_multiplier),
+        return (op, op.inputs[1], grad_outputs[0] * params.embedding_lr_multiplier),
     if isinstance(op, (RevGradOp, MomentumOperation)):
         return op.gradient(grad_outputs, params=op.inputs)
-    return zip(op.inputs, op.gradient(grad_outputs))
+    return zip((op,) * len(op.inputs), op.inputs, op.gradient(grad_outputs))
 
 
 def anonymize(inp: mtf.Tensor,

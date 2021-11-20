@@ -52,7 +52,8 @@ class RevGradOp(mtf.Operation):
         for fn_output, output in zip(self._fn_outputs, self._outputs):
             lowering.set_tensor_lowering(output, lowering.tensors[fn_output])
 
-    def gradient(self, grad_ys, params: typing.Optional[typing.List[mtf.Operation]] = None):
+    def gradient(self, grad_ys, params: typing.Optional[typing.List[mtf.Operation]] = None
+                 ) -> typing.Iterable[typing.Tuple[mtf.Operation, mtf.Tensor, mtf.Tensor]]:
         dy2, dy2_backwards, dy1, dy1_backwards = grad_ys
         x2 = self._x2 if dy2_backwards is None else dy2_backwards
         f_again_ops, mapping = self._graph.clone_operations(self._forward_operations, {self._x2: x2})
@@ -84,9 +85,9 @@ class RevGradOp(mtf.Operation):
             yield from (tensor_to_gradient.get(x) for x in self._variables)
             return
         tensor_to_gradient = {fx2: [0, 0, dy1]}
-        yield params[0], dy1
-        yield params[1], (self._y1 if dy1_backwards is None else dy1_backwards) - fx2
-        yield params[3], x2
+        yield self, params[0], dy1
+        yield self, params[1], (self._y1 if dy1_backwards is None else dy1_backwards) - fx2
+        yield self, params[3], x2
         with tf1.variable_scope(fx2.graph.captured_variable_scope):
             for op in f_again_ops[::-1]:
                 grad_outputs = []
@@ -115,5 +116,5 @@ class RevGradOp(mtf.Operation):
                         continue
                     if inp not in self._variables:
                         continue
-                    yield params[4 + self._variables.index(inp)], grad_list[2]
-        yield params[2], add(dy2, tensor_to_gradient[x2][2])
+                    yield op, params[4 + self._variables.index(inp)], grad_list[2]
+        yield self, params[2], add(dy2, tensor_to_gradient[x2][2])

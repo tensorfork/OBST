@@ -155,7 +155,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
 
                 if not op.has_gradient or not any(grad_outputs) or not (set(op.inputs) & downstream):
                     continue
-                for inp, grad in gradient_iterator(params, op, grad_outputs):
+                for inner_op, inp, grad in gradient_iterator(params, op, grad_outputs):
                     if inp not in downstream or grad is None:
                         continue
 
@@ -163,9 +163,9 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                         grad_list = tensor_to_gradient[inp]
                         grad_list[1] += 1
                         grad_list[2] += grad
-                        grad_list[3] = op
+                        grad_list[3] = inner_op
                     else:
-                        tensor_to_gradient[inp] = grad_list = [0, 1, grad, op]
+                        tensor_to_gradient[inp] = grad_list = [0, 1, grad, inner_op]
 
                     if len(inp.operation.outputs) != grad_list[1] or inp not in tensor_to_var:
                         continue

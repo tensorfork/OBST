@@ -90,9 +90,9 @@ class MomentumOperation(mtf.Operation):
             yield from (tensor_to_gradient.get(x) for x in self._variables)
             return
         tensor_to_gradient = {mapping[self.outputs[0]]: [0, 0, dx], mapping[self.outputs[2]]: [0, 0, dv]}
-        yield params[1], x - v
-        yield params[2], (dx + dv) * self.params.momentumnet_alpha
-        yield params[3], (v - (1 - self.params.momentumnet_alpha) * fx) / self.params.momentumnet_alpha
+        yield self, params[1], x - v
+        yield self, params[2], (dx + dv) * self.params.momentumnet_alpha
+        yield self, params[3], (v - (1 - self.params.momentumnet_alpha) * fx) / self.params.momentumnet_alpha
         with tf1.variable_scope(fx.graph.captured_variable_scope):
             for op in f_again_ops[::-1]:
                 grad_outputs = []
@@ -121,5 +121,5 @@ class MomentumOperation(mtf.Operation):
                         continue
                     if inp not in self._variables:
                         continue
-                    yield params[4 + self._variables.index(inp)], grad_list[2]
-        yield params[2], dx + (1 - self.params.momentumnet_alpha) * tensor_to_gradient[x]
+                    yield op, params[4 + self._variables.index(inp)], grad_list[2]
+        yield self, params[2], dx + (1 - self.params.momentumnet_alpha) * tensor_to_gradient[x]
