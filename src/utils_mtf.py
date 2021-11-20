@@ -603,7 +603,7 @@ class SparseAssign(mtf.Assign):
             variable = [variable]
             gradient = [gradient]
         mtf.Operation.__init__(self, indices + gradient, variable[0].mesh, name=random_name("sparse_assign"))
-        self.var = variable
+        self._variables = variable
         self.indices = indices
         self.grad = gradient
         self._assign_fn = assign_fn
@@ -615,11 +615,11 @@ class SparseAssign(mtf.Assign):
         def assign_fn(var: tf.Tensor, val: tf.Tensor, indices: tf.Tensor, gradient: tf.Tensor) -> tf.Tensor:
             indices = indices.reshape(indices, indices.shape.as_list() + [1])
             new_value = self.assign_fn(val, indices, gradient)
-            new_value = tf.cast(new_value, self.var.slice_dtype)
+            new_value = tf.cast(new_value, self._variables.slice_dtype)
             return tf1.assign(var, new_value)
 
         ops = []
-        for var, grad, ind in zip(self.var, self.grad, self.indices):
+        for var, grad, ind in zip(self._variables, self.grad, self.indices):
             ops.extend(mtf.parallel(mesh_impl.devices,
                                     assign_fn,
                                     lowering.variables[var].all_slices,
@@ -630,7 +630,7 @@ class SparseAssign(mtf.Assign):
 
     @property
     def variables(self):
-        return [self.var]
+        return [self._variables]
 
 
 def assign_sub(op: mtf.Operation, variable: mtf.Variable, gradient: mtf.Tensor):
