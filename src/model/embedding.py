@@ -4,7 +4,7 @@ import mesh_tensorflow as mtf
 import numpy as np
 import tensorflow as tf
 
-from .backend import normal_var, orthogonal_var, multiply_gradient
+from .backend import normal_var, orthogonal_var
 from .. import tf_wrapper as tfw
 from ..dataclass import BlockArgs, ModelParameter
 from ..mtf_wrapper import einsum, reshape, multiply
@@ -135,7 +135,7 @@ def _embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
         raise ValueError("The following embeddings are supported:"
                          " relative(-learned) or absolute(-split) or axial(-split) are supported")
 
-    return multiply_gradient(out, args.params.embedding_lr_multiplier)
+    return out
 
 
 def embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:

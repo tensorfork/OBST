@@ -155,7 +155,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
 
                 if not op.has_gradient or not any(grad_outputs) or not (set(op.inputs) & downstream):
                     continue
-                for inp, grad in gradient_iterator(op, grad_outputs):
+                for inp, grad in gradient_iterator(params, op, grad_outputs):
                     if inp not in downstream or grad is None:
                         continue
 

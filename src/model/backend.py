@@ -15,23 +15,6 @@ from ..utils_mtf import OPT_DIMS, SHAPE, deduplicate, non_replicated_variable, g
 tf1 = tf.compat.v1
 
 
-class MultiplyGradient(mtf.Operation):
-    def __init__(self, x: mtf.Tensor, multiplier: float):
-        super(MultiplyGradient, self).__init__([x], name=random_name("multiply_update"))
-        self._outputs = [x]
-        self.multiplier = multiplier
-
-    def gradient(self, grad_ys):
-        return [grad_ys[0] * self.multiplier]
-
-    def lower(self, lowering: mtf.Lowering):
-        lowering.set_tensor_lowering(self.outputs[0], lowering.tensors[self.inputs[0]])
-
-
-def multiply_gradient(x: mtf.Tensor, multiplier: float)->mtf.Tensor:
-    return MultiplyGradient(x, multiplier).outputs[0]
-
-
 class OrthogonalInit(Initializer):
     def __init__(self, params: ModelParameter, shape: SHAPE, is_last: bool, fan_in_dims: OPT_DIMS = None):
         if fan_in_dims is None:
