@@ -612,8 +612,8 @@ class SparseAssign(mtf.Assign):
     def lower(self, lowering):
         def assign_fn(var: tf.Tensor, val: tf.Tensor, indices: tf.Tensor, gradient: tf.Tensor) -> tf.Tensor:
             indices = tf.reshape(indices, indices.shape.as_list() + [1])
+            gradient = tf.cast(gradient, val.dtype)
             new_value = self.assign_fn(val, indices, gradient)
-            new_value = tf.cast(new_value, self._variables.slice_dtype)
             return tf1.assign(var, new_value)
 
         ops = []
