@@ -33,10 +33,7 @@ def render_video(model_output: typing.List[typing.Tuple[np.ndarray, typing.List[
         for sub_idx in range(len(model_output)):
 
             sub_frame = model_output[sub_idx][0][idx]
-            if params.use_discrete_video_loss:
-                sub_frame = sub_frame * (256 / params.color_quantization_value)
-            else:
-                sub_frame = sub_frame * (params.color_quantization_value - 1)
+            sub_frame = sub_frame * (params.color_quantization_value - 1)
             import scipy.ndimage
             sub_frame = scipy.ndimage.zoom(sub_frame, (upscale, upscale, 1), order=0)
             sub_frame = np.uint8(sub_frame)

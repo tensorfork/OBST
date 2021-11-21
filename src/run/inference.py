@@ -164,8 +164,6 @@ def get_infrence_model(params: ModelParameter):
         if params.use_language:
             token_out = anonymize(token_out)
         if params.use_video:
-            if params.use_discrete_video_loss:
-                frame_out = argmax(frame_out, reduced_dim=params.discrete_color_dim)
             frame_out = anonymize(frame_out)
 
         return token_out, frame_out

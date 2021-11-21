@@ -134,7 +134,6 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.embedding_stddev = 0.04
         self.color_quantization_value = 256
         self.experts = 64
-        self.use_discrete_video_loss = False
         self.use_bit_fold_input_pipeline = False
         self.bit_fold_value = 4
         self.debug_train_step = False
@@ -234,15 +233,6 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             for _ in range(random.randint(0, 1000)):
                 self.data_seed = random.randint(0, 1000000)
 
-        split_batch = self.batch_splits > 1
-        split_heads = self.head_splits > 1
-        if not hasattr(self, 'split_vocab'):
-            self.split_vocab = split_heads and isinstance(self.head_splits, int) and self.vocab_size > 256
-            if self.split_vocab:
-                full_partition_size = self.head_splits * 128
-                self.vocab_size += full_partition_size - self.vocab_size % full_partition_size
-            elif self.vocab_size % 256 > 0:
-                self.vocab_size += 256 - self.vocab_size % 256
         self.mesh_shape = ','.join([f"b:{self.batch_splits:.0f}"] * split_batch +
                                    [f"h:{self.head_splits:.0f}"] * split_heads)
         self.layout = ','.join([f"batch:b"] * split_batch +
@@ -284,7 +274,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.expert_dim = mtf.Dimension("experts", self.experts)
 
         self.macro_batch_dim = mtf.Dimension("batch", self.train_batch_size * self.macro_batching)
-        self.vocab_dim = mtf.Dimension(self.head_dim.name if self.split_vocab else 'vocab', self.vocab_size)
+        self.vocab_dim = mtf.Dimension('vocab', self.vocab_size)
         self.batch_dim = mtf.Dimension("batch", self.train_batch_size)
         self.frame_input_sequence = mtf.Dimension("_sequence", self.time_patch_size + 1)
 

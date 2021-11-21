@@ -55,20 +55,11 @@ def _input(params: ModelParameter,
 
             vid = concat(concat_list, 'color_channels')
 
-        if not params.use_discrete_video_loss:
-            vid = divide(cast(vid, params.variable_dtype.activation_dtype), 255)
+        vid = divide(cast(vid, params.variable_dtype.activation_dtype), 255)
         context_dimension = vid.shape[1]
         input_features = vid.shape[-1:]
         tgt = utils_slice(vid, 1, context_dimension.size, context_dimension)
         src = utils_slice(vid, 0, context_dimension.size - 1, context_dimension)
-
-        if params.use_discrete_video_loss:
-            src = divide(cast(src, params.variable_dtype.activation_dtype), (params.color_quantization_value - 1))
-
-            tgt = reshape(tgt, new_shape=mtf.Shape([params.batch_dim,
-                                                    params.sequence_per_head_dim,
-                                                    params.head_dim]
-                                                   + tgt.shape[2:]))
 
         if params.empty_frame_embedding is not None:
             embed_args = base_args(params.empty_frame_embedding)
@@ -149,9 +140,6 @@ def _output(params: ModelParameter, out: mtf.Tensor, spatial_ctx: mtf.Dimension
             token_out = block_part_fn(params, config, token_out, f'lang_out{config_idx}')
         new = [params.token_patch_dim, params.vocab_dim]
         old = params.feature_dims
-        if params.split_vocab:
-            old = anonymize_shape(old, params.head_dim)
-            token_out = anonymize(token_out, params.head_dim)
         token_out = einsum([token_out, embed(base_args(params.output_embedding), old + new)],
                            output_shape=token_out.shape - old + new)
 
@@ -162,19 +150,7 @@ def _output(params: ModelParameter, out: mtf.Tensor, spatial_ctx: mtf.Dimension
         for config_idx, config in enumerate(params.output_block_config):
             frame_out = block_part_fn(params, config, frame_out, f'vid_out{config_idx}')
 
-        if params.use_discrete_video_loss:
-
-            features_dim = mtf.Dimension("features", frame_out.shape[-1].size * frame_out.shape[-2].size)
-            frame_out = reshape(frame_out, frame_out.shape[:-2] + [features_dim])
-            frame_out = reshape(frame_out,
-                                [params.batch_dim, params.sequence_per_head_dim, params.head_dim]
-                                + frame_out.shape[2:])
-
-            frame_out = linear(base_args(frame_out), [features_dim],
-                               [params.color_channel_dim, params.discrete_color_dim])
-
-        else:
-            frame_out = sigmoid(linear_from_features(base_args(frame_out), [params.color_channel_dim]))
+        frame_out = sigmoid(linear_from_features(base_args(frame_out), [params.color_channel_dim]))
 
     return frame_out, token_out
 

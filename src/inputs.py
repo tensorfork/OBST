@@ -491,11 +491,7 @@ def dataset(params: ModelParameter, sub_batch_size, slice_index, slice_count, _)
     """
 
     def memory_op(x):
-        if not params.use_discrete_video_loss:
-            x['frame'] = tf.cast(x['frame'], params.variable_dtype.activation_dtype) / \
-                         (params.color_quantization_value - 1)
-        else:
-            x['frame'] = tf.cast(x['frame'], tf.int32)
+        x['frame'] = tf.cast(x['frame'], tf.int32)
         return x
 
     weights = []
