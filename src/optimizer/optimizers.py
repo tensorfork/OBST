@@ -1,21 +1,17 @@
 import mesh_tensorflow as mtf
 
 from .context import OptimizerCtx
-from ..mtf_wrapper import (cast, optimizer_scalar, einsum, greater, minimum,
-                           reduce_mean, reduce_sum, add, multiply, maximum, reciprocal, square,
+from ..mtf_wrapper import (cast, optimizer_scalar, einsum, minimum,
+                           reduce_mean, reduce_sum, add, multiply, maximum, square,
                            rsqrt, sqrt, add_n)
-from ..utils_mtf import weighted_add
 
 
 def adaptive_gradient_clipping(ctx: OptimizerCtx, gradient_clip: str) -> mtf.Tensor:
     gradient_clip = float(gradient_clip)
-    grd_norm = maximum(sqrt(einsum([ctx.grad, ctx.grad], output_shape=[])), 1e-6)
-    wgt_norm = maximum(sqrt(einsum([cast(ctx.var.value, ctx.params.optimizer_calculation_dtype)] * 2, output_shape=[])),
-                       0.001)
-    return weighted_add(einsum([wgt_norm, reciprocal(grd_norm), optimizer_scalar(ctx.params, gradient_clip), ctx.grad],
-                               output_shape=ctx.grad.shape), ctx.grad,
-                        cast(greater(multiply(grd_norm, reciprocal(wgt_norm)), gradient_clip),
-                             ctx.params.optimizer_calculation_dtype))
+    var = cast(ctx.var.value, ctx.params.optimizer_calculation_dtype)
+    grd_norm = minimum(rsqrt(einsum([ctx.grad] * 2, output_shape=[])), 1e6)
+    wgt_norm = maximum(sqrt(einsum([var] * 2, output_shape=[])), 1e-3)
+    return ctx.grad * minimum(wgt_norm * grd_norm * gradient_clip, 1)
 
 
 def l2norm_gradient_clipping(ctx: OptimizerCtx, gradient_clip: str) -> mtf.Tensor:
