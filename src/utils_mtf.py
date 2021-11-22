@@ -417,7 +417,7 @@ def get_fan_in(params: ModelParameter, shape: ALL_SHAPES) -> DIM_LIST:
     if features_used:
         return shape[:2]
     return shape[:1]
-mtf.while_loop()
+
 
 # The majority of this Function was copied from:
 # 'https://github.com/tensorflow/mesh/blob/8931eb9025f833b09d8425404ebd5801acbb0cac/mesh_tensorflow/ops.py#L5956-L6104'
