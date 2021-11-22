@@ -232,7 +232,8 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             print('WARNING: Use random dataset seed')
             for _ in range(random.randint(0, 1000)):
                 self.data_seed = random.randint(0, 1000000)
-
+        split_batch = self.batch_splits > 1
+        split_heads = self.head_splits > 1
         self.mesh_shape = ','.join([f"b:{self.batch_splits:.0f}"] * split_batch +
                                    [f"h:{self.head_splits:.0f}"] * split_heads)
         self.layout = ','.join([f"batch:b"] * split_batch +
