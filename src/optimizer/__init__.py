@@ -166,18 +166,21 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                     else:
                         tensor_to_gradient[inp] = grad_list = [0, 1, grad, inner_op]
 
-                    grad: mtf.Tensor = cast(grad_list[2], params.optimizer_calculation_dtype)
-                    var: mtf.Variable = tensor_to_var[inp]
-
-                    ctx = OptimizerCtx(op, grad_outputs, downstream, tensor_to_gradient, tensor_to_var, params,
-                                       loss_idx, update_ops, {}, loss_list, first_grad,
-                                       loss_1__loss_1, loss_1__loss_2, loss_2__loss_2, mstep, step, neg_step, dtype,
-                                       beta1, beta2, learning_rate, step_count)
-
                     if isinstance(inner_op, Gather):
-                        ctx.variable_to_gradient[inp] = grad
+                        var: mtf.Variable = tensor_to_var[inp]
+
+                        ctx = OptimizerCtx(op, grad_outputs, downstream, tensor_to_gradient, tensor_to_var, params,
+                                           loss_idx, update_ops, {}, loss_list, first_grad,
+                                           loss_1__loss_1, loss_1__loss_2, loss_2__loss_2, mstep, step, neg_step, dtype,
+                                           beta1, beta2, learning_rate, step_count)
+
+                        ctx.variable_to_gradient[inp] = cast(grad_list[2], params.optimizer_calculation_dtype)
                         scoped(fn, update, ctx(inp, var, ctx.variable_to_gradient[var]))
 
+    ctx = OptimizerCtx(op, grad_outputs, downstream, tensor_to_gradient, tensor_to_var, params,
+                       loss_idx, update_ops, {}, loss_list, first_grad,
+                       loss_1__loss_1, loss_1__loss_2, loss_2__loss_2, mstep, step, neg_step, dtype,
+                       beta1, beta2, learning_rate, step_count)
     ctx.variable_to_gradient = {var: cast(tensor_to_gradient[tensor][2], params.optimizer_calculation_dtype)
                                 for tensor, var in tensor_to_var.items() if var not in ctx.variable_to_gradient}
     for tensor, var in tensor_to_var.items():
