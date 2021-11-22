@@ -36,7 +36,8 @@ def wrapped_linear(args: BlockArgs) -> mtf.Tensor:
 def mixture_of_experts(args: BlockArgs) -> mtf.Tensor:
     old, new = linear_shapes(args)
     gate = linear(args, old, [args.params.expert_dim])
-    gate = exp(gate - reduce_max(gate, reduced_dim=args.params.expert_dim))
+    gate -= mtf.stop_gradient(reduce_max(gate, reduced_dim=args.params.expert_dim))
+    gate = exp(gate)
     return einsum([reciprocal(reduce_sum(gate, reduced_dim=args.params.expert_dim)), args.tensor, gate,
                    orthogonal_var(args, old + new + [args.params.expert_dim])],
                   output_shape=args.tensor.shape - old + new)
@@ -76,7 +77,9 @@ def product_key_memory(args: BlockArgs):
     old, new = linear_shapes(args)
     two = mtf.Dimension("two", 2)
     features = [two, args.params.factorized_product_key_value_dim]
-    assignment = mtf.exp(linear(args, old, features))
+    assignment = linear(args, old, features)
+    assignment -= mtf.stop_gradient(reduce_max(assignment))
+    assignment = mtf.exp(assignment)
     normalizer = mtf.reduce_sum(assignment, output_shape=assignment.shape - features)
     val, idx = mtf.top_1(assignment, args.params.factorized_product_key_value_dim)
     idx = mtf.slice(idx, 0, 1, two.name) * args.params.factorized_product_key_value + mtf.slice(idx, 1, 1, two.name)

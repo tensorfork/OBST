@@ -48,7 +48,7 @@ def attention(args: BlockArgs):
         logit = add(logit, multiply(*_masked_map(args)))
     if logit != 0:
         logit = add(logit, multiply(multiply(compare_range(args.params, dim, tmp, less), 1e38), -2))
-        logit = add(logit, negative(reduce_max(logit, reduced_dim=tmp)))
+        logit -= mtf.stop_gradient(reduce_max(logit, reduced_dim=tmp))
         logit = exp(logit)
         logit = multiply(logit, reciprocal(reduce_sum(logit, reduced_dim=tmp)))
     if 'biased_attention_map' in args and logit != 0 and "scale_attention_map" not in args:
