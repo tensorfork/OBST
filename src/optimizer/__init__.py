@@ -15,9 +15,10 @@ from .gradients import MULTI_LOSS_GRADIENTS
 from .learning_rate import get_learning_rate
 from .optimizers import OPTIMIZERS
 from ..dataclass import ModelParameter
+from ..model.embedding import Gather
 from ..mtf_wrapper import (cast, constant_float, constant_scalar, einsum, equal, greater_equal, mod, reduce_sum, assign,
                            add, multiply, scoped, identity, zeros_like, negative, optimizer_scalar, reciprocal,
-                           reduce_mean, broadcast, reshape)
+                           reduce_mean, broadcast)
 from ..utils_mtf import feature_dims_used, to_fp32, gradient_iterator, assign_sub, assign_add
 
 tf = tf2.compat.v1
@@ -65,8 +66,7 @@ def update(ctx: OptimizerCtx):
 
 
 def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, manual_step: mtf.Tensor, fn: str
-                  ) -> typing.Tuple[typing.Tuple[mtf.Tensor, typing.List[mtf.Assign], typing.List[mtf.Tensor]],
-                                    tf.Tensor, typing.Dict]:
+                  ) -> typing.Tuple[typing.List[mtf.Assign], mtf.Tensor]:
     """
     Creates optimizing and update/training operations.
     :param loss_list: Final scalar loss of the model
@@ -95,7 +95,6 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
     step_count = add(add(multiply(cast(learning_rate_ctx.global_steps_mtf, step.dtype), step),
                          multiply(mstep, 10 ** 9)), 1)
 
-    debug_gradients_dict = {}
     first_grad = {}
     loss_1__loss_1 = loss_1__loss_2 = loss_2__loss_2 = 0
     mgda = params.multi_loss_strategy == "mgda"
@@ -167,30 +166,21 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                     else:
                         tensor_to_gradient[inp] = grad_list = [0, 1, grad, inner_op]
 
-                    if len(inp.operation.outputs) != grad_list[1] or inp not in tensor_to_var:
-                        continue
-
                     grad: mtf.Tensor = cast(grad_list[2], params.optimizer_calculation_dtype)
                     var: mtf.Variable = tensor_to_var[inp]
 
                     ctx = OptimizerCtx(op, grad_outputs, downstream, tensor_to_gradient, tensor_to_var, params,
-                                       loss_idx, update_ops, debug_gradients_dict, loss_list, first_grad,
+                                       loss_idx, update_ops, {}, loss_list, first_grad,
                                        loss_1__loss_1, loss_1__loss_2, loss_2__loss_2, mstep, step, neg_step, dtype,
                                        beta1, beta2, learning_rate, step_count)
 
-                    if params.debug_gradients:
-                        flat_shape = mtf.Shape([mtf.Dimension('flat_dim', var.size)])
-                        flat_grad = variable(params, var, f"loss_{loss_idx}", flat_shape)
-                        update_ops.append(assign(flat_grad, reshape(grad, new_shape=flat_shape)))
-                        debug_gradients_dict[f"loss_{loss_idx}/{var.name}"] = flat_grad
+                    if isinstance(inner_op, Gather):
+                        ctx.variable_to_gradient[inp] = grad
+                        scoped(fn, update, ctx(inp, var, ctx.variable_to_gradient[var]))
 
     ctx.variable_to_gradient = {var: cast(tensor_to_gradient[tensor][2], params.optimizer_calculation_dtype)
-                                for tensor, var in tensor_to_var.items()}
+                                for tensor, var in tensor_to_var.items() if var not in ctx.variable_to_gradient}
     for tensor, var in tensor_to_var.items():
-        full_name = f'{var.name}/{params.optimizer}/grad_accumulation'
-        if fn == "accumulate" or full_name in params.mesh.graph.name_to_variable:
-            ctx.grad_buffer = variable(params, var, "grad_accumulation", var.shape)
-        scoped(fn, gradient_accumulation if fn == "accumulate" else update,
-               ctx(tensor, var, ctx.variable_to_gradient[var]))
+        scoped(fn, update, ctx(tensor, var, ctx.variable_to_gradient[var]))
 
-    return ctx.update_ops, learning_rate, debug_gradients_dict
+    return ctx.update_ops, learning_rate
