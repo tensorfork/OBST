@@ -91,6 +91,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.head_splits = 32.
         self.lookahead_steps = 0
         self.lookahead_alpha = 0
+        self.momentum = 0.95
         self.prefix = "datasets/full_hd_video"
         self.model_path = "gs://text-datasets/video-transformer/ctx=32-layer=64-heads=8-feat=256"
         self.tensorflow_optimization_settings = {"layout_optimizer": True,
