@@ -1,7 +1,9 @@
+import typing
+
 import mesh_tensorflow as mtf
 import tensorflow as tf
 
-from .backend import normal_var
+from .backend import normal_var, SHAPE
 from ..dataclass import BlockArgs
 from ..mtf_wrapper import einsum, reduce_mean, rsqrt_eps, square
 from ..utils_mtf import linear_shapes
@@ -9,9 +11,9 @@ from ..utils_mtf import linear_shapes
 tf1 = tf.compat.v1
 
 
-def norm(args: BlockArgs) -> mtf.Tensor:
+def norm(args: BlockArgs, feature_shape: typing.Optional[SHAPE] = None) -> mtf.Tensor:
     block_input = args.tensor
-    feature_shape = mtf.Shape(linear_shapes(args).old)
+    feature_shape = mtf.Shape(linear_shapes(args).old if feature_shape is None else feature_shape)
     normalized_shape = block_input.shape - (feature_shape - [args.params.head_dim] * ('group' in args))
     if 'proxy' in args:
         base = normal_var(args, feature_shape, mean=0)

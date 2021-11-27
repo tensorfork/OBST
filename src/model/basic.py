@@ -78,7 +78,7 @@ def product_key_memory(args: BlockArgs):
     two = mtf.Dimension("two", 2)
     features = [two, args.params.factorized_product_key_value_dim]
     assignment = linear(args, old, features)
-    assignment = norm(args(assignment))
+    assignment = norm(args(assignment), features)
     assignment -= mtf.stop_gradient(reduce_max(assignment))
     assignment = mtf.exp(assignment)
     normalizer = mtf.reduce_sum(assignment, output_shape=assignment.shape - features)
