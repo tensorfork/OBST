@@ -100,8 +100,7 @@ def multiply_learning_rate(ctx: OptimizerCtx) -> mtf.Tensor:
     return multiply(ctx.grad, ctx.learning_rate)
 
 
-def momentum(ctx: OptimizerCtx, momentum_multiplier: str, gradient_multiplier: str,
-             nesterov: str) -> mtf.Tensor:
+def momentum(ctx: OptimizerCtx, momentum_multiplier: str, gradient_multiplier: str, nesterov: str) -> mtf.Tensor:
     nesterov = bool(int(nesterov))
     momentum_multiplier = float(momentum_multiplier)
     gradient_multiplier = float(gradient_multiplier)

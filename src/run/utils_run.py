@@ -6,10 +6,10 @@ import tensorflow as tf
 from tensorflow.python.ops import summary_ops_v2 as summary
 from tensorflow.python.tpu import tpu
 
+from .. import tf_wrapper as tfw
 from ..dataclass import ModelParameter
 from ..mtf_wrapper import import_laid_out_tensor
 from ..utils_core import color_print
-from .. import tf_wrapper as tfw
 
 tf1 = tf.compat.v1
 Dataset = tf1.data.Dataset
@@ -68,15 +68,18 @@ def analyze_model(params: ModelParameter, time_to_build: float, graph: mtf.Graph
     var_count = int(sum([variable.size for variable in graph.all_variables]))
     embed_param_count = int(sum([variable.size for variable in
                                  graph.trainable_variables if 'embed' in variable.name]))
+    gather_param_count = int(sum([variable.size for variable in
+                                  graph.trainable_variables if 'gather' in variable.name]))
     body_param_count = int(sum([variable.size for variable in
                                 graph.trainable_variables if 'body' in variable.name]))
 
     print('')
 
     constant = '  variables: '
-    variable_mapping = [('Model', param_count - embed_param_count),
-                        ('Gather', embed_param_count),
-                        ('Body with Embed', body_param_count),
+    variable_mapping = [('Core', param_count - embed_param_count),
+                        ('Embedding', embed_param_count - gather_param_count),
+                        ('Sparse', gather_param_count),
+                        ('Full Model', body_param_count),
                         ('Untrainable', var_count - param_count),
                         ('', 0),
                         ('Total trainable', param_count),
@@ -111,7 +114,6 @@ def analyze_model(params: ModelParameter, time_to_build: float, graph: mtf.Graph
 
 
 def rep_batch(params: ModelParameter, shape: [mtf.Shape, typing.List[mtf.Dimension]]):
-
     if params.macro_batching > 1 and params.train:
         return mtf.replace_dimensions(shape, params.batch_dim, params.macro_batch_dim)
     return shape

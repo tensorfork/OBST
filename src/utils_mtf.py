@@ -181,12 +181,8 @@ def deduplicate(inp: SHAPE) -> SHAPE:
 
 def gradient_iterator(params: ModelParameter, op: mtf.Operation, grad_outputs: typing.List[mtf.Tensor]
                       ) -> typing.Iterable[typing.Tuple[mtf.Operation, mtf.Tensor, mtf.Tensor]]:
-    from .model.embedding import Gather
     from .model.momentumnet import MomentumOperation
     from .model.revnet import RevGradOp
-
-    if isinstance(op, Gather):
-        return (op, op.inputs[1], grad_outputs[0]),
     if isinstance(op, (RevGradOp, MomentumOperation)):
         return op.gradient(grad_outputs, params=op.inputs)
     return zip((op,) * len(op.inputs), op.inputs, op.gradient(grad_outputs))
@@ -589,36 +585,3 @@ class WhileLoopWithControlDependencies(mtf.Operation):
                 out = mtf.LazyAllreduceSum(
                     mesh_impl, out, lazy.mesh_axes, lazy.add_counter_fn)
             lowering.set_tensor_lowering(mtf_out, out)
-
-
-class ScatterAdd(mtf.Operation):
-    """Assign to one or more variables."""
-
-    def __init__(self, out: mtf.Tensor, indices: mtf.Tensor, gradient: mtf.Tensor):
-        super().__init__([out, indices, gradient], out.mesh, random_name("sparse_assign"))
-        self.indices = indices
-        self.grad = gradient
-        self._outputs = [mtf.Tensor(self, out.shape, out.dtype)]
-
-    def lower(self, lowering):
-        mesh_impl = lowering.mesh_impl(self)
-        flattened_dims = 0
-
-        def assign_fn(val: tf.Tensor, indices: tf.Tensor, gradient: tf.Tensor) -> tf.Tensor:
-            shape = val.shape
-            indices = tf.reshape(indices, indices.shape.as_list() + [1])
-            val = tf.reshape(val, val.shape.as_list()[:-flattened_dims] + [-1])
-            gradient = tf.cast(tf.reshape(gradient, gradient.shape.as_list()[:-flattened_dims] + [-1]), val.dtype)
-            return tf.reshape(tf.tensor_scatter_nd_add(val, indices, gradient), shape)
-
-        out, indices, gradients = self.inputs
-        for flattened_dims, (dim0, dim1) in enumerate(zip(out.shape.dims[::-1], gradients.shape.dims[::-1])):
-            if dim0 != dim1:
-                break
-        y = mesh_impl.slicewise(assign_fn, lowering.tensors[out], lowering.tensors[indices],
-                                lowering.tensors[gradients])
-        lowering.set_tensor_lowering(self.outputs[0], y)
-
-
-def scatter_add(out: mtf.Tensor, indices: mtf.Tensor, gradient: mtf.Tensor) -> mtf.Tensor:
-    return ScatterAdd(out, indices, gradient).outputs[0]

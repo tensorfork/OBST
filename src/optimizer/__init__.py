@@ -15,11 +15,10 @@ from .gradients import MULTI_LOSS_GRADIENTS
 from .learning_rate import get_learning_rate
 from .optimizers import OPTIMIZERS
 from ..dataclass import ModelParameter
-from ..model.embedding import Gather
 from ..mtf_wrapper import (cast, constant_float, constant_scalar, einsum, equal, greater_equal, mod, reduce_sum, assign,
                            add, multiply, scoped, identity, zeros_like, negative, optimizer_scalar, reciprocal,
                            reduce_mean, broadcast, assign_sub, assign_add)
-from ..utils_mtf import feature_dims_used, to_fp32, gradient_iterator, scatter_add
+from ..utils_mtf import feature_dims_used, to_fp32, gradient_iterator
 
 tf = tf2.compat.v1
 zeros = tf.zeros_initializer()
@@ -160,14 +159,9 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                     if inp in tensor_to_gradient:
                         grad_list = tensor_to_gradient[inp]
                         grad_list[1] += 1
+                        grad_list[2] += grad
                         grad_list[3] = inner_op
-                        if isinstance(inner_op, Gather):
-                            grad_list[2] = scatter_add(grad_list[2], inner_op.inputs[0], grad)
-                        else:
-                            grad_list[2] += grad
                     else:
-                        if isinstance(inner_op, Gather):
-                            grad = scatter_add(mtf.zeros(params.mesh, inp.shape, inp.dtype), inner_op.inputs[0], grad)
                         tensor_to_gradient[inp] = [0, 1, grad, inner_op]
 
     ctx = OptimizerCtx(op, grad_outputs, downstream, tensor_to_gradient, tensor_to_var, params,

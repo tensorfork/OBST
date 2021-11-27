@@ -141,7 +141,6 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.model_mode = 'jannet'
         self.optimizer = 'learning_rate'
         self.multi_loss_strategy = "linear"
-        self.embedding_lr_multiplier = 0.01
         self.memory_reduction_strategy = "revnet"
         self.debug_gradients = False
         self.use_initial_position_embedding = False
