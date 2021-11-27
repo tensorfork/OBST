@@ -646,7 +646,7 @@ def assign_sub(op: mtf.Operation, variable: mtf.Variable, gradient: mtf.Tensor, 
         return SparseAssign(variable, op.inputs[0], gradient, tf.tensor_scatter_nd_sub, alpha)
     if alpha == 1.0:
         return mtf.assign_sub(variable, gradient)
-    return mtf.assign(variable, gradient - variable * alpha)
+    return mtf.assign(variable, gradient - variable.value * alpha)
 
 
 def assign_add(op: mtf.Operation, variable: mtf.Variable, gradient: mtf.Tensor, alpha: float = 1.0):
@@ -655,4 +655,4 @@ def assign_add(op: mtf.Operation, variable: mtf.Variable, gradient: mtf.Tensor, 
         return SparseAssign(variable, op.inputs[0], gradient, tf.tensor_scatter_nd_add, alpha)
     if alpha == 1.0:
         return mtf.assign_add(variable, gradient)
-    return mtf.assign(variable, gradient + variable * alpha)
+    return mtf.assign(variable, gradient + variable.value * alpha)
