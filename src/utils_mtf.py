@@ -597,7 +597,8 @@ class SparseAssign(mtf.Assign):
     def __init__(self, variable: typing.Union[mtf.Variable, typing.List[mtf.Variable]],
                  indices: typing.Union[mtf.Tensor, typing.List[mtf.Tensor]],
                  gradient: typing.Union[mtf.Tensor, typing.List[mtf.Tensor]],
-                 assign_fn: typing.Union[tf.tensor_scatter_nd_sub, tf.tensor_scatter_nd_add]):
+                 assign_fn: typing.Union[tf.tensor_scatter_nd_sub, tf.tensor_scatter_nd_add],
+                 alpha: float):
         if not isinstance(indices, list):
             indices = [indices]
             variable = [variable]
@@ -606,7 +607,7 @@ class SparseAssign(mtf.Assign):
         self._variables = variable
         self.indices = indices
         self.grad = gradient
-        self._assign_fn = assign_fn
+        self._assign_fn = assign_fn if assign_fn == 1.0 else lambda x, y: assign_fn(x * alpha, y)
         self._outputs = []
 
     def lower(self, lowering):
@@ -639,15 +640,19 @@ class SparseAssign(mtf.Assign):
         return [self._variables]
 
 
-def assign_sub(op: mtf.Operation, variable: mtf.Variable, gradient: mtf.Tensor):
+def assign_sub(op: mtf.Operation, variable: mtf.Variable, gradient: mtf.Tensor, alpha: float = 1.0):
     from .model.embedding import Gather
     if isinstance(op, Gather):
-        return SparseAssign(variable, op.inputs[0], gradient, tf.tensor_scatter_nd_sub)
-    return mtf.assign_sub(variable, gradient)
+        return SparseAssign(variable, op.inputs[0], gradient, tf.tensor_scatter_nd_sub, alpha)
+    if alpha == 1.0:
+        return mtf.assign_sub(variable, gradient)
+    return mtf.assign(variable, gradient - variable * alpha)
 
 
-def assign_add(op: mtf.Operation, variable: mtf.Variable, gradient: mtf.Tensor):
+def assign_add(op: mtf.Operation, variable: mtf.Variable, gradient: mtf.Tensor, alpha: float = 1.0):
     from .model.embedding import Gather
     if isinstance(op, Gather):
-        return SparseAssign(variable, op.inputs[0], gradient, tf.tensor_scatter_nd_add)
-    return mtf.assign_add(variable, gradient)
+        return SparseAssign(variable, op.inputs[0], gradient, tf.tensor_scatter_nd_add, alpha)
+    if alpha == 1.0:
+        return mtf.assign_add(variable, gradient)
+    return mtf.assign(variable, gradient + variable * alpha)
