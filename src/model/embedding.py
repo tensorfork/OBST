@@ -8,7 +8,7 @@ import tensorflow as tf
 from .backend import normal_var, orthogonal_var
 from .. import tf_wrapper as tfw
 from ..dataclass import BlockArgs, ModelParameter
-from ..mtf_wrapper import einsum, reshape, multiply
+from ..mtf_wrapper import einsum, reshape, multiply, zeros_like
 from ..utils_core import random_name, scoped
 from ..utils_mtf import DIM_LIST, SHAPE, linear_shapes, shape_size
 
@@ -64,7 +64,7 @@ class Gather(mtf.Operation):
 
     def gradient(self, grad_ys: typing.List[mtf.Tensor]) -> typing.Tuple[None, mtf.Tensor]:
         indices, embedding = self.inputs
-        return None, scatter_add(mtf.zeros(embedding.mesh, embedding.shape, embedding.dtype), indices, grad_ys[0])
+        return None, scatter_add(zeros_like(embedding), indices, grad_ys[0])
 
     def lower(self, lowering: mtf.Lowering):
         mesh_impl: mtf.simd_mesh_impl.SimdMeshImpl = lowering.mesh_impl(self)
@@ -181,4 +181,4 @@ def embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
 
 
 def gather_embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
-    return Gather(args, embed(args, shape)).outputs[0]
+    return Gather(args, scoped("gather", embed, args, shape)).outputs[0]
