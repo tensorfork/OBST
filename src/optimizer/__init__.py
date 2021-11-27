@@ -64,7 +64,7 @@ def update(ctx: OptimizerCtx):
         momentum += einsum([cast(var.value, params.optimizer_calculation_dtype), learning_rate,
                             optimizer_scalar(params, params.weight_decay)], output_shape=var.shape)
 
-    update_ops.append(assign_sub(ctx.op, ctx.var, momentum))
+    update_ops.append(assign_sub(momentum.operation, ctx.var, momentum))  # Feed in any non-gather operation
 
 
 def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, manual_step: mtf.Tensor, fn: str
