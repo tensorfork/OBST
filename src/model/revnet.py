@@ -20,7 +20,7 @@ class RevGradOp(mtf.Operation):
     def __init__(self, params, block_config, x1, x1_backwards, x2, x2_backwards, index):
         graph: mtf.Graph = x1.graph
         prev_ops = len(graph.operations)
-        y1 = add(x1, block_part_fn(params, block_config, x2, index))
+        y1 = x1 + block_part_fn(params, block_config, x2, index)
         fn_outputs = [x2, x2_backwards, y1, x1_backwards]
         forward_operations = graph.operations[prev_ops:]
         new_outputs = set()
@@ -77,7 +77,7 @@ class RevGradOp(mtf.Operation):
                             if inp not in downstream or grad is None:
                                 continue
                             if inp in tensor_to_gradient:
-                                tensor_to_gradient[inp] = add(tensor_to_gradient[inp], grad)
+                                tensor_to_gradient[inp] += grad
                             else:
                                 tensor_to_gradient[inp] = grad
             yield add(dy2, tensor_to_gradient[x2])

@@ -59,8 +59,7 @@ def autoregressive_model(params: ModelParameter,
 
                 token_x_input = cast(token_x_input, dtype=tf.int32)
 
-            return add(position, 1), token_x_input, token_y_input, frame_input, frame_mask_src, \
-                   frame_mask_tag, token_mask
+            return position + 1, token_x_input, token_y_input, frame_input, frame_mask_src, frame_mask_tag, token_mask
 
         if token_mask is not None:
             token_mask = to_fp32(token_mask)

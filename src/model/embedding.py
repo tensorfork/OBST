@@ -17,7 +17,7 @@ def _multi_dim_range_tf(params: ModelParameter, dims: DIM_LIST) -> mtf.Tensor:
                                [1] * idx + [dim.size] + [1] * (len(dims) - idx - 1))
                    for idx, (dim, size) in enumerate(zip(dims, np.cumprod([1] + [d.size for d in dims[:-1]])))]
     for i in items:
-        out = tfw.add(out, i)
+        out += i
     return tfw.cast(out, params.variable_dtype.activation_dtype)
 
 
@@ -75,13 +75,13 @@ class RelativeEmbeddingForward(mtf.Operation):
 
         if cosine:
             additive = tfw.mod(features, 2)
-            features = tfw.divide(tfw.subtract(features, additive), 2)
-            additive = tfw.multiply(additive, math.pi)
+            features = (features - additive) / 2
+            additive = additive * math.pi
             feature_count /= 2
 
-        features = tfw.multiply(features, 4 / feature_count)
-        features = tfw.subtract(features, math.log(position_count / 2 / math.pi))
-        features = tfw.add(tfw.exp(features), additive)
+        features += 4 / feature_count
+        features -= math.log(position_count / 2 / math.pi)
+        features = tfw.exp(features) + additive
         out = tfw.einsum(f'{position_formula},{feature_formula}->{shape_formula}', positions, features)
         out = multiply(tfw.sin(out), params.embedding_stddev)
         lowering.set_tensor_lowering(self.outputs[0], mesh_impl.import_tf_tensor(self.outputs[0], out))

@@ -2,7 +2,7 @@ import mesh_tensorflow as mtf
 
 from .context import OptimizerCtx
 from ..mtf_wrapper import (cast, optimizer_scalar, einsum, minimum,
-                           reduce_mean, reduce_sum, add, multiply, maximum, square,
+                           reduce_mean, reduce_sum, multiply, maximum, square,
                            rsqrt, sqrt, add_n)
 
 
@@ -38,7 +38,7 @@ def gradient_centralisation(ctx: OptimizerCtx) -> mtf.Tensor:
 
 
 def weight_centralisation(ctx: OptimizerCtx) -> mtf.Tensor:
-    return add(ctx.grad, reduce_mean(ctx.var.value))
+    return ctx.grad + reduce_mean(ctx.var.value)
 
 
 def multiply_learning_rate(ctx: OptimizerCtx) -> mtf.Tensor:

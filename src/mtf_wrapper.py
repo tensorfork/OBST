@@ -53,12 +53,12 @@ def stop_gradient(tensor: mtf.Tensor):
 
 def _softmax_cross_entropy_with_logits(params: ModelParameter, logits: mtf.Tensor, targets: mtf.Tensor):
     max_logit = reduce_max(stop_gradient(logits), reduced_dim=params.vocab_dim)
-    log_z = add(log(reduce_sum(exp(add(logits, negative(max_logit))), reduced_dim=params.vocab_dim)), max_logit)
-    loss = einsum([add(logits, negative(log_z)), one_hot(targets, params.vocab_dim, dtype=logits.dtype),
+    log_z = log(reduce_sum(exp(logits - max_logit), reduced_dim=params.vocab_dim)) + max_logit
+    loss = einsum([logits - log_z, one_hot(targets, params.vocab_dim, dtype=logits.dtype),
                    constant_scalar(params, -1 / targets.size)], output_shape=[])
-    if not params.z_loss:
-        return loss
-    return add(loss, einsum([log_z, log_z, constant_scalar(params, params.z_loss / targets.size)], output_shape=[]))
+    if params.z_loss:
+        loss += einsum([log_z, log_z, constant_scalar(params, params.z_loss / targets.size)], output_shape=[])
+    return loss
 
 
 def softmax_cross_entropy_with_logits(params: ModelParameter, logits: mtf.Tensor, targets: mtf.Tensor) -> mtf.Tensor:

@@ -87,15 +87,14 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
     learning_rate_ctx = get_learning_rate(params, loss_list, update_ops)
     learning_rate = import_mtf(params, learning_rate_ctx.learning_rate, "learning_rate")
 
-    step = cast(equal(mod(cast(add(manual_step, optimizer_scalar(params, 1)), dtype),
+    step = cast(equal(mod(cast(manual_step + optimizer_scalar(params, 1), dtype),
                           import_mtf(params, params.grad_accumulation * 1., "grad_accum")),
                       import_mtf(params, 0., "zero")), dtype)
-    neg_step = negative(step)
-    mstep = add(1, neg_step)
-    beta1 = add(1, multiply(neg_step, import_mtf(params, 1 - params.opt_beta1, "beta1")))
-    beta2 = add(1, multiply(neg_step, import_mtf(params, 1 - params.opt_beta2, "beta2")))
-    step_count = add(add(multiply(cast(learning_rate_ctx.global_steps_mtf, step.dtype), step),
-                         multiply(mstep, 10 ** 9)), 1)
+    neg_step = -step
+    mstep = 1 + neg_step
+    beta1 = 1 + neg_step * import_mtf(params, 1 - params.opt_beta1, "beta1")
+    beta2 = 1 + neg_step * import_mtf(params, 1 - params.opt_beta2, "beta2")
+    step_count = cast(learning_rate_ctx.global_steps_mtf, step.dtype) * step + mstep * 10 ** 9 + 1
 
     first_grad = {}
     loss_1__loss_1 = loss_1__loss_2 = loss_2__loss_2 = 0
@@ -117,17 +116,15 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
             min_gamma = 0.001
             gamma = multiply(constant_float(params, value=(1 - min_gamma), shape=[]),
                              to_fp32(greater_equal(v1v2, v1v1)))
-            gamma = add(gamma,
-                        einsum([constant_float(params, value=min_gamma, shape=[]), to_fp32(greater_equal(v1v2, v2v2)),
-                                to_fp32(equal(gamma, 0))], output_shape=[]))
-            gamma = add(gamma,
-                        einsum([optimizer_scalar(params, -1),
-                                to_fp32(equal(gamma, 0)),
-                                add(v1v2, negative(v2v2)),
-                                reciprocal(add(v1v1, v2v2) - multiply(-2, v1v2))],
-                               output_shape=[]))
+            gamma += einsum([constant_float(params, value=min_gamma, shape=[]), to_fp32(greater_equal(v1v2, v2v2)),
+                             to_fp32(equal(gamma, 0))], output_shape=[])
+            gamma += einsum([optimizer_scalar(params, -1),
+                             to_fp32(equal(gamma, 0)),
+                             add(v1v2, negative(v2v2)),
+                             reciprocal(add(v1v1, v2v2) - multiply(-2, v1v2))],
+                            output_shape=[])
 
-            loss = add(multiply(loss_list[0], gamma), multiply(loss_list[1], (1 - gamma)))
+            loss = loss_list[0] * gamma + loss_list[1] * (1 - gamma)
 
         operations = loss.graph.operations
         xs = [x.outputs[0] for x in params.mesh.graph.trainable_variables]

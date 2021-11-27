@@ -6,7 +6,7 @@ import tensorflow as tf
 from .basic import activated_linear_in, activated_linear_out
 from .embedding import embed
 from ..dataclass import BlockArgs
-from ..mtf_wrapper import einsum, greater_equal, multiply, add, less, exp, reduce_max, reciprocal, reduce_sum, negative
+from ..mtf_wrapper import einsum, greater_equal, multiply, less, exp, reduce_max, reduce_sum
 from ..utils_mtf import (anonymize, anonymize_dim, compare_range, get_attention_dim, is_masked, linear_shapes)
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
@@ -37,22 +37,22 @@ def attention(args: BlockArgs):
         if 'embedded' in args or 'context' in args:
             key = activated_linear_out(base)
         if 'embedded' in args or 'positional' in args:
-            key = add(key, embed(args, [dim] + args.params.feature_dims))
+            key += embed(args, [dim] + args.params.feature_dims)
         qry = activated_linear_out(base)
-        qry = multiply(qry, dim.size ** -0.5)
+        qry *= dim.size ** -0.5
         logit_shape = shape - (mtf.Shape(linear_shapes(args).old) - [args.params.head_dim]) + tmp
         logit = einsum([qry, anonymize(key, dim)], output_shape=logit_shape)
         if "shared_key_value" in args:
             val = key
     if 'biased_softmax' in args:
-        logit = add(logit, multiply(*_masked_map(args)))
+        logit += multiply(*_masked_map(args))
     if logit != 0:
-        logit = add(logit, multiply(multiply(compare_range(args.params, dim, tmp, less), 1e38), -2))
+        logit += (compare_range(args.params, dim, tmp, less) * 1e38) * -2
         logit -= mtf.stop_gradient(reduce_max(logit, reduced_dim=tmp))
         logit = exp(logit)
-        logit = multiply(logit, reciprocal(reduce_sum(logit, reduced_dim=tmp)))
+        logit /= reduce_sum(logit, reduced_dim=tmp)
     if 'biased_attention_map' in args and logit != 0 and "scale_attention_map" not in args:
-        logit = add(logit, multiply(*_masked_map(args)))
+        logit += multiply(*_masked_map(args))
     logit = [logit] * (logit != 0)
     if 'scale_attention_map' in args or ("biased_attention_map" in args and not logit):
         logit.extend(_masked_map(args))

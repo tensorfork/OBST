@@ -4,7 +4,7 @@ import tensorflow as tf
 
 from .. import tf_wrapper as tfw
 from ..dataclass import BlockArgs
-from ..mtf_wrapper import relu as _relu, add, multiply, einsum, constant, sigmoid as _sigmoid, tanh as _tanh, softplus
+from ..mtf_wrapper import relu as _relu, multiply, einsum, constant, sigmoid as _sigmoid, tanh as _tanh, softplus
 from ..utils_core import random_name, scoped
 
 tf1 = tf.compat.v1
@@ -38,7 +38,7 @@ class MishBackward(mtf.Operation):
 
         def slicewise_fn(x, dy):
             gte = tfw.tanh(tfw.softplus(x))
-            gte = tfw.add(gte, tfw.subtract(1., tfw.multiply(tfw.multiply(tfw.square(gte), x), tfw.sigmoid(x))))
+            gte += 1. - tfw.square(gte) * x * tfw.sigmoid(x)
             return tfw.multiply(dy, gte)
 
         y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]], lowering.tensors[self.inputs[1]])
@@ -73,7 +73,7 @@ class SiluBackward(mtf.Operation):
 
         def slicewise_fn(x, dy):
             gte = tfw.sigmoid(x)
-            return tfw.multiply(dy, tfw.add(tfw.multiply(x, gte), tfw.subtract(1., gte)))
+            return dy * ((x - 1) * gte + 1)
 
         y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]], lowering.tensors[self.inputs[1]])
         lowering.set_tensor_lowering(self.outputs[0], y)
@@ -91,7 +91,7 @@ class LeCunTanhForward(mtf.Operation):
         mesh_impl = lowering.mesh_impl(self)
 
         def slicewise_fn(x):
-            return tfw.add(tfw.tanh(x), tfw.multiply(x, 0.1))
+            return tfw.tanh(x) + x * 0.1
 
         y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]])
         lowering.set_tensor_lowering(self.outputs[0], y)
@@ -124,7 +124,7 @@ class SoftsignForward(mtf.Operation):
         mesh_impl = lowering.mesh_impl(self)
 
         def slicewise_fn(x):
-            return tfw.divide(x, tfw.add(1., tfw.abs(x)))
+            return x / (1. + tfw.abs(x))
 
         y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]])
         lowering.set_tensor_lowering(self.outputs[0], y)
@@ -139,7 +139,7 @@ class SoftsignBackward(mtf.Operation):
         mesh_impl = lowering.mesh_impl(self)
 
         def slicewise_fn(x, dy):
-            return tfw.divide(dy, tfw.square(tfw.add(1., tfw.abs(x))))
+            return dy / tfw.square(1. + tfw.abs(x))
 
         y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[self.inputs[0]], lowering.tensors[self.inputs[1]])
         lowering.set_tensor_lowering(self.outputs[0], y)
@@ -156,9 +156,8 @@ def _output0(op):
 
 
 def _gelu(params, tensor: mtf.Tensor):
-    return einsum([tensor, add(_tanh(multiply(add(einsum([tensor, tensor, tensor, constant(params, 0.044715)],
-                                                         output_shape=tensor.shape), tensor), np.sqrt(2 / np.pi))),
-                               1.0),
+    return einsum([tensor, _tanh(einsum([tensor, tensor, tensor, constant(params, 0.044715)],
+                                        output_shape=tensor.shape) + tensor * np.sqrt(2 / np.pi)) + 1.0,
                    constant(params, 0.5)], output_shape=tensor.shape)
 
 

@@ -9,7 +9,7 @@ from .embedding import gather_embed
 from .normalization import norm
 from ..dataclass import BlockArgs
 from ..mtf_wrapper import (dropout as utils_dropout, sigmoid, exp, reduce_max, reduce_sum, einsum, reciprocal, reshape,
-                           multiply, add)
+                           multiply)
 from ..utils_mtf import linear_shapes, anonymize_shape, get_dim
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
@@ -50,7 +50,7 @@ def activated_linear(args: BlockArgs, prefix: str) -> mtf.Tensor:
     if 'glu' in args or 'glu_add' in args:
         out = multiply(out, sigmoid(feed_forward_fn(args)))
     if 'glu_add' in args:
-        out = add(out, activate(args(feed_forward_fn(args))))
+        out += activate(args(feed_forward_fn(args)))
     if 'norm' in args:
         out = norm(args(out))
     return out

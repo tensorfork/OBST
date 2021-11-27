@@ -13,10 +13,10 @@ from .normalization import norm
 from .revnet import RevGradOp
 from ..dataclass import BlockArgs, BlockConfig, ModelParameter
 from ..mtf_wrapper import (add_n, cast, constant_scalar, dropout, einsum, ones, reciprocal, reduce_sum, sigmoid, sign,
-                           zeros_like, mod, floordiv, reshape, equal, argmax, softmax_cross_entropy_with_logits,
+                           zeros_like, mod, floordiv, equal, argmax, softmax_cross_entropy_with_logits,
                            recompute_grad, add, negative, divide)
 from ..utils_core import scoped
-from ..utils_mtf import concat, utils_slice, weighted_add, anonymize, anonymize_shape
+from ..utils_mtf import concat, utils_slice, weighted_add
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -95,7 +95,7 @@ def _body(params: ModelParameter, src: mtf.Tensor) -> mtf.Tensor:
 
     if params.use_initial_position_embedding:
         for dim in (src.shape - params.feature_dims).dims[1:]:
-            src = add(src, embed(base_args(params.position_embedding), [dim] + params.feature_dims))
+            src += embed(base_args(params.position_embedding), [dim] + params.feature_dims)
 
     if params.memory_reduction_strategy == "revnet":
         out = (src, zeros_like(src), src, zeros_like(src))
@@ -125,7 +125,7 @@ def _body(params: ModelParameter, src: mtf.Tensor) -> mtf.Tensor:
             out = _layer_builder(out, block_part, i)
 
     if params.memory_reduction_strategy in ('revnet', 'momentum'):
-        out = add(out[0], out[2])
+        out = out[0] + out[2]
     return out
 
 
@@ -169,7 +169,7 @@ def _loss(params: ModelParameter, frame_out: typing.Optional[mtf.Tensor], token_
 
     if params.use_video:
         size = constant_scalar(params, 1 / frame_out.size)
-        out = add(frame_out, negative(vid_tgt))
+        out = frame_out - vid_tgt
         video_loss: mtf.Tensor = einsum([out, vid_msk_tgt, cat_msk_tgt, size, sign(out)], output_shape=[])
 
         loss_list.append(video_loss)
