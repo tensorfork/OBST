@@ -44,7 +44,7 @@ def update(ctx: OptimizerCtx):
         ctx.grad = scoped(opt, OPTIMIZERS[opt], ctx, *args)
 
     if 'rezero' in var.name:
-        ctx.grad = multiply(params.rezero_lr_multiplier, ctx.grad)
+        ctx.grad *= params.rezero_lr_multiplier
 
     features_used = feature_dims_used(params, var)
     large_tensor = features_used and len(var.shape.dims) > len(params.feature_dims)
@@ -56,14 +56,11 @@ def update(ctx: OptimizerCtx):
     large_tensor &= "input" not in var.name or "lang_in" in var.name or "vid_in" in var.name  # not input
     large_tensor &= "output" not in var.name or "lang_out" in var.name or "vid_out" in var.name  # not output
 
-    momentum = variable(params, ctx.var, "momentum", ctx.var.shape)
-    update_ops.append(assign_add(momentum.operation, momentum * params.momentum + ctx.grad * (1 - params.momentum)))
-
     if large_tensor and params.weight_decay > 0:
-        momentum += einsum([cast(var.value, params.optimizer_calculation_dtype), learning_rate,
+        ctx.grad += einsum([cast(var.value, params.optimizer_calculation_dtype), learning_rate,
                             optimizer_scalar(params, params.weight_decay)], output_shape=var.shape)
 
-    update_ops.append(assign_sub(ctx.var, momentum))
+    update_ops.append(assign_sub(ctx.var, ctx.grad))
 
 
 def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, manual_step: mtf.Tensor, fn: str
@@ -169,7 +166,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                        loss_1__loss_1, loss_1__loss_2, loss_2__loss_2, mstep, step, neg_step, dtype,
                        beta1, beta2, learning_rate, step_count)
     ctx.variable_to_gradient = {var: cast(tensor_to_gradient[tensor][2], params.optimizer_calculation_dtype)
-                                for tensor, var in tensor_to_var.items() if var not in ctx.variable_to_gradient}
+                                for tensor, var in tensor_to_var.items()}
     for tensor, var in tensor_to_var.items():
         update(ctx(tensor, var, ctx.variable_to_gradient[var]))
     if params.combine_assignments:
