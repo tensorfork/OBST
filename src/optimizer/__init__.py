@@ -18,8 +18,8 @@ from ..dataclass import ModelParameter
 from ..model.embedding import Gather
 from ..mtf_wrapper import (cast, constant_float, constant_scalar, einsum, equal, greater_equal, mod, reduce_sum, assign,
                            add, multiply, scoped, identity, zeros_like, negative, optimizer_scalar, reciprocal,
-                           reduce_mean, broadcast)
-from ..utils_mtf import feature_dims_used, to_fp32, gradient_iterator, assign_sub, assign_add
+                           reduce_mean, broadcast, assign_sub, assign_add)
+from ..utils_mtf import feature_dims_used, to_fp32, gradient_iterator, scatter_add
 
 tf = tf2.compat.v1
 zeros = tf.zeros_initializer()
@@ -58,13 +58,13 @@ def update(ctx: OptimizerCtx):
     large_tensor &= "output" not in var.name or "lang_out" in var.name or "vid_out" in var.name  # not output
 
     momentum = variable(params, ctx.var, "momentum", ctx.var.shape)
-    update_ops.append(assign_add(ctx.op, momentum.operation, ctx.grad * (1 - params.momentum), params.momentum))
+    update_ops.append(assign_add(momentum.operation, momentum * params.momentum + ctx.grad * (1 - params.momentum)))
 
     if large_tensor and params.weight_decay > 0:
         momentum += einsum([cast(var.value, params.optimizer_calculation_dtype), learning_rate,
                             optimizer_scalar(params, params.weight_decay)], output_shape=var.shape)
 
-    update_ops.append(assign_sub(momentum.operation, ctx.var, momentum))  # Feed in any non-gather operation
+    update_ops.append(assign_sub(ctx.var, momentum))
 
 
 def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, manual_step: mtf.Tensor, fn: str
@@ -160,21 +160,15 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                     if inp in tensor_to_gradient:
                         grad_list = tensor_to_gradient[inp]
                         grad_list[1] += 1
-                        grad_list[2] += grad
                         grad_list[3] = inner_op
+                        if isinstance(inner_op, Gather):
+                            grad_list[2] = scatter_add(grad_list[2], inner_op.inputs[0], grad)
+                        else:
+                            grad_list[2] += grad
                     else:
-                        tensor_to_gradient[inp] = grad_list = [0, 1, grad, inner_op]
-
-                    if isinstance(inner_op, Gather):
-                        var: mtf.Variable = tensor_to_var[inp]
-
-                        ctx = OptimizerCtx(op, grad_outputs, downstream, tensor_to_gradient, tensor_to_var, params,
-                                           loss_idx, update_ops, {}, loss_list, first_grad,
-                                           loss_1__loss_1, loss_1__loss_2, loss_2__loss_2, mstep, step, neg_step, dtype,
-                                           beta1, beta2, learning_rate, step_count)
-
-                        ctx.variable_to_gradient[var] = grad = cast(grad_list[2], params.optimizer_calculation_dtype)
-                        update(ctx(inp, var, grad))
+                        if isinstance(inner_op, Gather):
+                            grad = scatter_add(mtf.zeros(params.mesh, inp.shape, inp.dtype), inner_op.inputs[0], grad)
+                        tensor_to_gradient[inp] = [0, 1, grad, inner_op]
 
     ctx = OptimizerCtx(op, grad_outputs, downstream, tensor_to_gradient, tensor_to_var, params,
                        loss_idx, update_ops, {}, loss_list, first_grad,

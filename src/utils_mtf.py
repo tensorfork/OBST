@@ -591,68 +591,41 @@ class WhileLoopWithControlDependencies(mtf.Operation):
             lowering.set_tensor_lowering(mtf_out, out)
 
 
-class SparseAssign(mtf.Assign):
+class ScatterAdd(mtf.Operation):
     """Assign to one or more variables."""
 
-    def __init__(self, variable: typing.Union[mtf.Variable, typing.List[mtf.Variable]],
-                 indices: typing.Union[mtf.Tensor, typing.List[mtf.Tensor]],
-                 gradient: typing.Union[mtf.Tensor, typing.List[mtf.Tensor]],
-                 assign_fn: typing.Union[tf.tensor_scatter_nd_sub, tf.tensor_scatter_nd_add],
-                 alpha: float):
-        if not isinstance(indices, list):
-            indices = [indices]
-            variable = [variable]
-            gradient = [gradient]
-        mtf.Operation.__init__(self, indices + gradient, variable[0].mesh, name=random_name("sparse_assign"))
-        self._variables = variable
+    def __init__(self, out: mtf.Tensor, indices: mtf.Tensor, gradient: mtf.Tensor):
+        super().__init__(indices + gradient, out.mesh, random_name("sparse_assign"))
+        self._out = out
         self.indices = indices
         self.grad = gradient
-        self._assign_fn = assign_fn if assign_fn == 1.0 else lambda x, y, z: assign_fn(x * alpha, y, z)
-        self._outputs = []
+        self._outputs = [mtf.Tensor(self, out.shape, out.dtype)]
 
     def lower(self, lowering):
         flattened_dims = 0
 
-        def assign_fn(var: tf.Tensor, val: tf.Tensor, indices: tf.Tensor, gradient: tf.Tensor) -> tf.Tensor:
+        def assign_fn(val: tf.Tensor, indices: tf.Tensor, gradient: tf.Tensor) -> tf.Tensor:
             indices = tf.reshape(indices, indices.shape.as_list() + [1])
             val = tf.reshape(val, val.shape.as_list()[:-flattened_dims] + [-1])
-            gradient = tf.reshape(gradient, gradient.shape.as_list()[:-flattened_dims] + [-1])
-            gradient = tf.cast(gradient, val.dtype)
-            new_value = self.assign_fn(val, indices, gradient)
-            new_value = tf.reshape(new_value, var.shape)
-            return tf1.assign(var, tf.cast(new_value, var.dtype))
+            gradient = tf.cast(tf.reshape(gradient, gradient.shape.as_list()[:-flattened_dims] + [-1]), val.dtype)
+            return tf.reshape(tf.tensor_scatter_nd_add(val, indices, gradient), out.shape)
 
         ops = []
-        for var, grad, ind in zip(self._variables, self.grad, self.indices):
-            for flattened_dims, (dim0, dim1) in enumerate(zip(var.shape.dims[::-1], grad.shape.dims[::-1])):
-                if dim0 != dim1:
-                    break
-            val = lowering.tensors[var.value].all_slices
-            var = lowering.variables[var].laid_out_tensor.all_slices
-            ind = lowering.tensors[ind].all_slices
-            grad = lowering.tensors[grad].all_slices
-            devices = [""] * min(len(var), len(val), len(ind), len(grad))
-            ops.extend(mtf.parallel(devices, assign_fn, var, val, ind, grad))
+        out = self._out
+        grad = self.grad
+        ind = self.indices
+        for flattened_dims, (dim0, dim1) in enumerate(zip(out.shape.dims[::-1], grad.shape.dims[::-1])):
+            if dim0 != dim1:
+                break
+        val = lowering.tensors[out].all_slices
+        ind = lowering.tensors[ind].all_slices
+        grad = lowering.tensors[grad].all_slices
+        devices = [""] * min(len(val), len(ind), len(grad))
+        ops.extend(mtf.parallel(devices, assign_fn, val, ind, grad))
         lowering.operations[self] = tf.group(ops)
 
-    @property
-    def variables(self):
-        return [self._variables]
+
+def scatter_add(out: mtf.Tensor, indices: mtf.Tensor, gradient: mtf.Tensor) -> mtf.Tensor:
+    return ScatterAdd(out, indices, gradient).outputs[0]
 
 
-def assign_sub(op: mtf.Operation, variable: mtf.Variable, gradient: mtf.Tensor, alpha: float = 1.0):
-    from .model.embedding import Gather
-    if isinstance(op, Gather):
-        return SparseAssign(variable, op.inputs[0], gradient, tf.tensor_scatter_nd_sub, alpha)
-    if alpha == 1.0:
-        return mtf.assign_sub(variable, gradient)
-    return mtf.assign(variable, gradient - variable.value * alpha)
-
-
-def assign_add(op: mtf.Operation, variable: mtf.Variable, gradient: mtf.Tensor, alpha: float = 1.0):
-    from .model.embedding import Gather
-    if isinstance(op, Gather):
-        return SparseAssign(variable, op.inputs[0], gradient, tf.tensor_scatter_nd_add, alpha)
-    if alpha == 1.0:
-        return mtf.assign_add(variable, gradient)
-    return mtf.assign(variable, gradient + variable.value * alpha)
