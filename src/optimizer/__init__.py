@@ -61,8 +61,8 @@ def update(ctx: OptimizerCtx):
     update_ops.append(assign_add(ctx.op, momentum.operation, ctx.grad * (1 - params.momentum), params.momentum))
 
     if large_tensor and params.weight_decay > 0:
-        momentum = add(momentum, einsum([cast(var.value, params.optimizer_calculation_dtype), learning_rate,
-                                         optimizer_scalar(params, params.weight_decay)], output_shape=var.shape))
+        momentum += einsum([cast(var.value, params.optimizer_calculation_dtype), learning_rate,
+                            optimizer_scalar(params, params.weight_decay)], output_shape=var.shape)
 
     update_ops.append(assign_sub(ctx.op, ctx.var, momentum))
 
