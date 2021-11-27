@@ -595,7 +595,7 @@ class ScatterAdd(mtf.Operation):
     """Assign to one or more variables."""
 
     def __init__(self, out: mtf.Tensor, indices: mtf.Tensor, gradient: mtf.Tensor):
-        super().__init__(indices + gradient, out.mesh, random_name("sparse_assign"))
+        super().__init__([indices, gradient], out.mesh, random_name("sparse_assign"))
         self._out = out
         self.indices = indices
         self.grad = gradient
@@ -627,5 +627,3 @@ class ScatterAdd(mtf.Operation):
 
 def scatter_add(out: mtf.Tensor, indices: mtf.Tensor, gradient: mtf.Tensor) -> mtf.Tensor:
     return ScatterAdd(out, indices, gradient).outputs[0]
-
-
