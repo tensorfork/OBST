@@ -68,6 +68,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.factorized_product_key_value: typing.Optional[int] = None
         self.depth = 16
         self.buffer_size = 4
+        self.combine_assignments = False  # Needs more memory but it's faster
         self.shuffle_buffer = 256
         self.interleaved_datasets = 256
         self.token_patch_size = 1

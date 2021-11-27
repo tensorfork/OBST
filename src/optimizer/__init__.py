@@ -172,5 +172,6 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                                 for tensor, var in tensor_to_var.items() if var not in ctx.variable_to_gradient}
     for tensor, var in tensor_to_var.items():
         update(ctx(tensor, var, ctx.variable_to_gradient[var]))
-
+    if params.combine_assignments:
+        ctx.update_ops = step.graph.combine_assignments(ctx.update_ops)
     return ctx.update_ops, learning_rate
