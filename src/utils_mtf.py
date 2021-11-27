@@ -595,13 +595,13 @@ class ScatterAdd(mtf.Operation):
     """Assign to one or more variables."""
 
     def __init__(self, out: mtf.Tensor, indices: mtf.Tensor, gradient: mtf.Tensor):
-        super().__init__([indices, gradient], out.mesh, random_name("sparse_assign"))
-        self._out = out
+        super().__init__([out, indices, gradient], out.mesh, random_name("sparse_assign"))
         self.indices = indices
         self.grad = gradient
         self._outputs = [mtf.Tensor(self, out.shape, out.dtype)]
 
     def lower(self, lowering):
+        mesh_impl = lowering.mesh_impl(self)
         flattened_dims = 0
 
         def assign_fn(val: tf.Tensor, indices: tf.Tensor, gradient: tf.Tensor) -> tf.Tensor:
@@ -611,19 +611,13 @@ class ScatterAdd(mtf.Operation):
             gradient = tf.cast(tf.reshape(gradient, gradient.shape.as_list()[:-flattened_dims] + [-1]), val.dtype)
             return tf.reshape(tf.tensor_scatter_nd_add(val, indices, gradient), shape)
 
-        ops = []
-        out = self._out
-        grad = self.grad
-        ind = self.indices
-        for flattened_dims, (dim0, dim1) in enumerate(zip(out.shape.dims[::-1], grad.shape.dims[::-1])):
+        out, indices, gradients = self.inputs
+        for flattened_dims, (dim0, dim1) in enumerate(zip(out.shape.dims[::-1], gradients.shape.dims[::-1])):
             if dim0 != dim1:
                 break
-        val = lowering.tensors[out].all_slices
-        ind = lowering.tensors[ind].all_slices
-        grad = lowering.tensors[grad].all_slices
-        devices = [""] * min(len(val), len(ind), len(grad))
-        ops.extend(mtf.parallel(devices, assign_fn, val, ind, grad))
-        lowering.operations[self] = tf.group(ops)
+        y = mesh_impl.slicewise(assign_fn, lowering.tensors[out], lowering.tensors[indices],
+                                lowering.tensors[gradients])
+        lowering.set_tensor_lowering(self.outputs[0], y)
 
 
 def scatter_add(out: mtf.Tensor, indices: mtf.Tensor, gradient: mtf.Tensor) -> mtf.Tensor:
