@@ -605,10 +605,11 @@ class ScatterAdd(mtf.Operation):
         flattened_dims = 0
 
         def assign_fn(val: tf.Tensor, indices: tf.Tensor, gradient: tf.Tensor) -> tf.Tensor:
+            shape = val.shape
             indices = tf.reshape(indices, indices.shape.as_list() + [1])
             val = tf.reshape(val, val.shape.as_list()[:-flattened_dims] + [-1])
             gradient = tf.cast(tf.reshape(gradient, gradient.shape.as_list()[:-flattened_dims] + [-1]), val.dtype)
-            return tf.reshape(tf.tensor_scatter_nd_add(val, indices, gradient), out.shape.dims)
+            return tf.reshape(tf.tensor_scatter_nd_add(val, indices, gradient), shape)
 
         ops = []
         out = self._out
