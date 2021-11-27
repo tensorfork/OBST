@@ -607,7 +607,7 @@ class SparseAssign(mtf.Assign):
         self._variables = variable
         self.indices = indices
         self.grad = gradient
-        self._assign_fn = assign_fn if assign_fn == 1.0 else lambda x, y: assign_fn(x * alpha, y)
+        self._assign_fn = assign_fn if assign_fn == 1.0 else lambda x, y, z: assign_fn(x * alpha, y, z)
         self._outputs = []
 
     def lower(self, lowering):
