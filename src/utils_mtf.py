@@ -186,7 +186,7 @@ def gradient_iterator(params: ModelParameter, op: mtf.Operation, grad_outputs: t
     from .model.revnet import RevGradOp
 
     if isinstance(op, Gather):
-        return (op, op.inputs[1], grad_outputs[0] * params.embedding_lr_multiplier),
+        return (op, op.inputs[1], grad_outputs[0]),
     if isinstance(op, (RevGradOp, MomentumOperation)):
         return op.gradient(grad_outputs, params=op.inputs)
     return zip((op,) * len(op.inputs), op.inputs, op.gradient(grad_outputs))
