@@ -57,8 +57,8 @@ def update(ctx: OptimizerCtx):
     large_tensor &= "input" not in var.name or "lang_in" in var.name or "vid_in" in var.name  # not input
     large_tensor &= "output" not in var.name or "lang_out" in var.name or "vid_out" in var.name  # not output
 
-    momentum = variable(params, ctx.var, "momentum", ctx.var.shape).operation
-    update_ops.append(assign_add(ctx.op, momentum, ctx.grad * (1 - params.momentum), params.momentum))
+    momentum = variable(params, ctx.var, "momentum", ctx.var.shape)
+    update_ops.append(assign_add(ctx.op, momentum.operation, ctx.grad * (1 - params.momentum), params.momentum))
 
     if large_tensor and params.weight_decay > 0:
         momentum = add(momentum, einsum([cast(var.value, params.optimizer_calculation_dtype), learning_rate,
