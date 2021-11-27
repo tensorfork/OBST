@@ -174,7 +174,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
                                            beta1, beta2, learning_rate, step_count)
 
                         ctx.variable_to_gradient[var] = grad = cast(grad_list[2], params.optimizer_calculation_dtype)
-                        scoped(fn, update, ctx(inp, var, grad))
+                        update(ctx(inp, var, grad))
 
     ctx = OptimizerCtx(op, grad_outputs, downstream, tensor_to_gradient, tensor_to_var, params,
                        loss_idx, update_ops, {}, loss_list, first_grad,
@@ -183,6 +183,6 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
     ctx.variable_to_gradient = {var: cast(tensor_to_gradient[tensor][2], params.optimizer_calculation_dtype)
                                 for tensor, var in tensor_to_var.items() if var not in ctx.variable_to_gradient}
     for tensor, var in tensor_to_var.items():
-        scoped(fn, update, ctx(tensor, var, ctx.variable_to_gradient[var]))
+        update(ctx(tensor, var, ctx.variable_to_gradient[var]))
 
     return ctx.update_ops, learning_rate
