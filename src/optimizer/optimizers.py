@@ -34,6 +34,9 @@ def adam(ctx: OptimizerCtx) -> mtf.Tensor:
 
 
 def novograd(ctx: OptimizerCtx) -> mtf.Tensor:
+    if ctx.var.shape.ndims == 0:
+        return adam(ctx)
+
     exp_avg_p1 = exp_avg_p1_ptr = variable(ctx.params, ctx.var, "exp_avg_p1", ctx.var.shape)
     exp_avg_p2 = exp_avg_p2_ptr = variable(ctx.params, ctx.var, "exp_avg_p2", [])
 
@@ -46,6 +49,9 @@ def novograd(ctx: OptimizerCtx) -> mtf.Tensor:
 
 
 def sm3(ctx: OptimizerCtx) -> mtf.Tensor:
+    if ctx.var.shape.ndims == 0:
+        return adam(ctx)
+
     weight_update = variable(ctx.params, ctx.var, "dim0", [ctx.var.shape.dims[0]])
     buffer = [weight_update]
 
