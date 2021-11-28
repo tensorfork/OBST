@@ -63,9 +63,20 @@ class Gather(mtf.Operation):
         self._outputs = [mtf.Tensor(self, args.tensor.shape + embedding.shape.dims[batch_dims + 1:],
                                     args.params.variable_dtype.activation_dtype)]
 
+    def _transpose(self, tensor: mtf.Tensor):
+        return mtf.transpose(tensor, tensor.shape.dims[self.batch_dims:] + tensor.shape.dims[:self.batch_dims])
+
     def gradient(self, grad_ys: typing.List[mtf.Tensor]) -> typing.Tuple[None, mtf.Tensor]:
         indices, embedding = self.inputs
-        return None, scatter_add(zeros_like(embedding), indices, grad_ys[0])
+        grad, = grad_ys
+        if self.batch_dims:
+            indices = self._transpose(indices)
+            embedding = self._transpose(embedding)
+            grad = self._transpose(embedding)
+        out = scatter_add(zeros_like(embedding), indices, grad)
+        if self.batch_dims:
+            out = self._transpose(out)
+        return None, out
 
     def lower(self, lowering: mtf.Lowering):
         mesh_impl: mtf.simd_mesh_impl.SimdMeshImpl = lowering.mesh_impl(self)
