@@ -60,4 +60,4 @@ def attention(args: BlockArgs):
     if not logit:
         raise UserWarning(f"WARNING: There is no spatial mixing happening with the following attention parameters: "
                           f"{args.name_extras}.")
-    return einsum(logit + [val], shape)
+    return einsum([logit, val], shape)
