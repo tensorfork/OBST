@@ -70,7 +70,8 @@ def feed_forward(args: BlockArgs) -> mtf.Tensor:
 
 def group_linear(args: BlockArgs):
     return reshape(linear(args('group'), args.params.feature_dims,
-                          anonymize_shape(args.params.feature_dims, args.params.key_dim)), args.tensor.shape)
+                          anonymize_shape(args.params.feature_dims, args.params.key_dim)),
+                   args.tensor.shape - args.params.feature_dims + args.params.feature_dims)
 
 
 def reduced_half_linear(args: BlockArgs):
