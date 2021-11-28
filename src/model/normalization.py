@@ -33,13 +33,17 @@ def norm(args: BlockArgs, feature_shape: typing.Optional[SHAPE] = None) -> mtf.T
         proxy_z += shift
         sub = reduce_mean(proxy_z, output_shape=[])
         proxy_z -= sub
-        block_input -= shift
-        block_input /= scale
+        if shift:
+            block_input -= shift
+        if scale:
+            block_input /= scale
         block_input -= proxy_z
         block_input /= rsqrt_eps(reduce_mean(square(proxy_z), output_shape=[]), 1e-5)
     else:
         block_input -= reduce_mean(block_input, output_shape=normalized_shape)
         div = rsqrt_eps(reduce_mean(square(block_input), output_shape=normalized_shape), 1e-5)
-        scale = [div, block_input]
+        scale = ([scale] * bool(scale)) + [div, block_input]
         block_input = einsum(scale, output_shape=block_input.shape)
+        if shift:
+            block_input += shift
     return block_input
