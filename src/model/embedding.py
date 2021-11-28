@@ -56,8 +56,9 @@ def scatter_add(out: mtf.Tensor, indices: mtf.Tensor, gradient: mtf.Tensor) -> m
 
 
 class Gather(mtf.Operation):
-    def __init__(self, args: BlockArgs, embedding: mtf.Tensor):
+    def __init__(self, args: BlockArgs, embedding: mtf.Tensor, batch_dims: int):
         super().__init__([args.tensor, embedding], args.params.mesh, name=random_name("gather"))
+        self.batch_dims = batch_dims
         self.args = args
         self._outputs = [mtf.Tensor(self, args.tensor.shape + embedding.shape.dims[1:],
                                     args.params.variable_dtype.activation_dtype)]
@@ -72,7 +73,7 @@ class Gather(mtf.Operation):
         indices, embeddings = self.inputs
 
         def slicewise_fn(idx: tf.Tensor, embd: tf.Tensor) -> tf.Tensor:
-            return tf.gather(embd, idx, axis=0)
+            return tf.gather(embd, idx, batch_dims=self.batch_dims)
 
         y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[indices], lowering.tensors[embeddings])
         lowering.set_tensor_lowering(self.outputs[0], y)
@@ -180,5 +181,5 @@ def embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
     return scoped('embed', _embed, args, shape)
 
 
-def gather_embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
-    return Gather(args, scoped("gather", embed, args, shape)).outputs[0]
+def gather_embed(args: BlockArgs, shape: SHAPE, batch_dims: int = 0) -> mtf.Tensor:
+    return Gather(args, scoped("gather", embed, args, shape), batch_dims).outputs[0]
