@@ -24,30 +24,11 @@ def norm(args: BlockArgs, feature_shape: typing.Optional[SHAPE] = None) -> mtf.T
     feature_shape = mtf.Shape(linear_shapes(args).old if feature_shape is None else feature_shape)
     normalized_shape = block_input.shape - (feature_shape - [args.params.head_dim] * ('group' in args))
 
-    scale = normal_var(args, feature_shape, mean=1) if 'scale' in args else None
-    shift = normal_var(args, feature_shape, mean=0) if 'shift' in args else None
-
-    if 'proxy' in args:
-        proxy_z = mtf.import_tf_tensor(block_input.mesh,
-                                       uniformly_sampled_gaussian(args.params.train_batch_size, block_input.dtype),
-                                       [args.params.batch_dim])
-        if scale is not None:
-            proxy_z *= scale
-        if shift is not None:
-            proxy_z += shift
-        sub = reduce_mean(proxy_z, output_shape=[])
-        proxy_z -= sub
-        if scale is not None:
-            block_input *= scale
-        if shift is not None:
-            proxy_z += shift
-        block_input -= proxy_z
-        block_input /= rsqrt_eps(reduce_mean(square(proxy_z), output_shape=[]), 1e-5)
-    else:
-        block_input -= reduce_mean(block_input, output_shape=normalized_shape)
-        div = rsqrt_eps(reduce_mean(square(block_input), output_shape=normalized_shape), 1e-5)
-        scale = ([] if scale is None else [scale]) + [div, block_input]
-        block_input = einsum(scale, output_shape=block_input.shape)
-        if shift:
-            block_input += shift
+    block_input -= reduce_mean(block_input, output_shape=normalized_shape)
+    scale = [rsqrt_eps(reduce_mean(square(block_input), output_shape=normalized_shape), 1e-5), block_input]
+    if 'scale' in args:
+        scale.append(normal_var(args, feature_shape, mean=1))
+    block_input = einsum(scale, output_shape=block_input.shape)
+    if 'shift' in args:
+        block_input += normal_var(args, feature_shape, mean=0)
     return block_input
