@@ -38,7 +38,7 @@ def norm(args: BlockArgs, feature_shape: typing.Optional[SHAPE] = None) -> mtf.T
         sub = reduce_mean(proxy_z, output_shape=[])
         proxy_z -= sub
         if scale is not None:
-            block_input /= scale
+            block_input *= scale
         if shift is not None:
             proxy_z += shift
         block_input -= proxy_z
