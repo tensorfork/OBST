@@ -60,7 +60,7 @@ class Gather(mtf.Operation):
         super().__init__([args.tensor, embedding], args.params.mesh, name=random_name("gather"))
         self.batch_dims = batch_dims
         self.args = args
-        self._outputs = [mtf.Tensor(self, args.tensor.shape + embedding.shape.dims[1:],
+        self._outputs = [mtf.Tensor(self, args.tensor.shape + embedding.shape.dims[batch_dims + 1:],
                                     args.params.variable_dtype.activation_dtype)]
 
     def gradient(self, grad_ys: typing.List[mtf.Tensor]) -> typing.Tuple[None, mtf.Tensor]:
