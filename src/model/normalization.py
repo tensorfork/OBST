@@ -16,7 +16,7 @@ def norm(args: BlockArgs, feature_shape: typing.Optional[SHAPE] = None) -> mtf.T
     feature_shape = mtf.Shape(linear_shapes(args).old if feature_shape is None else feature_shape)
     normalized_shape = block_input.shape - (feature_shape - [args.params.head_dim] * ('group' in args))
     if 'proxy' in args:
-        base = normal_var(args, feature_shape, mean=0)
+        base = normal_var(args, feature_shape, stddev=1, mean=0)
         sub = reduce_mean(base, output_shape=[])
         base -= sub
         block_input -= sub
