@@ -9,7 +9,7 @@ from .embedding import gather_embed
 from .normalization import norm
 from ..dataclass import BlockArgs
 from ..mtf_wrapper import (dropout as utils_dropout, sigmoid, exp, reduce_max, reduce_sum, einsum, reciprocal, reshape,
-                           multiply)
+                           multiply, reduce_mean)
 from ..utils_mtf import linear_shapes, anonymize_shape, get_dim
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
@@ -73,11 +73,15 @@ def group_linear(args: BlockArgs):
                           anonymize_shape(args.params.feature_dims, args.params.key_dim)), args.tensor.shape)
 
 
+def reduced_half_linear(args: BlockArgs):
+    return group_linear(args(reduce_mean(args.tensor, reduced_dim=args.params.head_dim)))
+
+
 def product_key_memory(args: BlockArgs):
     old, new = linear_shapes(args)
     two = mtf.Dimension("two", 2)
     features = [two, args.params.factorized_product_key_value_dim]
-    assignment = linear(args, old, features)
+    assignment = linear(args, old, [args.params.head_dim] + features)
     assignment = norm(args(assignment), features)
     assignment -= mtf.stop_gradient(reduce_max(assignment))
     assignment = mtf.exp(assignment)
@@ -87,4 +91,7 @@ def product_key_memory(args: BlockArgs):
     val = (mtf.slice(val, 0, 1, two.name) + mtf.slice(val, 1, 1, two.name)) / normalizer
     val = mtf.reshape(val, val.shape - get_dim(val, two))
     idx = mtf.reshape(idx, idx.shape - get_dim(idx, two))
-    return gather_embed(args(idx), [args.params.product_key_value_dim] + args.params.feature_dims) * val
+    idx = mtf.transpose(idx, mtf.Shape([args.params.head_dim]) + (idx.shape - args.params.head_dim))  # head to front
+    out = gather_embed(args(idx), [args.params.head_dim, args.params.product_key_value_dim, args.params.key_dim], 0)
+    out = mtf.transpose(out, out.shape - args.params.feature_dims + args.params.feature_dims)  # feature_dims to end
+    return out * val
