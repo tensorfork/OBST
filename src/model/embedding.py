@@ -46,6 +46,7 @@ class ScatterAdd(mtf.Operation):
         for flattened_dims, (dim0, dim1) in enumerate(zip(out.shape.dims[::-1], gradients.shape.dims[::-1])):
             if dim0 != dim1:
                 break
+        flattened_dims = min(flattened_dims, 1)
         y = mesh_impl.slicewise(assign_fn, lowering.tensors[out], lowering.tensors[indices],
                                 lowering.tensors[gradients])
         lowering.set_tensor_lowering(self.outputs[0], y)
