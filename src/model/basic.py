@@ -82,7 +82,7 @@ def product_key_memory(args: BlockArgs):
     old, new = linear_shapes(args)
     two = mtf.Dimension("two", 2)
     features = [two, args.params.factorized_product_key_value_dim]
-    assignment = linear(args, old, [args.params.head_dim] + features)
+    assignment = linear(args, old, features)
     assignment = norm(args(assignment), features)
     assignment -= mtf.stop_gradient(reduce_max(assignment))
     assignment = mtf.exp(assignment)
@@ -92,7 +92,5 @@ def product_key_memory(args: BlockArgs):
     val = (mtf.slice(val, 0, 1, two.name) + mtf.slice(val, 1, 1, two.name)) / normalizer
     val = mtf.reshape(val, val.shape - get_dim(val, two))
     idx = mtf.reshape(idx, idx.shape - get_dim(idx, two))
-    idx = mtf.transpose(idx, mtf.Shape([args.params.head_dim]) + (idx.shape - args.params.head_dim))  # head to front
-    out = gather_embed(args(idx), [args.params.head_dim, args.params.product_key_value_dim, args.params.key_dim], 1)
-    out = mtf.transpose(out, out.shape - args.params.feature_dims + args.params.feature_dims)  # feature_dims to end
+    out = gather_embed(args(idx), [args.params.product_key_value_dim] + args.params.feature_dims)
     return out * val
