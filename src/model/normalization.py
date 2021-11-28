@@ -13,9 +13,10 @@ from ..utils_mtf import linear_shapes
 tf1 = tf.compat.v1
 
 
-def uniformly_sampled_gaussian(num_rand):
+def uniformly_sampled_gaussian(num_rand, dtype):
     rand = 2 * (np.arange(num_rand) + 0.5) / float(num_rand) - 1
-    return np.sqrt(2) * erfinv(rand)
+    rand = np.sqrt(2) * erfinv(rand)
+    return tf.constant(rand, dtype=dtype)
 
 
 def norm(args: BlockArgs, feature_shape: typing.Optional[SHAPE] = None) -> mtf.Tensor:
@@ -27,8 +28,9 @@ def norm(args: BlockArgs, feature_shape: typing.Optional[SHAPE] = None) -> mtf.T
     shift = normal_var(args, feature_shape, mean=0) if 'shift' in args else None
 
     if 'proxy' in args:
-        proxy_z = mtf.constant(block_input.mesh, uniformly_sampled_gaussian(args.params.train_batch_size),
-                               [args.params.batch_dim], dtype=block_input.dtype)
+        proxy_z = mtf.import_tf_tensor(block_input.mesh,
+                                       uniformly_sampled_gaussian(args.params.train_batch_size, block_input.dtype),
+                                       [args.params.batch_dim])
         proxy_z *= scale
         proxy_z += shift
         sub = reduce_mean(proxy_z, output_shape=[])
