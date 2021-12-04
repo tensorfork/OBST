@@ -46,6 +46,7 @@ class ScatterAdd(mtf.Operation):
             squeeze_dims = squeeze_dims.dims
         if squeeze_dims is None:
             squeeze_dims = []
+        self.squeeze_dims = squeeze_dims
         self.index_dims = [indices.shape.dims.index(dim) for dim in squeeze_dims if dim in indices.shape.dims]
         self.embed_dims = [out.shape.dims.index(dim) for dim in squeeze_dims if dim in out.shape.dims]
         self.grad_dims = [gradient.shape.dims.index(dim) for dim in squeeze_dims if dim in gradient.shape.dims]
@@ -73,11 +74,10 @@ class ScatterAdd(mtf.Operation):
             return unsqueeze(out, self.embed_dims)
 
         out, indices, gradients = self.inputs
-        for idx, (dim0, dim1) in enumerate(zip(out.shape.dims[::-1], gradients.shape.dims[::-1]), 1):
+        for flattened_dims, (dim0, dim1) in enumerate(zip((out.shape - self.squeeze_dims).dims[::-1],
+                                                          (gradients.shape - self.squeeze_dims).dims[::-1]), 1):
             if dim0 != dim1:
                 break
-            if out.shape.ndims - idx not in self.embed_dims and gradients.shape.ndims - idx not in self.grad_dims:
-                flattened_dims += 1
         flattened_dims = min(flattened_dims, -1)
         y = mesh_impl.slicewise(assign_fn, lowering.tensors[out], lowering.tensors[indices],
                                 lowering.tensors[gradients])
