@@ -93,5 +93,6 @@ def product_key_memory(args: BlockArgs):
     val = (mtf.slice(val, 0, 1, two.name) + mtf.slice(val, 1, 1, two.name)) / normalizer
     val = mtf.reshape(val, val.shape - get_dim(val, two))
     idx = mtf.reshape(idx, idx.shape - get_dim(idx, two))
-    out = gather_embed(args(idx), [args.params.product_key_value_dim] + args.params.feature_dims)
+    out = gather_embed(args(idx), [args.params.product_key_value_dim] + args.params.feature_dims,
+                       [args.params.head_dim])
     return out * val

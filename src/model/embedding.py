@@ -22,11 +22,34 @@ def _multi_dim_range_tf(params: ModelParameter, dims: DIM_LIST) -> mtf.Tensor:
     return tfw.cast(out, params.variable_dtype.activation_dtype)
 
 
+def squeeze(tensor: tf.Tensor, removed_dims: typing.List[int]):
+    shape = tensor.shape.as_list()
+    for i, d in enumerate(sorted(removed_dims)):
+        del shape[d - i]
+    return tf.reshape(tensor, shape)
+
+
+def unsqueeze(tensor: tf.Tensor, added_dims: typing.List[int]):
+    shape = tensor.shape.as_list()
+    for d in sorted(added_dims):
+        shape.insert(d, 1)
+    return tf.reshape(tensor, shape)
+
+
 class ScatterAdd(mtf.Operation):
     """Assign to one or more variables."""
 
-    def __init__(self, out: mtf.Tensor, indices: mtf.Tensor, gradient: mtf.Tensor):
+    def __init__(self, out: mtf.Tensor, indices: mtf.Tensor, gradient: mtf.Tensor,
+                 squeeze_dims: typing.Optional[SHAPE]):
         super().__init__([out, indices, gradient], out.mesh, random_name("sparse_assign"))
+        if isinstance(squeeze_dims, mtf.Shape):
+            squeeze_dims = squeeze_dims.dims
+        if squeeze_dims is None:
+            squeeze_dims = []
+        self.index_dims = [indices.shape.dims.index(dim) for dim in squeeze_dims if dim in indices.shape.dims]
+        self.embed_dims = [out.shape.dims.index(dim) for dim in squeeze_dims if dim in out.shape.dims]
+        self.grad_dims = [gradient.shape.dims.index(dim) for dim in squeeze_dims if dim in gradient.shape.dims]
+
         self.indices = indices
         self.grad = gradient
         self._outputs = [mtf.Tensor(self, out.shape, out.dtype)]
@@ -36,11 +59,18 @@ class ScatterAdd(mtf.Operation):
         flattened_dims = 0
 
         def assign_fn(val: tf.Tensor, indices: tf.Tensor, gradient: tf.Tensor) -> tf.Tensor:
+            # Val: [1 (Heads), Keys, Features]
+            # Indices: [Batch, Sequence, 1 (Heads), 1 (Keys)]
+            # Gradient: [Batch, Sequence, 1 (Heads), Features]
             shape = val.shape
+            val = squeeze(val, self.embed_dims)
+            indices = squeeze(indices, self.index_dims)
+            gradient = squeeze(gradient, self.grad_dims)
             indices = tf.reshape(indices, indices.shape.as_list() + [1])
             val = tf.reshape(val, val.shape.as_list()[:-flattened_dims] + [-1])
             gradient = tf.cast(tf.reshape(gradient, gradient.shape.as_list()[:-flattened_dims] + [-1]), val.dtype)
-            return tf.reshape(tf.tensor_scatter_nd_add(val, indices, gradient), shape)
+            out = tf.reshape(tf.tensor_scatter_nd_add(val, indices, gradient), shape)
+            return unsqueeze(out, self.embed_dims)
 
         out, indices, gradients = self.inputs
         for flattened_dims, (dim0, dim1) in enumerate(zip(out.shape.dims[::-1], gradients.shape.dims[::-1])):
@@ -51,20 +81,32 @@ class ScatterAdd(mtf.Operation):
         lowering.set_tensor_lowering(self.outputs[0], y)
 
 
-def scatter_add(out: mtf.Tensor, indices: mtf.Tensor, gradient: mtf.Tensor) -> mtf.Tensor:
-    return ScatterAdd(out, indices, gradient).outputs[0]
+def scatter_add(out: mtf.Tensor, indices: mtf.Tensor, gradient: mtf.Tensor, squeeze_dims: typing.Optional[SHAPE]=None
+                ) -> mtf.Tensor:
+    return ScatterAdd(out, indices, gradient, squeeze_dims).outputs[0]
 
 
 class Gather(mtf.Operation):
-    def __init__(self, args: BlockArgs, embedding: mtf.Tensor):
+    def __init__(self, args: BlockArgs, embedding: mtf.Tensor, squeeze_dims: typing.Optional[SHAPE]):
         super().__init__([args.tensor, embedding], args.params.mesh, name=random_name("gather"))
+        if isinstance(squeeze_dims, mtf.Shape):
+            squeeze_dims = squeeze_dims.dims
+        if squeeze_dims is None:
+            squeeze_dims = []
+        self.squeeze_dims = squeeze_dims
+        self.squeezed_index_dims = [args.tensor.shape.dims.index(dim) for dim in squeeze_dims
+                                    if dim in args.tensor.shape.dims]
+        self.squeezed_embed_dims = [embedding.shape.dims.index(dim) for dim in squeeze_dims
+                                    if dim in embedding.shape.dims]
+        out_shape = args.tensor.shape - squeeze_dims + embedding.shape.dims[1:]
         self.args = args
-        self._outputs = [mtf.Tensor(self, args.tensor.shape + embedding.shape.dims[1:],
+        self.unsqueezed_dims = [out_shape.dims.index(dim) for dim in squeeze_dims if dim in out_shape.dims]
+        self._outputs = [mtf.Tensor(self, out_shape,
                                     args.params.variable_dtype.activation_dtype)]
 
     def gradient(self, grad_ys: typing.List[mtf.Tensor]) -> typing.Tuple[None, mtf.Tensor]:
         indices, embedding = self.inputs
-        return None, scatter_add(zeros_like(embedding), indices, grad_ys[0])
+        return None, scatter_add(zeros_like(embedding), indices, grad_ys[0], self.squeeze_dims)
 
     def lower(self, lowering: mtf.Lowering):
         mesh_impl: mtf.simd_mesh_impl.SimdMeshImpl = lowering.mesh_impl(self)
@@ -72,7 +114,10 @@ class Gather(mtf.Operation):
         indices, embeddings = self.inputs
 
         def slicewise_fn(idx: tf.Tensor, embd: tf.Tensor) -> tf.Tensor:
-            return tf.gather(embd, idx, axis=0)
+            idx = squeeze(idx, self.squeezed_index_dims)
+            embd = squeeze(embd, self.squeezed_embed_dims)
+            out = tf.gather(embd, idx, axis=0)
+            return unsqueeze(out, self.unsqueezed_dims)
 
         y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[indices], lowering.tensors[embeddings])
         lowering.set_tensor_lowering(self.outputs[0], y)
@@ -180,5 +225,5 @@ def embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
     return scoped('embed', _embed, args, shape)
 
 
-def gather_embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
-    return Gather(args, scoped("gather", embed, args, shape)).outputs[0]
+def gather_embed(args: BlockArgs, shape: SHAPE, squeezed_dims: typing.Optional[SHAPE] = None) -> mtf.Tensor:
+    return Gather(args, scoped("gather", embed, args, shape), squeezed_dims).outputs[0]
