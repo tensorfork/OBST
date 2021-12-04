@@ -75,10 +75,10 @@ class ScatterAdd(mtf.Operation):
 
         out, indices, gradients = self.inputs
         for flattened_dims, (dim0, dim1) in enumerate(zip((out.shape - self.squeeze_dims).dims[::-1],
-                                                          (gradients.shape - self.squeeze_dims).dims[::-1]), 1):
+                                                          (gradients.shape - self.squeeze_dims).dims[::-1]), 0):
             if dim0 != dim1:
                 break
-        flattened_dims = min(flattened_dims, -1)
+        flattened_dims = max(flattened_dims, 1)
         y = mesh_impl.slicewise(assign_fn, lowering.tensors[out], lowering.tensors[indices],
                                 lowering.tensors[gradients])
         lowering.set_tensor_lowering(self.outputs[0], y)
