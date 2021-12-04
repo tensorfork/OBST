@@ -70,8 +70,7 @@ class ScatterAdd(mtf.Operation):
             indices = tf.reshape(indices, indices.shape.as_list() + [1])
             val = tf.reshape(val, val.shape.as_list()[:-flattened_dims] + [-1])
             gradient = tf.cast(tf.reshape(gradient, gradient.shape.as_list()[:-flattened_dims] + [-1]), val.dtype)
-            out = tf.reshape(tf.tensor_scatter_nd_add(val, indices, gradient), shape)
-            return unsqueeze(out, self.embed_dims)
+            return tf.reshape(tf.tensor_scatter_nd_add(val, indices, gradient), shape)
 
         out, indices, gradients = self.inputs
         for flattened_dims, (dim0, dim1) in enumerate(zip((out.shape - self.squeeze_dims).dims[::-1],
