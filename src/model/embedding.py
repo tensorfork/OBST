@@ -46,7 +46,6 @@ class ScatterAdd(mtf.Operation):
         for flattened_dims, (dim0, dim1) in enumerate(zip(out.shape.dims[::-1], gradients.shape.dims[::-1])):
             if dim0 != dim1:
                 break
-        flattened_dims = max(flattened_dims, 1)
         y = mesh_impl.slicewise(assign_fn, lowering.tensors[out], lowering.tensors[indices],
                                 lowering.tensors[gradients])
         lowering.set_tensor_lowering(self.outputs[0], y)
@@ -57,27 +56,15 @@ def scatter_add(out: mtf.Tensor, indices: mtf.Tensor, gradient: mtf.Tensor) -> m
 
 
 class Gather(mtf.Operation):
-    def __init__(self, args: BlockArgs, embedding: mtf.Tensor, batch_dims: int):
+    def __init__(self, args: BlockArgs, embedding: mtf.Tensor):
         super().__init__([args.tensor, embedding], args.params.mesh, name=random_name("gather"))
-        self.batch_dims = batch_dims
         self.args = args
-        self._outputs = [mtf.Tensor(self, args.tensor.shape + embedding.shape.dims[batch_dims + 1:],
+        self._outputs = [mtf.Tensor(self, args.tensor.shape + embedding.shape.dims[1:],
                                     args.params.variable_dtype.activation_dtype)]
-
-    def _transpose(self, tensor: mtf.Tensor):
-        return mtf.transpose(tensor, tensor.shape.dims[self.batch_dims:] + tensor.shape.dims[:self.batch_dims])
 
     def gradient(self, grad_ys: typing.List[mtf.Tensor]) -> typing.Tuple[None, mtf.Tensor]:
         indices, embedding = self.inputs
-        grad, = grad_ys
-        if self.batch_dims:
-            indices = self._transpose(indices)
-            embedding = self._transpose(embedding)
-            grad = self._transpose(embedding)
-        out = scatter_add(zeros_like(embedding), indices, grad)
-        if self.batch_dims:
-            out = self._transpose(out)
-        return None, out
+        return None, scatter_add(zeros_like(embedding), indices, grad_ys[0])
 
     def lower(self, lowering: mtf.Lowering):
         mesh_impl: mtf.simd_mesh_impl.SimdMeshImpl = lowering.mesh_impl(self)
@@ -85,7 +72,7 @@ class Gather(mtf.Operation):
         indices, embeddings = self.inputs
 
         def slicewise_fn(idx: tf.Tensor, embd: tf.Tensor) -> tf.Tensor:
-            return tf.gather(embd, idx, batch_dims=self.batch_dims)
+            return tf.gather(embd, idx, axis=0)
 
         y = mesh_impl.slicewise(slicewise_fn, lowering.tensors[indices], lowering.tensors[embeddings])
         lowering.set_tensor_lowering(self.outputs[0], y)
@@ -193,5 +180,5 @@ def embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
     return scoped('embed', _embed, args, shape)
 
 
-def gather_embed(args: BlockArgs, shape: SHAPE, batch_dims: int = 0) -> mtf.Tensor:
-    return Gather(args, scoped("gather", embed, args, shape), batch_dims).outputs[0]
+def gather_embed(args: BlockArgs, shape: SHAPE) -> mtf.Tensor:
+    return Gather(args, scoped("gather", embed, args, shape)).outputs[0]

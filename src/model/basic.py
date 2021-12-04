@@ -79,9 +79,10 @@ def reduced_half_linear(args: BlockArgs):
 
 
 def product_key_memory(args: BlockArgs):
-    old, new = linear_shapes(args)
     two = mtf.Dimension("two", 2)
-    features = [two, args.params.factorized_product_key_value_dim]
+    args = args(activated_linear_in(args))
+    old, new = linear_shapes(args)
+    features = [args.params.head_dim, two, args.params.factorized_product_key_value_dim]
     assignment = linear(args, old, features)
     assignment = norm(args(assignment), features)
     assignment -= mtf.stop_gradient(reduce_max(assignment))

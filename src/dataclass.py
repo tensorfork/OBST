@@ -87,9 +87,8 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.reduce_lr_on_plateau_reduction = 2
         self.momentumnet_alpha = 0.99
         self.current_step = 0
-        self.batch_splits = 1
+        self.tpu_size = 32
         self.default_sleep_duration = 0.1
-        self.head_splits = 32.
         self.lookahead_steps = 0
         self.lookahead_alpha = 0
         self.momentum = 0.95
@@ -233,10 +232,10 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             print('WARNING: Use random dataset seed')
             for _ in range(random.randint(0, 1000)):
                 self.data_seed = random.randint(0, 1000000)
-        split_batch = self.batch_splits > 1
-        split_heads = self.head_splits > 1
-        self.mesh_shape = ','.join([f"b:{self.batch_splits:.0f}"] * split_batch +
-                                   [f"h:{self.head_splits:.0f}"] * split_heads)
+        split_batch = self.heads < self.tpu_size
+        split_heads = self.heads > 1
+        self.mesh_shape = ','.join([f"b:{self.tpu_size // self.heads:.0f}"] * split_batch +
+                                   [f"h:{self.heads:.0f}"] * split_heads)
         self.layout = ','.join([f"batch:b"] * split_batch +
                                [f"heads:h"] * split_heads)
         self.variable_dtype = mtf.VariableDType(self.storage_dtype, self.slice_dtype, self.calculation_dtype)
