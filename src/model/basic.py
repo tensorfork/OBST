@@ -80,6 +80,7 @@ def reduced_half_linear(args: BlockArgs):
 
 def product_key_memory(args: BlockArgs):
     two = mtf.Dimension("two", 2)
+    inp = args.tensor
     args = args(activated_linear_in(args))
     old, new = linear_shapes(args)
     features = [two, args.params.factorized_product_key_value_dim]
@@ -95,4 +96,4 @@ def product_key_memory(args: BlockArgs):
     idx = mtf.reshape(idx, idx.shape - get_dim(idx, two))
     out = gather_embed(args(idx), [args.params.product_key_value_dim] + args.params.feature_dims,
                        [args.params.head_dim])
-    return out * val
+    return out * val + inp
