@@ -82,8 +82,8 @@ def product_key_memory(args: BlockArgs):
     two = mtf.Dimension("two", 2)
     args = args(activated_linear_in(args))
     old, new = linear_shapes(args)
-    features = [args.params.head_dim, two, args.params.factorized_product_key_value_dim]
-    assignment = linear(args, old, features)
+    features = [two, args.params.factorized_product_key_value_dim]
+    assignment = linear(args, old, [args.params.head_dim] + features)
     assignment = norm(args(assignment), features)
     assignment -= mtf.stop_gradient(reduce_max(assignment))
     assignment = mtf.exp(assignment)
