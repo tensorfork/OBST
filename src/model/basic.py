@@ -10,7 +10,7 @@ from .normalization import norm
 from ..dataclass import BlockArgs
 from ..mtf_wrapper import (dropout as utils_dropout, sigmoid, exp, reduce_max, reduce_sum, einsum, reciprocal, reshape,
                            multiply, reduce_mean)
-from ..utils_mtf import linear_shapes, anonymize_shape, anonymize_dim, concat, get_dim
+from ..utils_mtf import linear_shapes, anonymize_shape, get_dim
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -80,46 +80,20 @@ def reduced_half_linear(args: BlockArgs):
 
 def product_key_memory(args: BlockArgs):
     two = mtf.Dimension("two", 2)
-    out_shape = args.tensor.shape
+    inp = args.tensor
     args = args(activated_linear_in(args))
     old, new = linear_shapes(args)
     features = [two, args.params.factorized_product_key_value_dim]
     assignment = linear(args, old, [args.params.head_dim] + features)
     assignment = norm(args(assignment), features)
-    val0, idx0 = mtf.top_k(assignment, args.params.factorized_product_key_value_dim,
-                           args.params.pkm_key_dim)
-    val1, idx1 = mtf.top_k(-assignment, args.params.factorized_product_key_value_dim,
-                           args.params.pkm_key_dim)
-    val1 = -val1
-
-    new_idx1 = mtf.slice(idx1, 0, 1, two.name) * args.params.factorized_product_key_value
-    new_idx1 += anonymize_shape(mtf.slice(idx1, 1, 1, two.name), args.params.pkm_key_dim)
-    new_val1 = mtf.slice(val1, 0, 1, two.name)
-    new_val1 *= anonymize_shape(mtf.slice(val1, 1, 1, two.name), args.params.pkm_key_dim)
-
-    new_idx0 = mtf.slice(idx0, 0, 1, two.name) * args.params.factorized_product_key_value
-    new_idx0 += anonymize_shape(mtf.slice(idx0, 1, 1, two.name), args.params.pkm_key_dim)
-    new_val0 = mtf.slice(val0, 0, 1, two.name)
-    new_val0 *= anonymize_shape(mtf.slice(val0, 1, 1, two.name), args.params.pkm_key_dim)
-
-    new_val0 = mtf.exp(new_val0 - mtf.stop_gradient(reduce_max(new_val0)))
-    new_val1 = mtf.exp(new_val1 - mtf.stop_gradient(reduce_max(new_val1)))
-    reduced = new_val0.shape - args.params.pkm_key_dim - anonymize_dim(args.params.pkm_key_dim)
-    normalizer = mtf.reduce_sum(new_val0, output_shape=reduced) + mtf.reduce_sum(new_val1, output_shape=reduced)
-
-    new_val0 /= normalizer
-    new_val1 /= normalizer
-
-    dim = mtf.Dimension("topk_squared", args.params.product_key_value_keys ** 2)
-    new_val0 = mtf.reshape(new_val0, reduced + [dim])
-    new_idx0 = mtf.reshape(new_idx0, reduced + [dim])
-    new_val1 = mtf.reshape(new_val1, reduced + [dim])
-    new_idx1 = mtf.reshape(new_idx1, reduced + [dim])
-    val = concat([new_val0, new_val1], dim)
-    idx = concat([new_idx0, new_idx1], dim)
-    new_val, new_idx = mtf.top_k(val, get_dim(val, dim), args.params.pkm_key_dim)
-    new_idx = mtf.gather(idx, new_idx, dim)
-
-    out = gather_embed(args(new_idx), [args.params.product_key_value_dim] + args.params.feature_dims,
+    assignment -= mtf.stop_gradient(reduce_max(assignment))
+    assignment = mtf.exp(assignment)
+    normalizer = mtf.reduce_sum(assignment, output_shape=assignment.shape - features)
+    val, idx = mtf.top_1(assignment, args.params.factorized_product_key_value_dim)
+    idx = mtf.slice(idx, 0, 1, two.name) * args.params.factorized_product_key_value + mtf.slice(idx, 1, 1, two.name)
+    val = (mtf.slice(val, 0, 1, two.name) + mtf.slice(val, 1, 1, two.name)) / normalizer
+    val = mtf.reshape(val, val.shape - get_dim(val, two))
+    idx = mtf.reshape(idx, idx.shape - get_dim(idx, two))
+    out = gather_embed(args(idx), [args.params.product_key_value_dim] + args.params.feature_dims,
                        [args.params.head_dim])
-    return mtf.einsum([out, new_val], out_shape)
+    return out * val + inp

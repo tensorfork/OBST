@@ -66,7 +66,6 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.features: typing.Optional[int] = None
         self.features_per_head: typing.Optional[int] = None
         self.factorized_product_key_value: typing.Optional[int] = None
-        self.product_key_value_keys = 32
         self.depth = 16
         self.buffer_size = 4
         self.combine_assignments = False  # Needs more memory but it's faster
@@ -261,7 +260,6 @@ class ModelParameter(typing.Dict[str, typing.Any]):
 
         self.product_key_value_vectors = self.factorized_product_key_value ** 2
         self.product_key_value_dim = mtf.Dimension("product_key_value_dim", self.product_key_value_vectors)
-        self.pkm_key_dim = mtf.Dimension("pkm_key_dim", self.product_key_value_keys)
         self.factorized_product_key_value_dim = mtf.Dimension("factorized_product_key_value",
                                                               self.factorized_product_key_value)
         self.head_dim = mtf.Dimension("heads", self.heads)
