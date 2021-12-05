@@ -134,6 +134,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.embedding_stddev = 0.04
         self.color_quantization_value = 256
         self.experts = 64
+        self.pkm_axes = 2  # 2 axis = features^2 keys, 3 axis = features^3 keys...
         self.use_bit_fold_input_pipeline = False
         self.bit_fold_value = 4
         self.debug_train_step = False
@@ -261,6 +262,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.head_dimensions = [self.head_dim]
         self.key_dim = mtf.Dimension("features_per_head", self.features // self.heads)
         self.sequence_per_head_dim = mtf.Dimension("sequence_per_head", self.time_patch_size // self.heads)
+        self.pkm_dim = mtf.Dimension("pkm_axes", self.pkm_axes)
 
         self.feature_dims = self.head_dimensions + [self.key_dim]
 

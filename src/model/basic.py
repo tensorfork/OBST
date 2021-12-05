@@ -79,21 +79,21 @@ def reduced_half_linear(args: BlockArgs):
 
 
 def product_key_memory(args: BlockArgs):
-    two = mtf.Dimension("two", 2)
     args = args(activated_linear_in(args))
     old, new = linear_shapes(args)
-    features = [two, args.params.key_dim]
+    features = [args.params.pkm_dim, args.params.key_dim]
     assignment = linear(args, old, [args.params.head_dim] + features)
     assignment = norm(args(assignment), features)
     assignment -= mtf.stop_gradient(reduce_max(assignment))
     assignment = mtf.exp(assignment)
     normalizer = mtf.reduce_sum(assignment, output_shape=assignment.shape - [args.params.key_dim])
-    normalizer = mtf.multiply(*unbind(normalizer, two))
+    normalizer = mtf.einsum(unbind(normalizer, args.params.pkm_dim),
+                            output_shape=normalizer.shape - args.params.pkm_dim)
 
     val, idx = mtf.top_1(assignment, args.params.key_dim)
-    idx0, idx1 = unbind(idx, two)
-    idx = squeeze(idx0 * args.params.features_per_head + idx1, two)
-    val = squeeze(mtf.add(*unbind(val, two)) / normalizer, two)
+    idx = [k * args.params.features_per_head ** i for i, k in enumerate(unbind(idx, args.params.pkm_dim))]
+    idx = squeeze(mtf.add_n(idx), args.params.pkm_dim)
+    val = squeeze(mtf.add_n(unbind(val, args.params.pkm_dim)) / normalizer, args.params.pkm_dim)
     out = gather_embed(args(idx), [args.params.product_key_value_dim] + args.params.feature_dims,
                        [args.params.head_dim])
     return out * val
