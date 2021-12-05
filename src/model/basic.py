@@ -10,7 +10,7 @@ from .normalization import norm
 from ..dataclass import BlockArgs
 from ..mtf_wrapper import (dropout as utils_dropout, sigmoid, exp, reduce_max, reduce_sum, einsum, reciprocal, reshape,
                            multiply, reduce_mean)
-from ..utils_mtf import linear_shapes, anonymize_shape, anonymize_dim, concat
+from ..utils_mtf import linear_shapes, anonymize_shape, anonymize_dim, concat, get_dim
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -117,7 +117,7 @@ def product_key_memory(args: BlockArgs):
     new_idx1 = mtf.reshape(new_idx1, reduced + [dim])
     val = concat([new_val0, new_val1], dim)
     idx = concat([new_idx0, new_idx1], dim)
-    new_val, new_idx = mtf.top_k(val, dim, args.params.pkm_key_dim)
+    new_val, new_idx = mtf.top_k(val, get_dim(val, dim), args.params.pkm_key_dim)
     new_idx = mtf.gather(idx, new_idx, dim)
 
     out = gather_embed(args(new_idx), [args.params.product_key_value_dim] + args.params.feature_dims,
