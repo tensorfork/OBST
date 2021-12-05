@@ -85,16 +85,17 @@ def product_key_memory(args: BlockArgs):
     features = [args.params.pkm_dim, args.params.key_dim]
     assignment = linear(args, old, [args.params.head_dim] + features)
     assignment = norm(args(assignment), features)
-    assignment -= stop_gradient(reduce_max(assignment))
+    assignment -= stop_gradient(reduce_max(assignment,
+                                           output_shape=assignment.shape - [args.params.pkm_dim, args.params.key_dim]))
     assignment = exp(assignment)
     normalizer = reduce_sum(assignment, output_shape=assignment.shape - [args.params.key_dim])
     normalizer = einsum(unbind(normalizer, args.params.pkm_dim), output_shape=normalizer.shape - args.params.pkm_dim)
 
     val, idx = mtf.top_1(assignment, args.params.key_dim)
-    idx = mtf.einsum([exp(math.log(args.params.features_per_head) *
-                          mtf.range(normalizer.mesh, args.params.pkm_dim, dtype=normalizer.dtype)),
-                      idx], idx.shape - args.params.pkm_dim)
-    val = mtf.reduce_sum(val, args.params.pkm_dim) / normalizer
+    idx = mtf.einsum([mtf.cast(exp(math.log(args.params.features_per_head) *
+                                   mtf.range(normalizer.mesh, args.params.pkm_dim, dtype=normalizer.dtype)),
+                               tf.int32), idx], output_shape=idx.shape - args.params.pkm_dim)
+    val = mtf.reduce_sum(val, reduced_dim=args.params.pkm_dim) / normalizer
     out = gather_embed(args(idx), [args.params.product_key_value_dim] + args.params.feature_dims,
                        [args.params.head_dim])
     return out * val
