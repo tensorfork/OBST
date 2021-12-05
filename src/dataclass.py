@@ -65,7 +65,6 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.heads = 8
         self.features: typing.Optional[int] = None
         self.features_per_head: typing.Optional[int] = None
-        self.factorized_product_key_value: typing.Optional[int] = None
         self.depth = 16
         self.buffer_size = 4
         self.combine_assignments = False  # Needs more memory but it's faster
@@ -213,8 +212,6 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             self.features = self.features_per_head * self.heads
         if self.features_per_head is None:
             self.features_per_head = self.features // self.heads
-        if self.factorized_product_key_value is None:
-            self.factorized_product_key_value = self.features_per_head
         if self.use_video and (self.frame_width * self.frame_height // self.patch_size) % self.experts:
             raise ValueError("Frame size has to be divisible by number of experts. Set \"experts\" to 1 if you're not "
                              "using MoE")
@@ -258,10 +255,8 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         if self.use_bit_fold_input_pipeline:
             self.channel_color_size = self.channel_color_size // self.fold_count
 
-        self.product_key_value_vectors = self.factorized_product_key_value ** 2
+        self.product_key_value_vectors = self.features_per_head ** 2
         self.product_key_value_dim = mtf.Dimension("product_key_value_dim", self.product_key_value_vectors)
-        self.factorized_product_key_value_dim = mtf.Dimension("factorized_product_key_value",
-                                                              self.factorized_product_key_value)
         self.head_dim = mtf.Dimension("heads", self.heads)
         self.head_dimensions = [self.head_dim]
         self.key_dim = mtf.Dimension("features_per_head", self.features // self.heads)

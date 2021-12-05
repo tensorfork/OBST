@@ -10,7 +10,7 @@ from .normalization import norm
 from ..dataclass import BlockArgs
 from ..mtf_wrapper import (dropout as utils_dropout, sigmoid, exp, reduce_max, reduce_sum, einsum, reciprocal, reshape,
                            multiply, reduce_mean)
-from ..utils_mtf import linear_shapes, anonymize_shape, get_dim
+from ..utils_mtf import linear_shapes, anonymize_shape, squeeze, unbind
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -80,23 +80,20 @@ def reduced_half_linear(args: BlockArgs):
 
 def product_key_memory(args: BlockArgs):
     two = mtf.Dimension("two", 2)
-    inp = args.tensor
     args = args(activated_linear_in(args))
     old, new = linear_shapes(args)
-    features = [two, args.params.factorized_product_key_value_dim]
+    features = [two, args.params.key_dim]
     assignment = linear(args, old, [args.params.head_dim] + features)
     assignment = norm(args(assignment), features)
     assignment -= mtf.stop_gradient(reduce_max(assignment))
     assignment = mtf.exp(assignment)
-    normalizer = mtf.reduce_sum(assignment,
-                                output_shape=assignment.shape - [args.params.factorized_product_key_value_dim])
-    normalizer = mtf.slice(normalizer, 0, 1, "two") * mtf.slice(normalizer, 1, 1, "two")
-    normalizer = mtf.reshape(normalizer, normalizer.shape - get_dim(normalizer, two))
-    val, idx = mtf.top_1(assignment, args.params.factorized_product_key_value_dim)
-    idx = mtf.slice(idx, 0, 1, two.name) * args.params.factorized_product_key_value + mtf.slice(idx, 1, 1, two.name)
-    val = (mtf.slice(val, 0, 1, two.name) + mtf.slice(val, 1, 1, two.name)) / normalizer
-    val = mtf.reshape(val, val.shape - get_dim(val, two))
-    idx = mtf.reshape(idx, idx.shape - get_dim(idx, two))
+    normalizer = mtf.reduce_sum(assignment, output_shape=assignment.shape - [args.params.key_dim])
+    normalizer = mtf.multiply(*unbind(normalizer, two))
+
+    val, idx = mtf.top_1(assignment, args.params.key_dim)
+    idx0, idx1 = unbind(idx, two)
+    idx = squeeze(idx0 * args.params.features_per_head + idx1, two)
+    val = squeeze(mtf.add(*unbind(val, two)) / normalizer, two)
     out = gather_embed(args(idx), [args.params.product_key_value_dim] + args.params.feature_dims,
                        [args.params.head_dim])
-    return out * val + inp
+    return out * val

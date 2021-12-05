@@ -95,8 +95,24 @@ def anonymize_dim(dim: DIM, new_size: typing.Optional[int] = None):
     return new_dim(dim, new_size, name)
 
 
+def unbind(tensor: mtf.Tensor, dim: DIM) -> typing.List[mtf.Tensor]:
+    if isinstance(dim, mtf.Dimension):
+        dim = dim.name
+    return [mtf.slice(tensor, i, i + 1, dim) for i in range(dim.size)]
+
+
+def squeeze(tensor: mtf.Tensor, dims: typing.Union[SHAPE, DIM]):
+    shape = tensor.shape
+    if isinstance(dims, (mtf.Dimension, str)):
+        dims = [dims]
+    dims = dims_from_shape(dims)
+    for d in dims:
+        shape = shape - [get_dim(shape, d)]
+    return mtf.reshape(tensor, shape)
+
+
 def get_dim(shape: typing.Union[mtf.Tensor, mtf.Shape, typing.List[mtf.Dimension]],
-            dim: typing.Union[mtf.Dimension, str],
+            dim: DIM,
             index=False) -> typing.Union[int, mtf.Dimension]:
     """
     Attempts to get a dimension of a tensor. Raises a ValueError if the dimension does not exist.
