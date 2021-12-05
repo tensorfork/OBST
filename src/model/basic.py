@@ -84,7 +84,7 @@ def product_key_memory(args: BlockArgs):
     features = [args.params.pkm_dim, args.params.key_dim]
     assignment = linear(args, old, [args.params.head_dim] + features)
     assignment = norm(args(assignment), features)
-    assignment -= mtf.stop_gradient(reduce_max(assignment))
+    assignment -= stop_gradient(reduce_max(assignment))
     assignment = exp(assignment)
     normalizer = reduce_sum(assignment, output_shape=assignment.shape - [args.params.key_dim])
     normalizer = einsum(unbind(normalizer, args.params.pkm_dim), output_shape=normalizer.shape - args.params.pkm_dim)
