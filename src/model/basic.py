@@ -9,8 +9,8 @@ from .embedding import gather_embed
 from .normalization import norm
 from ..dataclass import BlockArgs
 from ..mtf_wrapper import (dropout as utils_dropout, sigmoid, exp, reduce_max, reduce_sum, einsum, reciprocal, reshape,
-                           multiply, reduce_mean)
-from ..utils_mtf import linear_shapes, anonymize_shape, squeeze, unbind
+                           multiply, reduce_mean, stop_gradient, pow as mtf_pow)
+from ..utils_mtf import linear_shapes, anonymize_shape, unbind
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -84,16 +84,16 @@ def product_key_memory(args: BlockArgs):
     features = [args.params.pkm_dim, args.params.key_dim]
     assignment = linear(args, old, [args.params.head_dim] + features)
     assignment = norm(args(assignment), features)
-    assignment -= mtf.stop_gradient(reduce_max(assignment))
-    assignment = mtf.exp(assignment)
-    normalizer = mtf.reduce_sum(assignment, output_shape=assignment.shape - [args.params.key_dim])
-    normalizer = mtf.einsum(unbind(normalizer, args.params.pkm_dim),
-                            output_shape=normalizer.shape - args.params.pkm_dim)
+    assignment -= stop_gradient(reduce_max(assignment))
+    assignment = exp(assignment)
+    normalizer = reduce_sum(assignment, output_shape=assignment.shape - [args.params.key_dim])
+    normalizer = einsum(unbind(normalizer, args.params.pkm_dim), output_shape=normalizer.shape - args.params.pkm_dim)
 
     val, idx = mtf.top_1(assignment, args.params.key_dim)
-    idx = [k * args.params.features_per_head ** i for i, k in enumerate(unbind(idx, args.params.pkm_dim))]
-    idx = squeeze(mtf.add_n(idx), args.params.pkm_dim)
-    val = squeeze(mtf.add_n(unbind(val, args.params.pkm_dim)) / normalizer, args.params.pkm_dim)
+    idx = mtf.einsum([mtf_pow(args.params.features_per_head,
+                              mtf.range(normalizer.mesh, args.params.pkm_dim, dtype=normalizer.dtype)),
+                      idx], idx.shape - args.params.pkm_dim)
+    val = mtf.reduce_sum(val, args.params.pkm_dim) / normalizer
     out = gather_embed(args(idx), [args.params.product_key_value_dim] + args.params.feature_dims,
                        [args.params.head_dim])
     return out * val
