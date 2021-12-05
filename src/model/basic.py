@@ -87,24 +87,24 @@ def product_key_memory(args: BlockArgs):
     assignment = linear(args, old, [args.params.head_dim] + features)
     assignment = norm(args(assignment), features)
     val0, idx0 = mtf.top_k(assignment, args.params.factorized_product_key_value_dim,
-                           args.params.product_key_value_key_dim)
+                           args.params.pkm_key_dim)
     val1, idx1 = mtf.top_k(-assignment, args.params.factorized_product_key_value_dim,
-                           args.params.product_key_value_key_dim)
+                           args.params.pkm_key_dim)
     val1 = -val1
 
     new_idx1 = mtf.slice(idx1, 0, 1, two.name) * args.params.factorized_product_key_value
-    new_idx1 += anonymize_shape(mtf.slice(idx1, 1, 1, two.name), args.params.product_key_value_key_dim)
+    new_idx1 += anonymize_shape(mtf.slice(idx1, 1, 1, two.name), args.params.pkm_key_dim)
     new_val1 = mtf.slice(val1, 0, 1, two.name)
-    new_val1 *= anonymize_shape(mtf.slice(val1, 1, 1, two.name), args.params.product_key_value_key_dim)
+    new_val1 *= anonymize_shape(mtf.slice(val1, 1, 1, two.name), args.params.pkm_key_dim)
 
     new_idx0 = mtf.slice(idx0, 0, 1, two.name) * args.params.factorized_product_key_value
-    new_idx0 += anonymize_shape(mtf.slice(idx0, 1, 1, two.name), args.params.product_key_value_key_dim)
+    new_idx0 += anonymize_shape(mtf.slice(idx0, 1, 1, two.name), args.params.pkm_key_dim)
     new_val0 = mtf.slice(val0, 0, 1, two.name)
-    new_val0 *= anonymize_shape(mtf.slice(val0, 1, 1, two.name), args.params.product_key_value_key_dim)
+    new_val0 *= anonymize_shape(mtf.slice(val0, 1, 1, two.name), args.params.pkm_key_dim)
 
     new_val0 = mtf.exp(new_val0 - mtf.stop_gradient(reduce_max(new_val0)))
     new_val1 = mtf.exp(new_val1 - mtf.stop_gradient(reduce_max(new_val1)))
-    reduced = new_val0 - args.params.product_key_value_key_dim - anonymize_dim(args.params.product_key_value_key_dim)
+    reduced = new_val0.shape - args.params.pkm_key_dim - anonymize_dim(args.params.pkm_key_dim)
     normalizer = mtf.reduce_sum(new_val0, output_shape=reduced) + mtf.reduce_sum(new_val1, output_shape=reduced)
 
     new_val0 /= normalizer

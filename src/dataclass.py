@@ -261,7 +261,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
 
         self.product_key_value_vectors = self.factorized_product_key_value ** 2
         self.product_key_value_dim = mtf.Dimension("product_key_value_dim", self.product_key_value_vectors)
-        self.product_key_value_key_dim = mtf.Dimension("product_key_value_key_dim", self.product_key_value_keys)
+        self.pkm_key_dim = mtf.Dimension("pkm_key_dim", self.product_key_value_keys)
         self.factorized_product_key_value_dim = mtf.Dimension("factorized_product_key_value",
                                                               self.factorized_product_key_value)
         self.head_dim = mtf.Dimension("heads", self.heads)
