@@ -106,7 +106,7 @@ def normal_var(args: BlockArgs, shape: SHAPE, stddev: float = 0.02, mean: float 
 
 
 def linear(args: BlockArgs, old: typing.List[mtf.Dimension], new: typing.List[mtf.Dimension]) -> mtf.Tensor:
-    return einsum([args.tensor, orthogonal_var(args, old + new)],
+    return einsum([args.tensor, orthogonal_var(args, old + new, old)],
                   deduplicate((args.tensor.shape - old).dims + new))
 
 
