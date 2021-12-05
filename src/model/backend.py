@@ -22,7 +22,7 @@ class OrthogonalInit(Initializer):
         self.params = params
         self.sizes = [d.size for d in shape]
         self.seed = random.randint(0, 2 ** 32)
-        sizes = [d.size for d in mtf.Shape(shape) - fan_in_dims]
+        sizes = [d.size for d in mtf.Shape(shape)]
         fan_in = int(np.prod([d.size for d in (get_fan_in(params, shape) if fan_in_dims is None else fan_in_dims)]))
         fan_out = np.prod(sizes) // fan_in
         self.transpose = transpose = fan_out > fan_in
