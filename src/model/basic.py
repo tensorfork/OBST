@@ -115,8 +115,10 @@ def product_key_memory(args: BlockArgs):
     new_idx0 = mtf.reshape(new_idx0, reduced + [dim])
     new_val1 = mtf.reshape(new_val1, reduced + [dim])
     new_idx1 = mtf.reshape(new_idx1, reduced + [dim])
-    new_val = concat([new_val0, new_val1], dim)
-    new_idx = concat([new_idx0, new_idx1], dim)
+    val = concat([new_val0, new_val1], dim)
+    idx = concat([new_idx0, new_idx1], dim)
+    new_val, new_idx = mtf.top_k(val, dim, args.params.pkm_key_dim)
+    new_idx = mtf.gather(idx, new_idx, dim)
 
     out = gather_embed(args(new_idx), [args.params.product_key_value_dim] + args.params.feature_dims,
                        [args.params.head_dim])
