@@ -7,6 +7,8 @@ transformers
 tpunicorn
 google-auth
 google-api-python-client
+cython
+pysimdjson
 
 absl-py
 ftfy
