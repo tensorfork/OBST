@@ -156,8 +156,8 @@ def place_dataloader(params: ModelParameter, input_fn):
                 dataset = dataset.skip(params.current_step // params.macro_batching)
             dataset = dataset.prefetch(params.buffer_size)
             options = tf.data.Options()
-            options.autotune.enabled = True
-            options.deterministic = not params.train
+            # options.autotune.enabled = True
+            # options.deterministic = not params.train
             options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.AUTO
             options.experimental_optimization.filter_fusion = True
             options.experimental_optimization.apply_default_optimizations = True
