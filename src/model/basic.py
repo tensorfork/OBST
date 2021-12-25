@@ -95,7 +95,7 @@ def product_key_memory(args: BlockArgs):
     idx = mtf.einsum([mtf.cast(exp(math.log(args.params.features_per_head) *
                                    mtf.range(normalizer.mesh, args.params.pkm_dim, dtype=normalizer.dtype)),
                                tf.int32), idx], output_shape=idx.shape - args.params.pkm_dim)
-    val = mtf.reduce_sum(val, reduced_dim=args.params.pkm_dim) / normalizer
+    val = einsum(unbind(val, args.params.pkm_dim), output_shape=val.shape - args.params.pkm_dim) / normalizer
     out = gather_embed(args(idx), [args.params.product_key_value_dim] + args.params.feature_dims,
                        [args.params.head_dim])
     return out * val
