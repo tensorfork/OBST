@@ -10,7 +10,7 @@ from .embedding import gather_embed
 from .normalization import norm
 from ..dataclass import BlockArgs
 from ..mtf_wrapper import (dropout as utils_dropout, sigmoid, exp, reduce_max, reduce_sum, einsum, reciprocal, reshape,
-                           multiply, reduce_mean, stop_gradient)
+                           multiply, stop_gradient)
 from ..utils_mtf import linear_shapes, anonymize_shape, unbind, replace_dim
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
@@ -89,7 +89,7 @@ def transpose_sequence_features(args: BlockArgs):
 
 
 def reduced_half_linear(args: BlockArgs):
-    return group_linear(args(reduce_mean(args.tensor, reduced_dim=args.params.head_dim)))
+    return group_linear(args(reduce_sum(args.tensor, reduced_dim=args.params.head_dim)))
 
 
 def product_key_memory(args: BlockArgs):
