@@ -11,7 +11,7 @@ from .normalization import norm
 from ..dataclass import BlockArgs
 from ..mtf_wrapper import (dropout as utils_dropout, sigmoid, exp, reduce_max, reduce_sum, einsum, reciprocal, reshape,
                            multiply, stop_gradient)
-from ..utils_mtf import linear_shapes, anonymize_shape, unbind, replace_dim
+from ..utils_mtf import linear_shapes, anonymize_shape, unbind, replace_dim, anonymize_dim
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -22,7 +22,7 @@ def rezero(args: BlockArgs) -> mtf.Tensor:
     return args.tensor * get_var(args, [], tf.constant_initializer(0))
 
 
-def dropout(args: BlockArgs):
+def dropout(args: BlockArgs) -> mtf.Tensor:
     keep = 1
     for extra in args.name_extras:
         if extra.startswith('dropout_rate'):
@@ -57,11 +57,11 @@ def activated_linear(args: BlockArgs, prefix: str) -> mtf.Tensor:
     return out
 
 
-def activated_linear_in(args: BlockArgs):
+def activated_linear_in(args: BlockArgs) -> mtf.Tensor:
     return activated_linear(args, 'in:')
 
 
-def activated_linear_out(args: BlockArgs):
+def activated_linear_out(args: BlockArgs) -> mtf.Tensor:
     return activated_linear(args, 'out:')
 
 
@@ -69,17 +69,16 @@ def feed_forward(args: BlockArgs) -> mtf.Tensor:
     return activated_linear_out(args(activated_linear_in(args)))
 
 
-def group_linear(args: BlockArgs):
-    return reshape(linear(args('group'), args.params.feature_dims,
-                          anonymize_shape(args.params.feature_dims, args.params.key_dim)),
-                   args.tensor.shape - args.params.feature_dims + args.params.feature_dims)
+def group_linear(args: BlockArgs) -> mtf.Tensor:
+    anonymous_key = anonymize_shape(args.params.feature_dims, args.params.key_dim)
+    return reshape(linear(args('group'), args.params.feature_dims, anonymous_key), args.tensor.shape)
 
 
-def sum_heads(args: BlockArgs):
+def sum_heads(args: BlockArgs) -> mtf.Tensor:
     return reduce_sum(args.tensor, reduced_dim=args.params.head_dim)
 
 
-def transpose_sequence_features(args: BlockArgs):
+def transpose_sequence_features(args: BlockArgs) -> mtf.Tensor:
     shape = list(args.tensor.shape)
     intermediate = mtf.Dimension("intermediate", 1)
     shape = replace_dim(shape, intermediate, args.params.sequence_dim)
@@ -88,15 +87,15 @@ def transpose_sequence_features(args: BlockArgs):
     return reshape(args.tensor, shape)
 
 
-def reduced_half_linear(args: BlockArgs):
+def reduced_half_linear(args: BlockArgs) -> mtf.Tensor:
     return group_linear(args(reduce_sum(args.tensor, reduced_dim=args.params.head_dim)))
 
 
-def product_key_memory(args: BlockArgs):
-    args = args(activated_linear_in(args))
-    old, new = linear_shapes(args)
-    features = [args.params.pkm_dim, args.params.key_dim]
-    assignment = linear(args, old, [args.params.head_dim] + features)
+def product_key_memory(args: BlockArgs) -> mtf.Tensor:
+    anonymous_key = anonymize_dim(args.params.key_dim)
+    features = [args.params.pkm_dim, anonymous_key]
+    assignment = linear(args, linear_shapes(args).old, [args.params.head_dim] + features)
+    assignment = replace_dim(assignment, args.params.key_dim, anonymous_key)  # No-op. Just for MTF propagation
     assignment = norm(args(assignment), features)
     assignment -= stop_gradient(reduce_max(assignment,
                                            output_shape=assignment.shape - [args.params.pkm_dim, args.params.key_dim]))
@@ -112,3 +111,15 @@ def product_key_memory(args: BlockArgs):
     out = gather_embed(args(idx), [args.params.product_key_value_dim] + args.params.feature_dims,
                        [args.params.head_dim])
     return out * val
+
+
+def feed_forward_product_key_memory(args: BlockArgs) -> mtf.Tensor:
+    return product_key_memory(args(activated_linear_in(args)))
+
+
+def bottleneck_group_linear(args: BlockArgs) -> mtf.Tensor:
+    args = args(activated_linear_in(args))
+    args = args('group')
+    args = args(activated_linear(args, 'mid:'))
+    return activated_linear_out(args)
+
