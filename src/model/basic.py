@@ -11,7 +11,7 @@ from .normalization import norm
 from ..dataclass import BlockArgs
 from ..mtf_wrapper import (dropout as utils_dropout, sigmoid, exp, reduce_max, reduce_sum, einsum, reciprocal, reshape,
                            multiply, reduce_mean, stop_gradient)
-from ..utils_mtf import linear_shapes, anonymize_shape, unbind
+from ..utils_mtf import linear_shapes, anonymize_shape, unbind, replace_dim
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
@@ -73,6 +73,19 @@ def group_linear(args: BlockArgs):
     return reshape(linear(args('group'), args.params.feature_dims,
                           anonymize_shape(args.params.feature_dims, args.params.key_dim)),
                    args.tensor.shape - args.params.feature_dims + args.params.feature_dims)
+
+
+def sum_heads(args: BlockArgs):
+    return reduce_sum(args.tensor, reduced_dim=args.params.head_dim)
+
+
+def transpose_sequence_features(args: BlockArgs):
+    shape = list(args.tensor.shape)
+    intermediate = mtf.Dimension("intermediate", 1)
+    shape = replace_dim(shape, intermediate, args.params.sequence_dim)
+    shape = replace_dim(shape, args.params.sequence_dim, args.params.key_dim)
+    shape = replace_dim(shape, args.params.key_dim, intermediate)
+    return reshape(args.tensor, shape)
 
 
 def reduced_half_linear(args: BlockArgs):

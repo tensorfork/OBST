@@ -4,7 +4,8 @@ import mesh_tensorflow as mtf
 import tensorflow as tf
 
 from .activation import activate
-from .basic import dropout, feed_forward, rezero, group_linear, product_key_memory, reduced_half_linear
+from .basic import dropout, feed_forward, rezero, group_linear, product_key_memory, reduced_half_linear, \
+    transpose_sequence_features, sum_heads
 from .convolution import convolution
 from .normalization import norm
 from .spatial import attention
@@ -65,4 +66,6 @@ LAYER_FUNCTIONS = {'feed_forward': feed_forward,
                    'split_path': split_path,
                    'product_key_memory': product_key_memory,
                    'reduced_half_linear': reduced_half_linear,
+                   'transpose_sequence_features': transpose_sequence_features,
+                   'sum_heads': sum_heads
                    }
