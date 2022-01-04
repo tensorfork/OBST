@@ -26,6 +26,11 @@ class LearningRateConfig:
         self.factor = factor
 
 
+class TensorStorage:
+    def __init__(self):
+        self.text_input_embedding: typing.Optional[mtf.Tensor] = None
+
+
 class ModelParameter(typing.Dict[str, typing.Any]):
     def __init__(self, config: typing.Dict[str, typing.Any]):
         super().__init__()
@@ -37,6 +42,8 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.use_video = True
         self.save_graph = False
         self.use_language = True
+        self.contrastive_across_samples = False
+        self.contrastive_across_token_embeddings = False
         self.input_dropout = 0.
         self.output_offset = 1
         self.weight_standardisation = True
@@ -196,6 +203,8 @@ class ModelParameter(typing.Dict[str, typing.Any]):
 
             self.learning_rate_config = {key: LearningRateConfig(**config) for key, config in
                                          self.learning_rate_config.items()}
+
+            self.tensor_storage = TensorStorage()
 
         self.multi_loss_strategy = self.multi_loss_strategy.lower()
         if self.multi_loss_strategy not in ["linear", "pcgrad", "mgda"]:

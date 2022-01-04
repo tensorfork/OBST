@@ -6,7 +6,7 @@ import tensorflow as tf
 from .activation import activate
 from .backend import linear, linear_from_features, linear_to_features
 from .basic import activated_linear
-from .embedding import embed, gather_embed
+from .embedding import embed, gather_embed, Gather
 from .frontend import block_part_fn
 from .momentumnet import MomentumOperation
 from .normalization import norm
@@ -14,7 +14,7 @@ from .revnet import RevGradOp
 from ..dataclass import BlockArgs, BlockConfig, ModelParameter
 from ..mtf_wrapper import (add_n, cast, constant_scalar, dropout, einsum, ones, reciprocal, reduce_sum, sigmoid, sign,
                            zeros_like, mod, floordiv, equal, argmax, softmax_cross_entropy_with_logits,
-                           recompute_grad, add, negative, divide)
+                           recompute_grad, divide, square, sqrt)
 from ..utils_core import scoped
 from ..utils_mtf import concat, utils_slice, weighted_add
 
@@ -77,6 +77,7 @@ def _input(params: ModelParameter,
         intermediate = params.intermediate[0]
         intermediate = mtf.Dimension(intermediate.name, int(intermediate.size * params.vocab_weight_factorization))
         txt = gather_embed(base_args(txt_src, params.token_embedding), [params.vocab_dim, intermediate])
+        params.tensor_storage.text_input_embedding = txt.operation.inputs[1]
         txt = dropout(txt, params.train, rate=params.input_dropout)
         txt = linear_to_features(base_args(txt), [params.token_patch_dim, intermediate])
 
@@ -134,7 +135,7 @@ def _output(params: ModelParameter, out: mtf.Tensor, spatial_ctx: mtf.Dimension
     base_args = BlockArgs(params, out, [''])
     token_out = frame_out = None
 
-    if params.use_language:
+    if params.use_language and not params.contrastive_across_token_embeddings and not params.contrastive_across_samples:
         token_out = utils_slice(out, 0, params.language_token_patch, spatial_ctx)
         for config_idx, config in enumerate(params.output_block_config):
             token_out = block_part_fn(params, config, token_out, f'lang_out{config_idx}')
@@ -161,7 +162,26 @@ def _loss(params: ModelParameter, frame_out: typing.Optional[mtf.Tensor], token_
                                                typing.Optional[mtf.Tensor], typing.Optional[mtf.Tensor]]:
     token_loss = accuracy = video_loss = None
     if params.use_language:
-        token_loss = softmax_cross_entropy_with_logits(params, token_out, txt_tgt)
+        if params.contrastive_across_samples or params.contrastive_across_token_embeddings:
+            token_out /= sqrt(reduce_sum(square(token_out), reduced_dim=params.feature_dims))
+        if params.contrastive_across_samples:
+            sum_across_samples = reduce_sum(token_out, reduced_dim=params.sequence_dim)
+            sum_across_batch = reduce_sum(token_out, reduced_dim=params.batch_dim)
+            token_loss = einsum([sum_across_batch, sum_across_batch], output_shape=[]) / params.train_batch_size
+            token_loss -= einsum([sum_across_samples, sum_across_samples], output_shape=[]
+                                 ) / params.sequence_length
+            token_loss /= token_out.size
+        elif params.contrastive_across_token_embeddings:
+            token_loss = einsum([token_out, params.tensor_storage.text_input_embedding], output_shape=[])
+            gather_out = Gather(BlockArgs(params, txt_tgt, ['']), params.tensor_storage.text_input_embedding,
+                                [params.head_dim])
+            gather_out = einsum([token_out, gather_out.outputs[0]], output_shape=[]) * 2
+            token_loss -= gather_out  # Maximize your token, minimize all others
+            token_loss /= token_out.size * params.vocab_size
+            # TODO: This is efficient BUT fully linear, which might give issues. As it stands, it can minimize one
+            #  easy class (for example, set z's probability to -inf) and get the same loss as with a good model
+        else:
+            token_loss = softmax_cross_entropy_with_logits(params, token_out, txt_tgt)
         loss_list.append(token_loss)
         if params.calc_accuracy:
             accuracy = divide(reduce_sum(cast(equal(argmax(token_out, params.vocab_dim), txt_tgt),
