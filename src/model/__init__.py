@@ -168,9 +168,8 @@ def _loss(params: ModelParameter, frame_out: typing.Optional[mtf.Tensor], token_
             sum_across_samples = reduce_sum(token_out, reduced_dim=params.sequence_dim)
             sum_across_batch = reduce_sum(token_out, reduced_dim=params.batch_dim)
             token_loss = einsum([sum_across_batch, sum_across_batch], output_shape=[]) / params.train_batch_size
-            token_loss -= einsum([sum_across_samples, sum_across_samples], output_shape=[]
-                                 ) / params.sequence_length
-            token_loss /= token_out.size
+            token_loss -= einsum([sum_across_samples, sum_across_samples], output_shape=[]) / params.sequence_length
+            token_loss /= params.train_batch_size * params.sequence_length
         elif params.contrastive_across_token_embeddings:
             token_loss = einsum([token_out, params.tensor_storage.text_input_embedding], output_shape=[])
             gather_out = Gather(BlockArgs(params, txt_tgt, ['']), params.tensor_storage.text_input_embedding,
