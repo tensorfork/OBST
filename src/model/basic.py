@@ -79,16 +79,16 @@ def sum_heads(args: BlockArgs) -> mtf.Tensor:
 
 
 def transpose_sequence_features(args: BlockArgs) -> mtf.Tensor:
-    shape = list(args.tensor.shape)
-    intermediate = mtf.Dimension("intermediate", 1)
-    shape = replace_dim(shape, intermediate, args.params.sequence_dim)
-    shape = replace_dim(shape, args.params.sequence_dim, args.params.key_dim)
-    shape = replace_dim(shape, args.params.key_dim, intermediate)
-    return mtf.transpose(args.tensor, shape)
+    assert args.params.features_per_head == args.params.sequence_length, "ToDo: Support other shapes"
+    tensor = mtf.rename_dimension(args.tensor, args.params.sequence_dim.name, "intermediate")
+    tensor = mtf.rename_dimension(tensor, args.params.key_dim.name, args.params.sequence_dim.name)
+    tensor = mtf.rename_dimension(tensor, "intermediate", args.params.key_dim.name)
+    return tensor
 
 
 def reduced_half_linear(args: BlockArgs) -> mtf.Tensor:
     return group_linear(args(reduce_sum(args.tensor, reduced_dim=args.params.head_dim)))
+
 
 def product_key_memory(args: BlockArgs) -> mtf.Tensor:
     anonymous_key = anonymize_dim(args.params.key_dim)
@@ -121,4 +121,3 @@ def bottleneck_group_linear(args: BlockArgs) -> mtf.Tensor:
     args = args('group')
     args = args(activated_linear(args, 'mid:'))
     return activated_linear_out(args)
-
