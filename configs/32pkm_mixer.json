@@ -6,16 +6,23 @@
         {
             "layer": [
                 "norm-shift-scale-features-group",
+                "product_key_memory-absolute-shared",
+                "norm-shift-scale-features-group",
+                "activation-relu",
+                "sum_heads",
                 "product_key_memory-absolute-shared"
             ]
         },
         {
             "layer": [
+                "transpose_sequence_features",
                 "norm-shift-scale-features-group",
-                "attention-biased_attention_map-absolute-input_as_value",
+                "product_key_memory-absolute-shared",
                 "norm-shift-scale-features-group",
-                "activation-gelu",
-                "attention-biased_attention_map-absolute-input_as_value"
+                "activation-relu",
+                "sum_heads",
+                "product_key_memory-absolute-shared",
+                "transpose_sequence_features"
             ]
         }
     ],
@@ -42,8 +49,6 @@
     "vocab_size": 256,
     "model_mode": "gpt",
     "use_language": true,
-    "batch_splits": 4,
-    "head_splits": 8,
     "adaptive_gradient_clipping": false,
     "gradient_clip": 1,
     "learning_rate": 0.01,
@@ -56,7 +61,7 @@
     "weight_standardisation": false,
     "macro_batching": 1,
     "macro_batch_loss_smoothing": true,
-    "model_path": "gs://ggpt4/runs/aa/activation/char-pkm-features=256-seq=512-sm3",
+    "model_path": "gs://ggpt4/runs/aa/activation/char-pkm-features=256-seq=512-sm3-pkm-mixer-2",
     "steps_per_checkpoint": 256,
     "use_checkpointing": false,
     "calculation_dtype": "bfloat16",
