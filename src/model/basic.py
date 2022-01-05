@@ -118,6 +118,6 @@ def feed_forward_product_key_memory(args: BlockArgs) -> mtf.Tensor:
 
 def bottleneck_group_linear(args: BlockArgs) -> mtf.Tensor:
     args = args(activated_linear_in(args))
-    args = args('group')
+    args.name_extras.extend(['group', 'mid:group', 'out:group'])
     args = args(activated_linear(args, 'mid:'))
     return activated_linear_out(args)
