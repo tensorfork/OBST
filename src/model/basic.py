@@ -84,12 +84,11 @@ def transpose_sequence_features(args: BlockArgs) -> mtf.Tensor:
     shape = replace_dim(shape, intermediate, args.params.sequence_dim)
     shape = replace_dim(shape, args.params.sequence_dim, args.params.key_dim)
     shape = replace_dim(shape, args.params.key_dim, intermediate)
-    return reshape(args.tensor, shape)
+    return mtf.transpose(args.tensor, shape)
 
 
 def reduced_half_linear(args: BlockArgs) -> mtf.Tensor:
     return group_linear(args(reduce_sum(args.tensor, reduced_dim=args.params.head_dim)))
-
 
 def product_key_memory(args: BlockArgs) -> mtf.Tensor:
     anonymous_key = anonymize_dim(args.params.key_dim)
