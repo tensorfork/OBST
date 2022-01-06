@@ -96,8 +96,10 @@ def product_key_memory(args: BlockArgs) -> mtf.Tensor:
     assignment = linear(args, linear_shapes(args).old, [args.params.head_dim] + features)
     assignment = replace_dim(assignment, args.params.key_dim, anonymous_key)  # No-op. Just for MTF propagation
     assignment = norm(args(assignment), features)
-    assignment -= stop_gradient(reduce_max(assignment,
-                                           output_shape=assignment.shape - [args.params.pkm_dim, args.params.key_dim]))
+    assignment = mtf.cast(assignment, tf.float64)
+    normalizer = reduce_max(assignment, reduced_dim=args.params.key_dim)
+    normalizer = reduce_sum(normalizer, reduced_dim=args.params.pkm_dim)
+    assignment -= stop_gradient(normalizer)
     assignment = exp(assignment)
     normalizer = reduce_sum(assignment, output_shape=assignment.shape - [args.params.key_dim])
     normalizer = einsum(unbind(normalizer, args.params.pkm_dim), output_shape=normalizer.shape - args.params.pkm_dim)
@@ -107,6 +109,7 @@ def product_key_memory(args: BlockArgs) -> mtf.Tensor:
                                    mtf.range(normalizer.mesh, args.params.pkm_dim, dtype=normalizer.dtype)),
                                tf.int32), idx], output_shape=idx.shape - args.params.pkm_dim)
     val = einsum(unbind(val, args.params.pkm_dim), output_shape=val.shape - args.params.pkm_dim) / normalizer
+    val = mtf.cast(val, args.params.variable_dtype.activation_dtypex)
     out = gather_embed(args(idx), [args.params.product_key_value_dim] + args.params.feature_dims,
                        [args.params.head_dim])
     return out * val
