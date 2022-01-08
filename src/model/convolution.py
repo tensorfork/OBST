@@ -130,4 +130,4 @@ def convolution(args: BlockArgs):
     convolution_size = 16
     if len(args) > 0 and args[-1].isdigit():
         convolution_size = int(args[-1])
-    return ConvolutionForward(args, dim, convolution_size, ).outputs[0]
+    return ConvolutionForward(args, dim, convolution_size, idx in args.params.masked_attention_dimensions).outputs[0]
