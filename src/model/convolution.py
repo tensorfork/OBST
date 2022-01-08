@@ -126,6 +126,7 @@ class ConvolutionFilterBackward(mtf.Operation):
 
 
 def convolution(args: BlockArgs):
+    raise ValueError("Convolution is currently broken")
     idx, dim = get_attention_dim(args)
     convolution_size = 16
     if len(args) > 0 and args[-1].isdigit():
