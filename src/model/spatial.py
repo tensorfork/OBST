@@ -22,10 +22,15 @@ def _masked_map(args: BlockArgs) -> typing.Tuple[mtf.Tensor, typing.Union[mtf.Te
     return bias, compare_range(args.params, dim, tmp, greater_equal) if is_masked(args) else 1
 
 
+def _cumsum_grad(dy: mtf.Tensor, dim: int) -> mtf.Tensor:
+    return mtf.cwise(lambda x: tf.reverse(tf.cumsum(tf.reverse(x, dim), dim), dim), [dy],
+                     name=random_name('cumsum_grad'))
+
+
 def cumsum(args: BlockArgs) -> mtf.Tensor:
     dim = args.tensor.shape.dims.index(get_attention_dim(args).dim)
     return mtf.cwise(lambda x: tf.cumsum(x, dim), [args.tensor], name=random_name("cumsum"),
-                     grad_function=lambda _, dy: [tf.reverse(tf.cumsum(tf.reverse(dy, dim), dim), dim)])
+                     grad_function=lambda _, dy: [_cumsum_grad(dy, dim)])
 
 
 def cummean(args: BlockArgs) -> mtf.Tensor:
