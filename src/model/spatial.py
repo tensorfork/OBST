@@ -7,21 +7,28 @@ from .basic import activated_linear_in, activated_linear_out
 from .embedding import embed
 from ..dataclass import BlockArgs
 from ..mtf_wrapper import einsum, greater_equal, multiply, less, exp, reduce_max, reduce_sum
-from ..utils_mtf import (anonymize, anonymize_dim, compare_range, get_attention_dim, is_masked, linear_shapes)
+from ..utils_mtf import (anonymize, anonymize_dim, compare_range, get_attention_dim, is_masked, linear_shapes,
+                         random_name)
 
 ATTENTION_DIM = typing.NamedTuple("AttentionDim", (('index', int), ('dim', mtf.Dimension)))
 
 tf1 = tf.compat.v1
 
 
-def _masked_map(args: BlockArgs):
+def _masked_map(args: BlockArgs) -> typing.Tuple[mtf.Tensor, typing.Union[mtf.Tensor, int]]:
     dim = get_attention_dim(args).dim
     tmp = anonymize_dim(dim)
     bias = embed(args, [args.params.head_dim, dim, tmp])
     return bias, compare_range(args.params, dim, tmp, greater_equal) if is_masked(args) else 1
 
 
-def attention(args: BlockArgs):
+def cumsum(args: BlockArgs) -> mtf.Tensor:
+    dim = args.tensor.shape.dims.index(args.params.sequence_dim)
+    return mtf.cwise(lambda x: tf.cumsum(x, dim), [args.tensor], name=random_name("cumsum"),
+                     grad_function=lambda _, dy: tf.reverse(tf.cumsum(tf.reverse(dy, dim), dim), dim))
+
+
+def attention(args: BlockArgs) -> mtf.Tensor:
     args.params.attention_idx += 1
     if "dot_product" in args or "input_as_value" not in args:
         base = args(activated_linear_in(args))

@@ -8,7 +8,7 @@ from .basic import dropout, feed_forward, rezero, group_linear, feed_forward_pro
     transpose_sequence_features, sum_heads, bottleneck_group_linear, product_key_memory
 from .convolution import convolution
 from .normalization import norm
-from .spatial import attention
+from .spatial import attention, cumsum
 from ..dataclass import BlockArgs, BlockConfig, ModelParameter
 from ..mtf_wrapper import add, multiply
 from ..utils_core import scoped
@@ -57,6 +57,7 @@ def split_path(args: BlockArgs) -> mtf.Tensor:
 
 LAYER_FUNCTIONS = {'feed_forward': feed_forward,
                    'attention': attention,
+                   'cumsum': cumsum,
                    'norm': norm,
                    'rezero': rezero,
                    'activation': activate,
