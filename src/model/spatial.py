@@ -23,9 +23,14 @@ def _masked_map(args: BlockArgs) -> typing.Tuple[mtf.Tensor, typing.Union[mtf.Te
 
 
 def cumsum(args: BlockArgs) -> mtf.Tensor:
-    dim = args.tensor.shape.dims.index(args.params.sequence_dim)
+    dim = args.tensor.shape.dims.index(get_attention_dim(args).dim)
     return mtf.cwise(lambda x: tf.cumsum(x, dim), [args.tensor], name=random_name("cumsum"),
                      grad_function=lambda _, dy: tf.reverse(tf.cumsum(tf.reverse(dy, dim), dim), dim))
+
+
+def cummean(args: BlockArgs) -> mtf.Tensor:
+    return cumsum(args) / (1 + mtf.range(args.tensor.mesh, get_attention_dim(args).dim, dtype=args.tensor.dtype,
+                                         name=random_name("cummean")))
 
 
 def attention(args: BlockArgs) -> mtf.Tensor:
