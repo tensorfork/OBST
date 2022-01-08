@@ -83,7 +83,7 @@ def transpose_sequence_features(args: BlockArgs) -> mtf.Tensor:
     tensor = mtf.rename_dimension(args.tensor, args.params.sequence_dim.name, "intermediate")
     tensor = mtf.rename_dimension(tensor, args.params.key_dim.name, args.params.sequence_dim.name)
     tensor = mtf.rename_dimension(tensor, "intermediate", args.params.key_dim.name)
-    return tensor
+    return mtf.transpose(tensor, args.tensor.shape)
 
 
 def reduced_half_linear(args: BlockArgs) -> mtf.Tensor:
