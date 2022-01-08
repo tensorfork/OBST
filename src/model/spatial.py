@@ -23,7 +23,7 @@ def _masked_map(args: BlockArgs) -> typing.Tuple[mtf.Tensor, typing.Union[mtf.Te
 
 
 def _cumsum_grad(dy: mtf.Tensor, dim: int) -> mtf.Tensor:
-    return mtf.cwise(lambda x: tf.reverse(tf.cumsum(tf.reverse(x, dim), dim), dim), [dy],
+    return mtf.cwise(lambda x: tf.cumsum(x, dim, reverse=True), [dy],
                      name=random_name('cumsum_grad'))
 
 
