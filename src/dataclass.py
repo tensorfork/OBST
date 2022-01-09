@@ -152,6 +152,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.debug_gradients = False
         self.use_initial_position_embedding = False
         self.intermediate_feed_forward_multiplier = None
+        self.intermediate_feed_forward_multiplier_multiplier = None
         self.own_color = "\x1b[32;1m"
         self.other_color = "\x1b[0m"
         self.scale_by_depth = True
@@ -225,6 +226,9 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         if self.use_video and (self.frame_width * self.frame_height // self.patch_size) % self.experts:
             raise ValueError("Frame size has to be divisible by number of experts. Set \"experts\" to 1 if you're not "
                              "using MoE")
+        if self.intermediate_feed_forward_multiplier_multiplier is not None:
+            self.intermediate_feed_forward_multiplier = \
+                self.group_linear_factor * self.intermediate_feed_forward_multiplier_multiplier / self.heads
         if self.intermediate_feed_forward_multiplier is None:
             self.intermediate_feed_forward_multiplier = self.group_linear_factor / self.heads
         if not self.use_video and self.language_token_per_frame != self.sequence_length:

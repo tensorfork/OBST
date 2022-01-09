@@ -19,8 +19,8 @@
             ]
         }
     ],
-    "group_linear_factor": 1,
-    "intermediate_feed_forward_multiplier": 0.03125,
+    "group_linear_factor": 2,
+    "intermediate_feed_forward_multiplier_multiplier": 0.5,
     "depth": 32,
     "use_initial_position_embedding": false,
     "sequence_length": 512,
