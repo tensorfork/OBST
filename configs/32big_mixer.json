@@ -6,23 +6,16 @@
         {
             "layer": [
                 "norm-shift-scale-features-group",
-                "product_key_memory-absolute-shared",
-                "norm-shift-scale-features-group",
-                "activation-relu",
-                "sum_heads",
-                "product_key_memory-absolute-shared"
+                "bottleneck_group_linear-in:relu-mid:relu-mid:norm-mid:shift-mid:scale-mid:features"
             ]
         },
         {
             "layer": [
-                "transpose_sequence_features",
                 "norm-shift-scale-features-group",
-                "product_key_memory-absolute-shared",
+                "attention-biased_attention_map-absolute-input_as_value-shared",
                 "norm-shift-scale-features-group",
-                "activation-relu",
-                "sum_heads",
-                "product_key_memory-absolute-shared",
-                "transpose_sequence_features"
+                "activation-gelu",
+                "attention-biased_attention_map-absolute-input_as_value-shared"
             ]
         }
     ],
@@ -30,13 +23,13 @@
     "intermediate_feed_forward_multiplier": 0.03125,
     "depth": 32,
     "use_initial_position_embedding": false,
-    "sequence_length": 256,
-    "features_per_head": 256,
+    "sequence_length": 512,
+    "features_per_head": 512,
     "heads": 8,
     "use_random_dataloader": false,
     "shuffle_buffer": 1048576,
     "buffer_size": 64,
-    "train_batch_size": 4096,
+    "train_batch_size": 1024,
     "interleaved_datasets": 64,
     "data_seed": 134567,
     "dataset_configs": [
@@ -55,13 +48,13 @@
     "opt_beta1": 0.9,
     "memory_reduction_strategy": "revnet",
     "opt_beta2": 0.99,
-    "optimizer": "adaptive_clip:0.003-adam-learning_rate",
+    "optimizer": "adaptive_clip:0.003-sm3-momentum:0.9:1:1-learning_rate",
     "weight_decay": 0.0001,
     "weight_centralisation": false,
     "weight_standardisation": false,
     "macro_batching": 1,
     "macro_batch_loss_smoothing": true,
-    "model_path": "gs://ggpt4/runs/aa/activation/features=seq=256-pkm-mixer-adam-2",
+    "model_path": "gs://ggpt4/runs/aa/activation/features=seq=512-batch=1024-mixer-group_bottleneck",
     "steps_per_checkpoint": 256,
     "use_checkpointing": false,
     "calculation_dtype": "bfloat16",

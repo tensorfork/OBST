@@ -12,7 +12,10 @@
         {
             "layer": [
                 "norm-shift-scale-features-group",
-                "attention-biased_attention_map-absolute-input_as_value"
+                "attention-biased_attention_map-absolute-input_as_value-shared",
+                "norm-shift-scale-features-group",
+                "activation-gelu",
+                "attention-biased_attention_map-absolute-input_as_value-shared"
             ]
         }
     ],
@@ -51,7 +54,7 @@
     "weight_standardisation": false,
     "macro_batching": 1,
     "macro_batch_loss_smoothing": true,
-    "model_path": "gs://ggpt4/runs/aa/activation/features=seq=256-resmlp-bottleneck_ff",
+    "model_path": "gs://ggpt4/runs/aa/activation/features=seq=256-batch=4096-mixer-group_bottleneck",
     "steps_per_checkpoint": 256,
     "use_checkpointing": false,
     "calculation_dtype": "bfloat16",
