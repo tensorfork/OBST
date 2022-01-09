@@ -1,6 +1,6 @@
 # OBST
 
-Copyright (c) 2020-2021 Yannic Kilcher (yk), Lucas Nestler (clashluke), Shawn Presser (shawwn), Jan (xmaster96)
+Copyright (c) 2020-2022 Yannic Kilcher (yk), Lucas Nestler (clashluke), Shawn Presser (shawwn), Jan (xmaster96), Noah Ziems(Ziems)
 
 ## Quickstart
 
