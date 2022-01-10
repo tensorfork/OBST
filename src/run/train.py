@@ -31,6 +31,7 @@ def get_train_model(params: ModelParameter):
         inputs = zip(*map(inp_slice_fn, inputs))
         idx = constant_scalar(params, 0, dtype=tf.int64)
         for args in inputs:
+            mtf.depend()
             loss, loss_list, video_loss, accuracy, token_loss, frame_out, token_out = build(params, *args)
             loss = none_cast(loss)
             video_loss = none_cast(video_loss)
@@ -42,6 +43,9 @@ def get_train_model(params: ModelParameter):
 
             update_ops, learning_rate = get_optimizer(loss_list, params, idx, "update")
             idx += 1
+            for op in update_ops:
+                for var in op.variables:
+                    mtf.depend(var, op)
         return frame_out, token_out, learning_rate, loss, video_loss, token_loss, accuracy, update_ops, {}
 
     return train_model
