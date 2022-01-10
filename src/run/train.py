@@ -29,7 +29,7 @@ def get_train_model(params: ModelParameter):
         inputs = (frame_input, cat_mask_src, cat_mask_tag, token_x_input, token_y_input, frame_mask_src, frame_mask_tag,
                   token_mask)
         inputs = zip(*map(inp_slice_fn, inputs))
-        idx = constant_scalar(params, 0, dtype=tf.int64)
+        idx = constant_scalar(params, 0, dtype=params.optimizer_calculation_dtype)
         for args in inputs:
             loss, loss_list, video_loss, accuracy, token_loss, frame_out, token_out = build(params, *args)
             loss = none_cast(loss)
