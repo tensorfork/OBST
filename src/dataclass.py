@@ -190,7 +190,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
             raise ValueError("Gradient accumulation is not supported right now. The optimizer was split into two "
                              "different 'sections' where the 'accumulation' section still has to be integrated")
 
-        assert self.macro_batching < 1, "MacroBatching has to be >=1, where 1 means it's disabled"
+        assert self.macro_batching > 0, "MacroBatching has to be >=1, where 1 means it's disabled"
         if isinstance(self.position_embedding, str):
             self.position_embedding = self.position_embedding.split('-')
             self.token_embedding = self.token_embedding.split('-')
