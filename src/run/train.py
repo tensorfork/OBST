@@ -31,7 +31,6 @@ def get_train_model(params: ModelParameter):
         inputs = zip(*map(inp_slice_fn, inputs))
         idx = constant_scalar(params, 0, dtype=tf.int64)
         for args in inputs:
-            mtf.depend()
             loss, loss_list, video_loss, accuracy, token_loss, frame_out, token_out = build(params, *args)
             loss = none_cast(loss)
             video_loss = none_cast(video_loss)
