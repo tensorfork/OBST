@@ -62,7 +62,7 @@ def get_train_model(params: ModelParameter):
                     tensor: mtf.Tensor = tensor
                     op: mtf.AddOperation = tensor.operation
                     while not isinstance(op, mtf.Variable):
-                        value, inp = op.inputs
+                        value: mtf.Tensor = op.inputs[0]
                         op: mtf.Variable = value.operation
                     params.variable_cache[op.full_name] = mtf.stop_gradient(mtf.cast(tensor, op.activation_dtype))
                 graph.operations.clear()
