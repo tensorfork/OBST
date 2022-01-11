@@ -274,11 +274,15 @@ def mtf_slice(tensor: mtf.Tensor, begin: int, size: int, dim_name: str):
     return scoped("slice", mtf.slice, tensor, begin, size, dim_name)
 
 
-def add(x1: mtf.Tensor, x2: mtf.Tensor):
+def add(x1: typing.Union[mtf.Variable, mtf.Tensor], x2: mtf.Tensor):
+    if isinstance(x1, mtf.Variable):
+        x1 = x1.value
     return scoped("add", lambda x, y: x + y, x1, x2)
 
 
-def multiply(x1: mtf.Tensor, x2: mtf.Tensor):
+def multiply(x1: typing.Union[mtf.Variable, mtf.Tensor], x2: mtf.Tensor):
+    if isinstance(x1, mtf.Variable):
+        x1 = x1.value
     return scoped("multiply", lambda x, y: x * y, x1, x2)
 
 
@@ -287,7 +291,7 @@ def divide(x1: mtf.Tensor, x2: float):
 
 
 def subtract(x1: mtf.Tensor, x2: mtf.Tensor):
-    return scoped("subtract", lambda x, y: x - y, x1, x2)
+    return scoped("subtract", add, x1, -x2)
 
 
 def ones(mesh: mtf.Mesh, shape: SHAPE, dtype: tf.DType) -> mtf.Tensor:
