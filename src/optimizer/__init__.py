@@ -60,7 +60,10 @@ def update(ctx: OptimizerCtx):
         ctx.grad += einsum([cast(var.value, params.optimizer_calculation_dtype), learning_rate,
                             optimizer_scalar(params, params.weight_decay)], output_shape=var.shape)
 
-    update_ops.append((assign_sub if ctx.assign else subtract)(ctx.var, ctx.grad))
+    if ctx.assign:
+        update_ops.append(assign_sub(ctx.var, ctx.grad))
+    else:
+        update_ops.append(subtract(ctx.var, mtf.cast(ctx.grad, params.calculation_dtype)))
 
 
 def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, manual_step: mtf.Tensor, fn: str
