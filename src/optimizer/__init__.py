@@ -17,7 +17,7 @@ from .optimizers import OPTIMIZERS
 from ..dataclass import ModelParameter
 from ..mtf_wrapper import (cast, constant_float, constant_scalar, einsum, equal, greater_equal, mod, reduce_sum, assign,
                            add, multiply, scoped, identity, zeros_like, negative, optimizer_scalar, reciprocal,
-                           reduce_mean, broadcast, assign_sub, assign_add, subtract)
+                           reduce_mean, broadcast, assign_sub, assign_add, subtract, get_variable_for_tensor)
 from ..utils_mtf import feature_dims_used, to_fp32, gradient_iterator
 
 tf = tf2.compat.v1
@@ -126,8 +126,17 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
             loss = loss_list[0] * gamma + loss_list[1] * (1 - gamma)
 
         operations = loss.graph.operations
-        xs = [x.outputs[0] for x in params.variable_cache.values()]
-        tensor_to_var = dict(zip(xs, params.variable_cache.values()))
+        xs = []
+        tensor_to_var = {}
+        for x in params.variable_cache.values():
+            x: typing.Union[mtf.AddOperation, mtf.Variable] = x
+            value: mtf.Tensor = x.outputs[0]
+            op = get_variable_for_tensor(value)
+            if not op.trainable:
+                continue
+            xs.append(value)
+            tensor_to_var[value] = x
+
         loss_grad = constant_scalar(params, 1.0)
         downstream = set(xs)
 
