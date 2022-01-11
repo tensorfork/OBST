@@ -33,6 +33,7 @@ def get_train_model(params: ModelParameter):
         idx = constant_scalar(params, 0, dtype=params.optimizer_calculation_dtype)
         all_ops = []
         for i, args in enumerate(inputs, 1):
+            params.is_last_mbatch = i == len(inputs)
             NAME_INDICES.clear()
             loss, loss_list, video_loss, accuracy, token_loss, frame_out, token_out = build(params, *args)
             loss = none_cast(loss)
@@ -43,22 +44,9 @@ def get_train_model(params: ModelParameter):
             elif params.multi_loss_strategy == "mgda":
                 loss_list = [none_cast(x) for x in loss_list] + [None]
             graph: mtf.Graph = params.mesh.graph
-            update_ops, learning_rate = get_optimizer(loss_list, params, idx, "update")
-            if i != len(inputs):
-                ops = graph.operations.copy()
-                all_ops.extend([op for op in ops if not isinstance(op, mtf.Assign)])
-                idx += 1
-                for op in update_ops:
-                    op: mtf.Assign = op
-                    for var, inp in zip(op.variables, op.inputs):
-                        var: mtf.Variable = var
-                        inp = mtf.stop_gradient(mtf.cast(inp, var.activation_dtype))
-                        var._outputs.clear()
-                        var._outputs.append(inp)
-                        inp._operation = var
-                graph.operations.clear()
-                graph.operations.extend([op for op in ops if isinstance(op, mtf.Variable)])
-            else:
+            update_ops, learning_rate = get_optimizer(loss_list, params, idx,
+                                                      "update" if params.is_last_mbatch else "add")
+            if params.is_last_mbatch:
                 ops = graph.operations.copy()
                 graph.operations.clear()
                 graph.operations.extend(all_ops)
@@ -66,6 +54,19 @@ def get_train_model(params: ModelParameter):
                 graph._all_variables = deduplicate(graph.all_variables)
                 graph._trainable_variables = deduplicate(graph.trainable_variables)
                 graph._operations = deduplicate(graph.operations)
+            else:
+                ops = graph.operations.copy()
+                all_ops.extend([op for op in ops if not isinstance(op, mtf.Assign)])
+                idx += 1
+                for tensor in update_ops:
+                    tensor: mtf.Tensor = tensor
+                    op: mtf.AddOperation = tensor.operation
+                    while not isinstance(op, mtf.Variable):
+                        value, inp = op.inputs
+                        op: mtf.Variable = value.operation
+                    params.variable_cache[op.full_name] = mtf.stop_gradient(mtf.cast(tensor, op.activation_dtype))
+                graph.operations.clear()
+                graph.operations.extend([op for op in ops if isinstance(op, mtf.Variable)])
 
         return frame_out, token_out, learning_rate, loss, video_loss, token_loss, accuracy, update_ops, {}
 

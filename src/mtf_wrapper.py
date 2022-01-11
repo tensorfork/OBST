@@ -279,7 +279,7 @@ def add(x1: mtf.Tensor, x2: mtf.Tensor):
 
 
 def multiply(x1: mtf.Tensor, x2: mtf.Tensor):
-    return scoped("multiply", lambda x, y: x * y, x1, x2, )
+    return scoped("multiply", lambda x, y: x * y, x1, x2)
 
 
 def divide(x1: mtf.Tensor, x2: float):

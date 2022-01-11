@@ -17,7 +17,7 @@ from .optimizers import OPTIMIZERS
 from ..dataclass import ModelParameter
 from ..mtf_wrapper import (cast, constant_float, constant_scalar, einsum, equal, greater_equal, mod, reduce_sum, assign,
                            add, multiply, scoped, identity, zeros_like, negative, optimizer_scalar, reciprocal,
-                           reduce_mean, broadcast, assign_sub, assign_add)
+                           reduce_mean, broadcast, assign_sub, assign_add, subtract)
 from ..utils_mtf import feature_dims_used, to_fp32, gradient_iterator
 
 tf = tf2.compat.v1
@@ -25,7 +25,7 @@ zeros = tf.zeros_initializer()
 
 
 def gradient_accumulation(ctx: OptimizerCtx):
-    ctx.update_ops.append(assign_add(ctx.op, ctx.grad_buffer, add(ctx.grad, identity(ctx.grad_buffer))))
+    ctx.update_ops.append((assign_add if ctx.assign else add)(ctx.grad_buffer, ctx.grad))
 
 
 def update(ctx: OptimizerCtx):
@@ -37,7 +37,7 @@ def update(ctx: OptimizerCtx):
     if ctx.grad_buffer is not None:
         ctx.grad = reduce_mean(broadcast(identity(ctx.grad_buffer.value), [params.batch_dim] + ctx.grad.shape.dims),
                                params.batch_dim)
-        ctx.update_ops.append(assign(ctx.grad_buffer, zeros_like(ctx.grad)))
+        ctx.update_ops.append((assign if ctx.assign else mtf.multiply)(ctx.grad_buffer, zeros_like(ctx.grad)))
 
     for opt in params.optimizer.split('-'):
         opt, *args = opt.split(':')
@@ -60,7 +60,7 @@ def update(ctx: OptimizerCtx):
         ctx.grad += einsum([cast(var.value, params.optimizer_calculation_dtype), learning_rate,
                             optimizer_scalar(params, params.weight_decay)], output_shape=var.shape)
 
-    update_ops.append(assign_sub(ctx.var, ctx.grad))
+    update_ops.append((assign_sub if ctx.assign else subtract)(ctx.var, ctx.grad))
 
 
 def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, manual_step: mtf.Tensor, fn: str
@@ -164,7 +164,7 @@ def get_optimizer(loss_list: typing.List[mtf.Tensor], params: ModelParameter, ma
     ctx = OptimizerCtx(op, grad_outputs, downstream, tensor_to_gradient, tensor_to_var, params,
                        loss_idx, update_ops, {}, loss_list, first_grad,
                        loss_1__loss_1, loss_1__loss_2, loss_2__loss_2, mstep, step, neg_step, dtype,
-                       beta1, beta2, learning_rate, step_count)
+                       beta1, beta2, learning_rate, step_count, fn == 'update')
     ctx.variable_to_gradient = {var: cast(tensor_to_gradient[tensor][2], params.optimizer_calculation_dtype)
                                 for tensor, var in tensor_to_var.items()}
     for tensor, var in tensor_to_var.items():

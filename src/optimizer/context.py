@@ -12,7 +12,7 @@ class OptimizerCtx:
                  loss_1__loss_1: typing.Optional[mtf.Tensor], loss_1__loss_2: typing.Optional[mtf.Tensor],
                  loss_2__loss_2: typing.Optional[mtf.Tensor], mstep: mtf.Tensor, step: mtf.Tensor, neg_step,
                  dtype: mtf.VariableDType, beta1: mtf.Tensor, beta2: mtf.Tensor, learning_rate: mtf.Tensor,
-                 step_count: mtf.Tensor):
+                 step_count: mtf.Tensor, assign: bool):
         self.step_count = step_count
         self.op = op
         self.grad_outputs = grad_outputs
@@ -34,6 +34,7 @@ class OptimizerCtx:
         self.beta1 = beta1
         self.beta2 = beta2
         self.learning_rate = learning_rate
+        self.assign = assign
         self.args = [op, grad_outputs, downstream, tensor_to_gradient, tensor_to_var, params, loss_idx, update_ops,
                      debug_gradients_dict, loss_list, first_grad, loss_1__loss_1, loss_1__loss_2, loss_2__loss_2, mstep,
                      step, dtype, beta1, beta2, learning_rate]

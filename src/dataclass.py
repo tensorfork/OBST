@@ -337,6 +337,7 @@ class ModelParameter(typing.Dict[str, typing.Any]):
         self.input_pipeline_shape = align_tensor_op(self.input_pipeline_shape)
 
         self.attention_idx = 0
+        self.is_last_mbatch = True
         self.variable_cache = {}
         self.cached_parameters = {}
         self.debug_outfeed = {}

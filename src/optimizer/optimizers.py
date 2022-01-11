@@ -1,3 +1,5 @@
+import typing
+
 import mesh_tensorflow as mtf
 
 from .backend import variable
@@ -20,6 +22,13 @@ def debias(ctx: OptimizerCtx, tensor: mtf.Tensor, momentum: mtf.Tensor) -> mtf.T
     return multiply(tensor, debias_momentum(ctx, momentum))
 
 
+def assign_ctx(ctx: OptimizerCtx, var: typing.Union[mtf.Variable, mtf.Tensor], value: mtf.Tensor
+               ) -> typing.Union[mtf.Assign, mtf.AddOperation]:
+    if ctx.assign:
+        return assign(var, value)
+    return add(multiply(var, 0), value)
+
+
 def adam(ctx: OptimizerCtx) -> mtf.Tensor:
     exp_avg_p2_ptr = variable(ctx.params, ctx.var, 'exp_avg_p2', ctx.var.shape)
     exp_avg_p1_ptr = variable(ctx.params, ctx.var, 'exp_avg_p1', ctx.var.shape)
@@ -27,8 +36,8 @@ def adam(ctx: OptimizerCtx) -> mtf.Tensor:
     exp_avg_p2 = weighted_add(exp_avg_p2_ptr, square(ctx.grad), ctx.beta2)
     grad = weighted_add(exp_avg_p1_ptr, ctx.grad, ctx.beta1)
 
-    ctx.update_ops.append(assign(exp_avg_p2_ptr, exp_avg_p2))
-    ctx.update_ops.append(assign(exp_avg_p1_ptr, grad))
+    ctx.update_ops.append(assign_ctx(ctx, exp_avg_p2_ptr, exp_avg_p2))
+    ctx.update_ops.append(assign_ctx(ctx, exp_avg_p1_ptr, grad))
     return einsum([opt_rsqrt(debias(ctx, exp_avg_p2, ctx.beta2)), grad,
                    debias_momentum(ctx, ctx.beta1)], output_shape=grad.shape)
 
@@ -42,8 +51,8 @@ def novograd(ctx: OptimizerCtx) -> mtf.Tensor:
 
     exp_avg_p1 = add(multiply(ctx.beta1, exp_avg_p1), multiply(ctx.grad, opt_rsqrt(exp_avg_p2)))
     exp_avg_p2 = weighted_add(exp_avg_p2, reduce_sum(square(ctx.grad)), ctx.beta2)
-    ctx.update_ops.extend([assign(exp_avg_p1_ptr, exp_avg_p1),
-                           assign(exp_avg_p2_ptr, exp_avg_p2)])
+    ctx.update_ops.extend([assign_ctx(ctx, exp_avg_p1_ptr, exp_avg_p1),
+                           assign_ctx(ctx, exp_avg_p2_ptr, exp_avg_p2)])
     return add(multiply(ctx.beta1, exp_avg_p1),
                multiply(ctx.grad, opt_rsqrt(debias(ctx, exp_avg_p2, ctx.beta2))))
 
@@ -61,7 +70,7 @@ def sm3(ctx: OptimizerCtx) -> mtf.Tensor:
 
     weight_update = add(weight_update, square(ctx.grad))
 
-    ctx.update_ops.extend([assign(buf_ptr, reduce_max(weight_update, output_shape=[dim]))
+    ctx.update_ops.extend([assign_ctx(ctx, buf_ptr, reduce_max(weight_update, output_shape=[dim]))
                            for buf_ptr, dim in zip(buffer, weight_update.shape.dims)])
 
     return multiply(ctx.grad, opt_rsqrt(weight_update))
@@ -113,7 +122,7 @@ def momentum(ctx: OptimizerCtx, momentum_multiplier: str, gradient_multiplier: s
 
     state = variable(ctx.params, ctx.var, 'momentum', ctx.var.shape)
     new_state = momentum_multiplier * state + ctx.grad * gradient_multiplier
-    ctx.update_ops.append(assign(state, new_state))
+    ctx.update_ops.append(assign_ctx(ctx, state, new_state))
     if not nesterov:
         return new_state
     return ctx.grad + momentum_multiplier * new_state
