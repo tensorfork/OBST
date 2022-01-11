@@ -84,6 +84,7 @@ def get_var(args: BlockArgs, shape: SHAPE, initializer: Initializer) -> mtf.Tens
     if first_block:
         var = _var()
         cache[cache["counter"]] = var
+        cache["variable_names"].append(var.full_name)
         cache["counter"] += 1
         return var
 
