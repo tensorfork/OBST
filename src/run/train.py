@@ -5,7 +5,7 @@ import tensorflow as tf
 
 from ..dataclass import ModelParameter
 from ..model import build
-from ..mtf_wrapper import constant_scalar
+from ..mtf_wrapper import constant_scalar, get_variable_for_tensor
 from ..optimizer import get_optimizer
 from ..utils_core import NAME_INDICES
 from ..utils_mtf import unbind, deduplicate
@@ -55,16 +55,13 @@ def get_train_model(params: ModelParameter):
                 graph._trainable_variables = deduplicate(graph.trainable_variables)
                 graph._operations = deduplicate(graph.operations)
             else:
-                ops = graph.operations.copy()
-                all_ops.extend([op for op in ops if not isinstance(op, mtf.Assign)])
                 idx += 1
                 for tensor in update_ops:
                     tensor: mtf.Tensor = tensor
-                    op: mtf.AddOperation = tensor.operation
-                    while not isinstance(op, mtf.Variable):
-                        value: mtf.Tensor = op.inputs[0]
-                        op: mtf.Variable = value.operation
+                    op = get_variable_for_tensor(tensor)
                     params.variable_cache[op.full_name] = mtf.stop_gradient(mtf.cast(tensor, op.activation_dtype))
+                ops = graph.operations.copy()
+                all_ops.extend([op for op in ops if not isinstance(op, mtf.Assign)])
                 graph.operations.clear()
                 graph.operations.extend([op for op in ops if isinstance(op, mtf.Variable)])
 

@@ -271,7 +271,7 @@ def non_replicated_broadcast(x, shape):
 def get_variable(params: ModelParameter, name: str, shape: SHAPE, initializer: Initializer, trainable: bool,
                  dtype: mtf.VariableDType):
     full_name = f'{tf1.get_variable_scope().name}/{name}'
-    if full_name in params.variable_cache and params.is_last_mbatch:
+    if full_name in params.variable_cache:
         return params.variable_cache[full_name]
     if full_name in params.mesh.graph.name_to_variable:
         return params.mesh.graph.name_to_variable[full_name].outputs[0]

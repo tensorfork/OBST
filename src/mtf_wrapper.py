@@ -18,6 +18,16 @@ OPT_DIMS = typing.Optional[DIM_LIST]
 OPT_DIM = typing.Optional[mtf.Dimension]
 
 
+def get_variable_for_tensor(tensor: typing.Union[mtf.Tensor, mtf.Variable]) -> mtf.Variable:
+    if isinstance(tensor, mtf.Variable):
+        return tensor
+    op: mtf.Operation = tensor.operation
+    while not isinstance(op, mtf.Variable):
+        value: mtf.Tensor = op.inputs[0]
+        op: mtf.Variable = value.operation
+    return op
+
+
 def einsum(xs: TENSORS, output_shape: OPT_SHAPE = None, reduced_dims: OPT_DIMS = None) -> mtf.Tensor:
     return scoped("einsum", mtf.einsum, xs, output_shape, reduced_dims)
 
@@ -110,15 +120,15 @@ def tanh(tensor: mtf.Tensor):
 
 
 def assign(var: mtf.Variable, new_val: mtf.Tensor):
-    return scoped("assign", mtf.assign, var, new_val)
+    return scoped("assign", mtf.assign, get_variable_for_tensor(var), new_val)
 
 
 def assign_add(var: mtf.Variable, new_val: mtf.Tensor):
-    return scoped("assign_add", mtf.assign_add, var, new_val)
+    return scoped("assign_add", mtf.assign_add, get_variable_for_tensor(var), new_val)
 
 
 def assign_sub(var: mtf.Variable, new_val: mtf.Tensor):
-    return scoped("assign_sub", mtf.assign_sub, var, new_val)
+    return scoped("assign_sub", mtf.assign_sub, get_variable_for_tensor(var), new_val)
 
 
 def concat(tensors: typing.List[mtf.Tensor], concat_dim_name: str) -> mtf.Tensor:
