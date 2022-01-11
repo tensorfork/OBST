@@ -37,6 +37,9 @@ def get_train_model(params: ModelParameter):
             NAME_INDICES.clear()
             params.cached_parameters["counter"] = 0
             params.cached_parameters["index"] = 0
+            for val in params.cached_parameters.values():
+                if isinstance(val, dict):
+                    val['counter'] = 0
             loss, loss_list, video_loss, accuracy, token_loss, frame_out, token_out = build(params, *args)
             loss = none_cast(loss)
             video_loss = none_cast(video_loss)
