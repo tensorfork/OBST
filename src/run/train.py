@@ -34,9 +34,8 @@ def get_train_model(params: ModelParameter):
         all_ops = []
         for i, args in enumerate(inputs, 1):
             params.is_last_mbatch = i == len(inputs)
+            params.macro_batch_index = i
             NAME_INDICES.clear()
-            params.cached_parameters["counter"] = 0
-            params.cached_parameters["index"] = 0
             for val in params.cached_parameters.values():
                 if isinstance(val, dict):
                     val['counter'] = 0
