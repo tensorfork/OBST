@@ -7,6 +7,7 @@ from ..dataclass import ModelParameter
 from ..model import build
 from ..mtf_wrapper import constant_scalar
 from ..optimizer import get_optimizer
+from ..utils_core import NAME_INDICES
 from ..utils_mtf import unbind
 
 
@@ -31,6 +32,7 @@ def get_train_model(params: ModelParameter):
         inputs = zip(*map(inp_slice_fn, inputs))
         idx = constant_scalar(params, 0, dtype=params.optimizer_calculation_dtype)
         for args in inputs:
+            NAME_INDICES.clear()
             loss, loss_list, video_loss, accuracy, token_loss, frame_out, token_out = build(params, *args)
             loss = none_cast(loss)
             video_loss = none_cast(video_loss)
@@ -40,11 +42,16 @@ def get_train_model(params: ModelParameter):
             elif params.multi_loss_strategy == "mgda":
                 loss_list = [none_cast(x) for x in loss_list] + [None]
 
+            graph: mtf.Graph = params.mesh.graph
+            graph._operations.clear()
+            graph._operations.extend([op for op in graph.operations if not isinstance(op, mtf.Assign)])
             update_ops, learning_rate = get_optimizer(loss_list, params, idx, "update")
             idx += 1
             for op in update_ops:
-                for var in op.variables:
-                    mtf.depend(var, op)
+                op: mtf.Assign = op
+                for var, inp in zip(op.variables, op.inputs):
+                    var._outputs.clear()
+                    var._outputs.append(inp)
         return frame_out, token_out, learning_rate, loss, video_loss, token_loss, accuracy, update_ops, {}
 
     return train_model

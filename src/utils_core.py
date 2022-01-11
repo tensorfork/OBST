@@ -9,7 +9,7 @@ import tensorflow as tf
 
 from .dataclass import ModelParameter
 
-_NAME_INDICES = {}
+NAME_INDICES = {}
 tf1 = tf.compat.v1
 
 
@@ -61,7 +61,7 @@ def random_name(prefix="") -> str:
     For the sake of convenience, special characters are removed from the final string.
     :return: random string
     """
-    if prefix not in _NAME_INDICES:
-        _NAME_INDICES[prefix] = -1
-    _NAME_INDICES[prefix] += 1
-    return f'{prefix}{_NAME_INDICES[prefix]}'
+    if prefix not in NAME_INDICES:
+        NAME_INDICES[prefix] = -1
+    NAME_INDICES[prefix] += 1
+    return f'{prefix}{NAME_INDICES[prefix]}'
