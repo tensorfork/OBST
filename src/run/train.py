@@ -36,6 +36,7 @@ def get_train_model(params: ModelParameter):
             params.is_last_mbatch = i == len(inputs)
             params.macro_batch_index = i
             NAME_INDICES.clear()
+            params.cached_parameters.clear()
             loss, loss_list, video_loss, accuracy, token_loss, frame_out, token_out = build(params, *args)
             loss = none_cast(loss)
             video_loss = none_cast(video_loss)
@@ -62,14 +63,6 @@ def get_train_model(params: ModelParameter):
                     op = get_variable_for_tensor(tensor)
                     tensor = mtf.stop_gradient(mtf.cast(tensor, op.activation_dtype))
                     params.variable_cache[op.full_name] = tensor.operation
-                for val in params.cached_parameters.values():
-                    if not isinstance(val, dict):
-                        continue
-                    for inner_val in val.values():
-                        if not isinstance(val, dict):
-                            continue
-                        for inner_idx in range(inner_val['counter']):
-                            inner_val[inner_idx]['counter'] = 0
                 ops = graph.operations.copy()
                 all_ops.extend([op for op in ops if not isinstance(op, mtf.Assign)])
                 graph.operations.clear()
