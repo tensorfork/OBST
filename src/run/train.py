@@ -71,7 +71,7 @@ def get_train_model(params: ModelParameter):
                         for inner_idx in range(inner_val['counter']):
                             inner_val1 = inner_val[inner_idx]
                             for var_idx, var_name in enumerate(inner_val1['variable_names']):
-                                inner_val1[var_idx] = params.variable_cache[var_name]
+                                inner_val1[var_idx] = params.variable_cache[var_name].outputs[0]
                                 inner_val1['counter'] = 0
                 ops = graph.operations.copy()
                 all_ops.extend([op for op in ops if not isinstance(op, mtf.Assign)])
