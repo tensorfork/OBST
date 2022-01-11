@@ -18,6 +18,12 @@ OPT_DIMS = typing.Optional[DIM_LIST]
 OPT_DIM = typing.Optional[mtf.Dimension]
 
 
+class VariableStorage:
+    def __init__(self, var: mtf.Variable, value: mtf.Tensor):
+        self.var = var
+        self.value = value
+
+
 def einsum(xs: TENSORS, output_shape: OPT_SHAPE = None, reduced_dims: OPT_DIMS = None) -> mtf.Tensor:
     return scoped("einsum", mtf.einsum, xs, output_shape, reduced_dims)
 
@@ -109,16 +115,22 @@ def tanh(tensor: mtf.Tensor):
     return scoped("tanh", mtf.tanh, tensor)
 
 
-def assign(var: mtf.Variable, new_val: mtf.Tensor):
-    return scoped("assign", mtf.assign, var, new_val)
+def get_variable_from_storage(var: typing.Union[mtf.Variable, VariableStorage]) -> mtf.Variable:
+    if isinstance(var, mtf.Variable):
+        return var
+    return var.var
 
 
-def assign_add(var: mtf.Variable, new_val: mtf.Tensor):
-    return scoped("assign_add", mtf.assign_add, var, new_val)
+def assign(var: mtf.Variable, new_val: mtf.Tensor) -> mtf.Assign:
+    return scoped("assign", mtf.assign, get_variable_from_storage(var), new_val)
 
 
-def assign_sub(var: mtf.Variable, new_val: mtf.Tensor):
-    return scoped("assign_sub", mtf.assign_sub, var, new_val)
+def assign_add(var: mtf.Variable, new_val: mtf.Tensor) -> mtf.Assign:
+    return scoped("assign_add", mtf.assign_add, get_variable_from_storage(var), new_val)
+
+
+def assign_sub(var: mtf.Variable, new_val: mtf.Tensor) -> mtf.Assign:
+    return scoped("assign_sub", mtf.assign_sub, get_variable_from_storage(var), new_val)
 
 
 def concat(tensors: typing.List[mtf.Tensor], concat_dim_name: str) -> mtf.Tensor:

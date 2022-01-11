@@ -7,7 +7,7 @@ from tensorflow.python.ops.init_ops import Initializer
 
 from .dataclass import BlockArgs, ModelParameter
 from .mtf_wrapper import cast, mtf_range, reshape, concat as mtf_concat, pad as mtf_pad, mtf_slice, add, multiply, \
-    negative
+    negative, VariableStorage
 from .utils_core import default, random_name
 
 tf1 = tf.compat.v1
@@ -271,12 +271,17 @@ def non_replicated_broadcast(x, shape):
 def get_variable(params: ModelParameter, name: str, shape: SHAPE, initializer: Initializer, trainable: bool,
                  dtype: mtf.VariableDType):
     full_name = f'{tf1.get_variable_scope().name}/{name}'
+    if full_name in params.variable_storage:
+        return params.variable_storage[full_name].value
     if full_name in params.mesh.graph.name_to_variable:
         return params.mesh.graph.name_to_variable[full_name].outputs[0]
     shape = deduplicate(mtf.Shape(shape))
-    var = mtf.Variable(params.mesh, name, shape, dtype, initializer, trainable)
+    var = mtf.Variable(params.mesh, full_name, shape, dtype, initializer, trainable)
+    var.full_name = full_name
     params.mesh.graph.name_to_variable[full_name] = var
-    return var.outputs[0]
+    value = var.outputs[0]
+    params.variable_storage[full_name] = VariableStorage(var, value)
+    return value
 
 
 def non_replicated_variable(params: ModelParameter, name: str, shape: SHAPE, initializer: Initializer, trainable: bool,

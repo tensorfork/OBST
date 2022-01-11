@@ -5,7 +5,7 @@ import tensorflow as tf
 
 from ..dataclass import ModelParameter
 from ..model import build
-from ..mtf_wrapper import constant_scalar
+from ..mtf_wrapper import constant_scalar, VariableStorage
 from ..optimizer import get_optimizer
 from ..utils_core import NAME_INDICES
 from ..utils_mtf import unbind
@@ -29,9 +29,10 @@ def get_train_model(params: ModelParameter):
 
         inputs = (frame_input, cat_mask_src, cat_mask_tag, token_x_input, token_y_input, frame_mask_src, frame_mask_tag,
                   token_mask)
-        inputs = zip(*map(inp_slice_fn, inputs))
+        inputs = list(zip(*map(inp_slice_fn, inputs)))
         idx = constant_scalar(params, 0, dtype=params.optimizer_calculation_dtype)
-        for args in inputs:
+        all_ops = []
+        for i, args in enumerate(inputs, 1):
             NAME_INDICES.clear()
             loss, loss_list, video_loss, accuracy, token_loss, frame_out, token_out = build(params, *args)
             loss = none_cast(loss)
@@ -43,18 +44,25 @@ def get_train_model(params: ModelParameter):
                 loss_list = [none_cast(x) for x in loss_list] + [None]
 
             graph: mtf.Graph = params.mesh.graph
-            ops = graph.operations.copy()
-            graph._operations.clear()
-            graph._operations.extend([op for op in ops if not isinstance(op, mtf.Assign)])
             update_ops, learning_rate = get_optimizer(loss_list, params, idx, "update")
-            idx += 1
-            for op in update_ops:
-                op: mtf.Assign = op
-                for var, inp in zip(op.variables, op.inputs):
-                    var._outputs.clear()
-                    inp = mtf.cast(inp, var.dtype.activation_dtype)
-                    inp._operation = var
-                    var._outputs.append(inp)
+            if i != len(inputs):
+                ops = graph.operations.copy()
+                graph.operations.clear()
+                graph.operations.extend([op for op in ops if not isinstance(op, mtf.Assign)])
+                all_ops.extend(graph.operations)
+                idx += 1
+                for op in update_ops:
+                    op: mtf.Assign = op
+                    for var, inp in zip(op.variables, op.inputs):
+                        var: mtf.Variable = var
+                        var_store: VariableStorage = params.variable_storage[var.full_name]
+                        var_store.value = inp
+            else:
+                ops = graph.operations.copy()
+                graph.operations.clear()
+                graph.operations.extend(all_ops)
+                graph.operations.extend(ops)
+
         return frame_out, token_out, learning_rate, loss, video_loss, token_loss, accuracy, update_ops, {}
 
     return train_model
