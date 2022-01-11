@@ -115,10 +115,15 @@ def tanh(tensor: mtf.Tensor):
     return scoped("tanh", mtf.tanh, tensor)
 
 
-def get_variable_from_storage(var: typing.Union[mtf.Variable, VariableStorage]) -> mtf.Variable:
+def get_variable_from_storage(var: typing.Union[mtf.Variable, VariableStorage, mtf.Tensor]) -> mtf.Variable:
+    if isinstance(var, mtf.Tensor):
+        var = var.operation
     if isinstance(var, mtf.Variable):
         return var
-    return var.var
+    if isinstance(var, VariableStorage):
+        return var.var
+    else:
+        raise ValueError(f"Unsupported type {type(var)}")
 
 
 def assign(var: mtf.Variable, new_val: mtf.Tensor) -> mtf.Assign:
