@@ -53,8 +53,9 @@ def get_train_model(params: ModelParameter):
                     for var, inp in zip(op.variables, op.inputs):
                         var: mtf.Variable = var
                         inp = mtf.stop_gradient(mtf.cast(inp, var.activation_dtype))
-                        inp._operation = var
+                        var._outputs.clear()
                         var._outputs.append(inp)
+                        inp._operation = var
                 graph.operations.clear()
                 graph.operations.extend([op for op in ops if isinstance(op, mtf.Variable)])
             else:
