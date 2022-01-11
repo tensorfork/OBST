@@ -43,14 +43,17 @@ def get_train_model(params: ModelParameter):
                 loss_list = [none_cast(x) for x in loss_list] + [None]
 
             graph: mtf.Graph = params.mesh.graph
+            ops = graph.operations.copy()
             graph._operations.clear()
-            graph._operations.extend([op for op in graph.operations if not isinstance(op, mtf.Assign)])
+            graph._operations.extend([op for op in ops if not isinstance(op, mtf.Assign)])
             update_ops, learning_rate = get_optimizer(loss_list, params, idx, "update")
             idx += 1
             for op in update_ops:
                 op: mtf.Assign = op
                 for var, inp in zip(op.variables, op.inputs):
                     var._outputs.clear()
+                    inp = mtf.cast(inp, var.dtype.activation_dtype)
+                    inp._operation = var
                     var._outputs.append(inp)
         return frame_out, token_out, learning_rate, loss, video_loss, token_loss, accuracy, update_ops, {}
 
