@@ -59,7 +59,8 @@ def get_train_model(params: ModelParameter):
                 for tensor in update_ops:
                     tensor: mtf.Tensor = tensor
                     op = get_variable_for_tensor(tensor)
-                    params.variable_cache[op.full_name] = mtf.stop_gradient(mtf.cast(tensor, op.activation_dtype))
+                    tensor = mtf.stop_gradient(mtf.cast(tensor, op.activation_dtype))
+                    params.variable_cache[op.full_name] = tensor.operation
                 ops = graph.operations.copy()
                 all_ops.extend([op for op in ops if not isinstance(op, mtf.Assign)])
                 graph.operations.clear()
