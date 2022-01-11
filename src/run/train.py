@@ -35,6 +35,8 @@ def get_train_model(params: ModelParameter):
         for i, args in enumerate(inputs, 1):
             params.is_last_mbatch = i == len(inputs)
             NAME_INDICES.clear()
+            params.cached_parameters["counter"] = 0
+            params.cached_parameters["index"] = 0
             loss, loss_list, video_loss, accuracy, token_loss, frame_out, token_out = build(params, *args)
             loss = none_cast(loss)
             video_loss = none_cast(video_loss)
