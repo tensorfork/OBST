@@ -278,7 +278,7 @@ def get_variable(params: ModelParameter, name: str, shape: SHAPE, initializer: I
     shape = deduplicate(mtf.Shape(shape))
     var = mtf.Variable(params.mesh, name, shape, dtype, initializer, trainable)
     var.full_name = full_name
-    params.mesh.graph.name_to_variable[full_name] = var
+    params.variable_cache[full_name] = params.mesh.graph.name_to_variable[full_name] = var
     return var.outputs[0]
 
 
