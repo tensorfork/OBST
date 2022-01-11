@@ -8,7 +8,7 @@ from ..model import build
 from ..mtf_wrapper import constant_scalar
 from ..optimizer import get_optimizer
 from ..utils_core import NAME_INDICES
-from ..utils_mtf import unbind
+from ..utils_mtf import unbind, deduplicate
 
 
 def none_cast(x: typing.Optional[mtf.Tensor]):
@@ -63,6 +63,9 @@ def get_train_model(params: ModelParameter):
                 graph.operations.clear()
                 graph.operations.extend(all_ops)
                 graph.operations.extend(ops)
+                graph._all_variables = deduplicate(graph.all_variables)
+                graph._trainable_variables = deduplicate(graph.trainable_variables)
+                graph._operations = deduplicate(graph.operations)
 
         return frame_out, token_out, learning_rate, loss, video_loss, token_loss, accuracy, update_ops, {}
 
