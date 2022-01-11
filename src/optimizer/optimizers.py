@@ -78,7 +78,7 @@ def sm3(ctx: OptimizerCtx) -> mtf.Tensor:
 
 def adaptive_gradient_clipping(ctx: OptimizerCtx, gradient_clip: str) -> mtf.Tensor:
     gradient_clip = float(gradient_clip)
-    var = cast(ctx.var.value, ctx.params.optimizer_calculation_dtype)
+    var = cast(ctx.value, ctx.params.optimizer_calculation_dtype)
     grd_norm = minimum(rsqrt(einsum([ctx.grad] * 2, output_shape=[])), 1e6)
     wgt_norm = maximum(sqrt(einsum([var] * 2, output_shape=[])), 1e-3)
     return ctx.grad * minimum(wgt_norm * grd_norm * gradient_clip, 1)
@@ -108,7 +108,7 @@ def gradient_centralisation(ctx: OptimizerCtx) -> mtf.Tensor:
 
 
 def weight_centralisation(ctx: OptimizerCtx) -> mtf.Tensor:
-    return ctx.grad + reduce_mean(ctx.var.value)
+    return ctx.grad + reduce_mean(ctx.value)
 
 
 def multiply_learning_rate(ctx: OptimizerCtx) -> mtf.Tensor:
