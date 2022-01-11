@@ -56,7 +56,7 @@ def get_train_model(params: ModelParameter):
                     for var, inp in zip(op.variables, op.inputs):
                         var: mtf.Variable = var
                         var_store: VariableStorage = params.variable_storage[var.full_name]
-                        var_store.value = inp
+                        var_store.value = mtf.cast(inp, var.activation_dtype)
             else:
                 ops = graph.operations.copy()
                 graph.operations.clear()
