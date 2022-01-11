@@ -55,7 +55,7 @@ def get_var(args: BlockArgs, shape: SHAPE, initializer: Initializer) -> mtf.Tens
     body_idx = scope.index("body0v") + 1
     block, full_fn_name = scope[body_idx:body_idx + 2]
     block, config = block.split('_')
-    first_block = block == '0' and params.macro_batch_index == 1
+    first_block = block == '0'
     fn_name = ''.join(c for c in full_fn_name if not c.isdigit())
 
     cache = params.cached_parameters
@@ -85,7 +85,6 @@ def get_var(args: BlockArgs, shape: SHAPE, initializer: Initializer) -> mtf.Tens
     if first_block:
         var = _var()
         cache[cache["counter"]] = var
-        cache["variable_names"].append(var.operation.full_name)
         cache["counter"] += 1
         return var
 
