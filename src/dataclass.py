@@ -338,7 +338,6 @@ class ModelParameter(typing.Dict[str, typing.Any]):
 
         self.attention_idx = 0
         self.variable_cache = {}
-        self.variable_storage = {}
         self.cached_parameters = {}
         self.debug_outfeed = {}
 

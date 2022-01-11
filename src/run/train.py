@@ -5,7 +5,7 @@ import tensorflow as tf
 
 from ..dataclass import ModelParameter
 from ..model import build
-from ..mtf_wrapper import constant_scalar, VariableStorage
+from ..mtf_wrapper import constant_scalar
 from ..optimizer import get_optimizer
 from ..utils_core import NAME_INDICES
 from ..utils_mtf import unbind
@@ -42,21 +42,21 @@ def get_train_model(params: ModelParameter):
                 loss_list = [loss]
             elif params.multi_loss_strategy == "mgda":
                 loss_list = [none_cast(x) for x in loss_list] + [None]
-
             graph: mtf.Graph = params.mesh.graph
             update_ops, learning_rate = get_optimizer(loss_list, params, idx, "update")
             if i != len(inputs):
                 ops = graph.operations.copy()
-                graph.operations.clear()
-                graph.operations.extend([op for op in ops if not isinstance(op, mtf.Assign)])
-                all_ops.extend(graph.operations)
+                all_ops.extend([op for op in ops if not isinstance(op, mtf.Assign)])
                 idx += 1
                 for op in update_ops:
                     op: mtf.Assign = op
                     for var, inp in zip(op.variables, op.inputs):
                         var: mtf.Variable = var
-                        var_store: VariableStorage = params.variable_storage[var.full_name]
-                        var_store.value = mtf.cast(inp, var.activation_dtype)
+                        inp = mtf.stop_gradient(mtf.cast(inp, var.activation_dtype))
+                        inp._operation = var
+                        var._outputs.append(inp)
+                graph.operations.clear()
+                graph.operations.extend([op for op in ops if isinstance(op, mtf.Variable)])
             else:
                 ops = graph.operations.copy()
                 graph.operations.clear()
